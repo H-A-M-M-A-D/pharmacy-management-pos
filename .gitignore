@@ -1,0 +1,31 @@
+# .NET build and user state
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Flutter/Dart generated state
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+
+# IDE local state
+**/.idea/
+**/.vscode/
+*.iml
+*.code-workspace
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+.postgres-bootstrap.local.ps1
