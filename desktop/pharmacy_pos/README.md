@@ -1,6 +1,6 @@
-# pharmacy_pos
+# Pharmacy Management System Desktop
 
-A new Flutter project.
+Flutter Windows client for authentication and user management. Configure the API with `--dart-define=API_BASE_URL=http://localhost:5000`. Access tokens use `flutter_secure_storage`; no credentials are stored in source.
 
 ## Getting Started
 

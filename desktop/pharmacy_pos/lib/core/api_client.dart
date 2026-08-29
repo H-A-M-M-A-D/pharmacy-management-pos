@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'models.dart';
+
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode});
 
@@ -12,35 +14,41 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-class LoginSession {
-  const LoginSession({
-    required this.token,
-    required this.username,
-    required this.fullName,
+abstract interface class PharmacyApi {
+  Future<LoginSession> login(String username, String password);
+  Future<CurrentUser> me(String token);
+  Future<LoginSession> changePassword(
+    String token,
+    String currentPassword,
+    String newPassword,
+  );
+  Future<CurrentUser> updateProfile(
+    String token, {
+    required String fullName,
+    String? email,
+    String? phoneNumber,
   });
-
-  final String token;
-  final String username;
-  final String fullName;
-
-  factory LoginSession.fromJson(Map<String, dynamic> json) {
-    final user = json['user'] as Map<String, dynamic>?;
-    final token = json['token'] as String?;
-    if (user == null || token == null || token.isEmpty) {
-      throw const ApiException(
-        'The server returned an invalid login response.',
-      );
-    }
-
-    return LoginSession(
-      token: token,
-      username: user['username'] as String? ?? '',
-      fullName: user['fullName'] as String? ?? '',
-    );
-  }
+  Future<PagedUsers> listUsers(
+    String token, {
+    String? search,
+    String? roleId,
+    String? branchId,
+    bool? isActive,
+  });
+  Future<UserOptions> userOptions(String token);
+  Future<UserDetails> userDetails(String token, String id);
+  Future<UserDetails> createUser(String token, Map<String, dynamic> values);
+  Future<UserDetails> updateUser(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> setUserActive(String token, String id, bool active);
+  Future<void> resetPassword(String token, String id, String password);
+  void close();
 }
 
-class ApiClient {
+class ApiClient implements PharmacyApi {
   ApiClient({Uri? baseUri, HttpClient? httpClient})
     : baseUri =
           baseUri ??
@@ -55,28 +63,165 @@ class ApiClient {
   final Uri baseUri;
   final HttpClient _httpClient;
 
+  @override
   Future<LoginSession> login(String username, String password) async {
     try {
+      final json = await _request(
+        'POST',
+        '/api/auth/login',
+        body: {'username': username, 'password': password},
+      );
+      return LoginSession.fromJson(json!);
+    } on ApiException catch (error) {
+      if (error.statusCode == HttpStatus.unauthorized) {
+        throw const ApiException(
+          'Invalid username or password.',
+          statusCode: HttpStatus.unauthorized,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<CurrentUser> me(String token) async => CurrentUser.fromJson(
+    (await _request('GET', '/api/auth/me', token: token))!,
+  );
+
+  @override
+  Future<LoginSession> changePassword(
+    String token,
+    String currentPassword,
+    String newPassword,
+  ) async => LoginSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/auth/change-password',
+      token: token,
+      body: {'currentPassword': currentPassword, 'newPassword': newPassword},
+    ))!,
+  );
+
+  @override
+  Future<CurrentUser> updateProfile(
+    String token, {
+    required String fullName,
+    String? email,
+    String? phoneNumber,
+  }) async => CurrentUser.fromJson(
+    (await _request(
+      'PUT',
+      '/api/auth/me',
+      token: token,
+      body: {
+        'fullName': fullName,
+        'email': _nullIfEmpty(email),
+        'phoneNumber': _nullIfEmpty(phoneNumber),
+      },
+    ))!,
+  );
+
+  @override
+  Future<PagedUsers> listUsers(
+    String token, {
+    String? search,
+    String? roleId,
+    String? branchId,
+    bool? isActive,
+  }) async {
+    final query = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) query['search'] = search!.trim();
+    if (roleId != null) query['roleId'] = roleId;
+    if (branchId != null) query['branchId'] = branchId;
+    if (isActive != null) query['isActive'] = isActive.toString();
+    final uri = Uri(path: '/api/users', queryParameters: query).toString();
+    return PagedUsers.fromJson((await _request('GET', uri, token: token))!);
+  }
+
+  @override
+  Future<UserOptions> userOptions(String token) async => UserOptions.fromJson(
+    (await _request('GET', '/api/users/options', token: token))!,
+  );
+
+  @override
+  Future<UserDetails> userDetails(String token, String id) async =>
+      UserDetails.fromJson(
+        (await _request('GET', '/api/users/$id', token: token))!,
+      );
+
+  @override
+  Future<UserDetails> createUser(
+    String token,
+    Map<String, dynamic> values,
+  ) async => UserDetails.fromJson(
+    (await _request('POST', '/api/users', token: token, body: values))!,
+  );
+
+  @override
+  Future<UserDetails> updateUser(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => UserDetails.fromJson(
+    (await _request('PUT', '/api/users/$id', token: token, body: values))!,
+  );
+
+  @override
+  Future<void> setUserActive(String token, String id, bool active) async {
+    await _request(
+      'POST',
+      '/api/users/$id/${active ? 'activate' : 'deactivate'}',
+      token: token,
+      expectBody: false,
+    );
+  }
+
+  @override
+  Future<void> resetPassword(String token, String id, String password) async {
+    await _request(
+      'POST',
+      '/api/users/$id/reset-password',
+      token: token,
+      body: {'temporaryPassword': password},
+      expectBody: false,
+    );
+  }
+
+  Future<Map<String, dynamic>?> _request(
+    String method,
+    String path, {
+    String? token,
+    Map<String, dynamic>? body,
+    bool expectBody = true,
+  }) async {
+    try {
       final request = await _httpClient
-          .postUrl(baseUri.resolve('/api/auth/login'))
+          .openUrl(method, baseUri.resolve(path))
           .timeout(const Duration(seconds: 10));
       request.headers.contentType = ContentType.json;
-      request.write(jsonEncode({'username': username, 'password': password}));
-
+      if (token != null) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      if (body != null) request.write(jsonEncode(body));
       final response = await request.close().timeout(
         const Duration(seconds: 10),
       );
-      final body = await utf8.decoder.bind(response).join();
-      if (response.statusCode != HttpStatus.ok) {
-        throw ApiException(
-          response.statusCode == HttpStatus.unauthorized
-              ? 'Invalid username or password.'
-              : 'Login failed. Please try again.',
-          statusCode: response.statusCode,
-        );
+      final responseBody = await utf8.decoder.bind(response).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        var message = 'The request could not be completed.';
+        try {
+          final problem = jsonDecode(responseBody) as Map<String, dynamic>;
+          message =
+              problem['title'] as String? ??
+              problem['message'] as String? ??
+              message;
+        } on FormatException {
+          // Keep the safe generic message.
+        }
+        throw ApiException(message, statusCode: response.statusCode);
       }
-
-      return LoginSession.fromJson(jsonDecode(body) as Map<String, dynamic>);
+      if (!expectBody || responseBody.isEmpty) return null;
+      return jsonDecode(responseBody) as Map<String, dynamic>;
     } on ApiException {
       rethrow;
     } on TimeoutException {
@@ -88,5 +233,9 @@ class ApiClient {
     }
   }
 
+  static String? _nullIfEmpty(String? value) =>
+      value?.trim().isEmpty == true ? null : value?.trim();
+
+  @override
   void close() => _httpClient.close(force: true);
 }

@@ -12,10 +12,16 @@ public class User : Entity
     /// </summary>
     public required string Username { get; set; }
 
+    /// <summary>Normalized global login identifier used for lookup.</summary>
+    public required string NormalizedUsername { get; set; }
+
     /// <summary>
     /// User's email address.
     /// </summary>
-    public required string Email { get; set; }
+    public string? Email { get; set; }
+
+    /// <summary>Normalized email used by the optional unique index.</summary>
+    public string? NormalizedEmail { get; set; }
 
     /// <summary>
     /// User's full name.
@@ -57,10 +63,19 @@ public class User : Entity
     /// </summary>
     public bool IsActive { get; set; } = true;
 
+    public bool MustChangePassword { get; set; }
+
+    public int FailedLoginAttempts { get; set; }
+
+    public DateTime? LockoutEndUtc { get; set; }
+
+    /// <summary>Incremented whenever existing access tokens must be invalidated.</summary>
+    public int TokenVersion { get; set; }
+
     /// <summary>
     /// Last login timestamp.
     /// </summary>
-    public DateTime? LastLoginAt { get; set; }
+    public DateTime? LastLoginAtUtc { get; set; }
 
     /// <summary>
     /// Navigation property for audit log entries created by this user.

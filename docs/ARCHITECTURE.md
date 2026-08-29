@@ -23,6 +23,10 @@ Application owns auth and FEFO contracts/use-case orchestration. Infrastructure 
 - `HasPermissionAttribute` creates policies that require a specific `permission` claim. No authorization logic depends only on role-name checks.
 - Initial owner setup is rejected once any user exists. Full user and permission administration is outside Phase 1.
 
+Phase 2 adds global case-insensitive username normalization, optional normalized-email uniqueness, configurable five-attempt/15-minute lockout defaults, forced first-login password changes, and token-version validation against the database. Username is immutable for the MVP. User changes are permission-oriented; `users.manage_owner` is additionally required for Owner targets, and backend logic prevents removal or deactivation of the last active Owner.
+
+Default roles are `Owner`, `Manager`, `Pharmacist`, `Cashier`, `PurchaseManager`, `Accountant`, and `StoreKeeper`. Owner receives all current permissions. Manager receives user administration except Owner management and role mutation, plus catalog/profile/audit access. Other roles initially receive profile view/update/change-password permissions. Migration seed SQL is conflict-safe, runs once through EF history, and does not continuously restore mappings that administrators later customize.
+
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -105,21 +109,22 @@ These statements are verified in the EF model, migration, and real PostgreSQL 17
 
 - Directory: `backend/Pharmacy.Infrastructure/Migrations`
 - Migration: `20260829211152_InitialCreate`
+- Migration: `20260829223012_AddUserSecurityAndManagement`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: `20260829211152_InitialCreate` recorded with product version `10.0.11`
+- EF history: both Phase 1 and Phase 2 migrations recorded with product version `10.0.11`
 - Real schema: 13 application tables plus `__EFMigrationsHistory`, 17 foreign keys, and 59 indexes including primary keys
 
 ## Flutter Foundation
 
-The Flutter project contains a Material app shell, `ApiClient`, `AuthState`, login screen, and placeholder dashboard. The API base URL is supplied with `API_BASE_URL`; authentication calls `/api/auth/login`; the JWT is held in memory and logout clears it. Feature screens and offline storage are not implemented.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, and profile screens. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Phase 1 Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
-- No seeded permissions or administrative user-management workflow.
-- No refresh tokens, account lockout, password reset, or secure persistent Flutter token storage.
+- No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
+- No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
 - No POS, purchases, product UI, inventory UI, transfers, reports, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.

@@ -21,6 +21,16 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
+            2L,
+            await ScalarAsync<long>(connection, null, """
+                SELECT count(*)
+                FROM "__EFMigrationsHistory"
+                WHERE "MigrationId" IN (
+                    '20260829211152_InitialCreate',
+                    '20260829223012_AddUserSecurityAndManagement');
+                """));
+
+        Assert.Equal(
             13L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
@@ -55,6 +65,55 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("date", types["ProductBatches.ExpiryDate"]);
         Assert.Equal("date", types["ProductBatches.ManufacturingDate"]);
         Assert.Equal("timestamp with time zone", types["StockMovements.CreatedAt"]);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task User_security_columns_and_normalized_uniqueness_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var branchId = Guid.NewGuid();
+        await InsertBranchAsync(connection, transaction, branchId);
+        var roleId = await ScalarAsync<Guid>(connection, transaction, """
+            SELECT "Id" FROM "Roles" WHERE "Name" = 'Cashier';
+            """);
+
+        await InsertUserAsync(connection, transaction, branchId, roleId, "case-user", "CASE-USER", null, null);
+        await InsertUserAsync(connection, transaction, branchId, roleId, "null-email", "NULL-EMAIL", null, null);
+        await AssertDatabaseErrorAsync(
+            connection,
+            transaction,
+            "duplicate_normalized_username",
+            PostgresErrorCodes.UniqueViolation,
+            () => InsertUserAsync(connection, transaction, branchId, roleId, "Case-User", "CASE-USER", null, null));
+
+        await InsertUserAsync(
+            connection, transaction, branchId, roleId, "email-one", "EMAIL-ONE", "One@Example.test", "ONE@EXAMPLE.TEST");
+        await AssertDatabaseErrorAsync(
+            connection,
+            transaction,
+            "duplicate_normalized_email",
+            PostgresErrorCodes.UniqueViolation,
+            () => InsertUserAsync(
+                connection, transaction, branchId, roleId, "email-two", "EMAIL-TWO", "one@example.test", "ONE@EXAMPLE.TEST"));
+
+        await ExecuteAsync(connection, transaction, """
+            UPDATE "Users"
+            SET "FailedLoginAttempts" = 5,
+                "LockoutEndUtc" = now() + interval '15 minutes'
+            WHERE "NormalizedUsername" = 'CASE-USER';
+            """);
+        Assert.Equal(
+            5,
+            await ScalarAsync<int>(connection, transaction, """
+                SELECT "FailedLoginAttempts"
+                FROM "Users"
+                WHERE "NormalizedUsername" = 'CASE-USER'
+                  AND "LockoutEndUtc" > now()
+                  AND "RoleId" = (SELECT "Id" FROM "Roles" WHERE "Name" = 'Cashier');
+                """));
+        await transaction.RollbackAsync();
     }
 
     [PostgreSqlFact]
@@ -255,6 +314,33 @@ public sealed class PostgreSqlIntegrationTests
             ("productId", productId),
             ("batchId", batchId),
             ("quantity", quantity));
+
+    private static async Task InsertUserAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid branchId,
+        Guid roleId,
+        string username,
+        string normalizedUsername,
+        string? email,
+        string? normalizedEmail) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Users"
+                ("Id", "Username", "NormalizedUsername", "Email", "NormalizedEmail",
+                 "FullName", "PasswordHash", "BranchId", "RoleId", "IsActive",
+                 "MustChangePassword", "FailedLoginAttempts", "TokenVersion", "CreatedAt", "UpdatedAt")
+            VALUES
+                (@id, @username, @normalizedUsername, @email, @normalizedEmail,
+                 'Integration User', 'not-a-real-password-hash', @branchId, @roleId, true,
+                 true, 0, 0, now(), now());
+            """,
+            ("id", Guid.NewGuid()),
+            ("username", username),
+            ("normalizedUsername", normalizedUsername),
+            ("email", email is null ? DBNull.Value : email),
+            ("normalizedEmail", normalizedEmail is null ? DBNull.Value : normalizedEmail),
+            ("branchId", branchId),
+            ("roleId", roleId));
 
     private static async Task AssertDatabaseErrorAsync(
         NpgsqlConnection connection,

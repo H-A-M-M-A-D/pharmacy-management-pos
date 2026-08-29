@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Pharmacy.Api\Pharmacy.Api.csproj" />
     <ProjectReference Include="..\Pharmacy.Application\Pharmacy.Application.csproj" />
     <ProjectReference Include="..\Pharmacy.Domain\Pharmacy.Domain.csproj" />
     <ProjectReference Include="..\Pharmacy.Infrastructure\Pharmacy.Infrastructure.csproj" />

@@ -1,104 +1,50 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Auth;
+using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Auth;
 
 namespace Pharmacy.Api.Controllers;
 
-/// <summary>
-/// Authentication endpoints.
-/// </summary>
 [ApiController]
-[Route("api/[controller]")]
-public class AuthController : ControllerBase
+[Route("api/auth")]
+public sealed class AuthController(IAuthService authService) : ControllerBase
 {
-    private readonly IAuthService _authService;
-
-    public AuthController(IAuthService authService)
-    {
-        _authService = authService;
-    }
-
-    /// <summary>
-    /// Login with username and password.
-    /// </summary>
     [HttpPost("login")]
     [AllowAnonymous]
-    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
-        {
-            return BadRequest("Username and password are required");
-        }
-
-        var result = await _authService.LoginAsync(request, cancellationToken);
-        if (result == null)
-        {
-            return Unauthorized("Invalid username or password");
-        }
-
-        return Ok(result);
+        var result = await authService.LoginAsync(request, cancellationToken);
+        return result is null ? Unauthorized(new { message = "Invalid username or password." }) : Ok(result);
     }
 
-    /// <summary>
-    /// Create initial Owner user (for first-time setup).
-    /// Should be restricted in production.
-    /// </summary>
     [HttpPost("setup-owner")]
     [AllowAnonymous]
-    public async Task<ActionResult<UserDto>> SetupOwner([FromBody] SetupOwnerRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<CurrentUserDto>> SetupOwner(SetupOwnerRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) ||
-            string.IsNullOrWhiteSpace(request.Email) ||
-            string.IsNullOrWhiteSpace(request.FullName) ||
-            string.IsNullOrWhiteSpace(request.Password))
-        {
-            return BadRequest("All fields are required");
-        }
-
-        try
-        {
-            var user = await _authService.CreateOwnerAsync(
-                request.Username,
-                request.Email,
-                request.FullName,
-                request.Password,
-                cancellationToken);
-
-            return Ok(user);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(ex.Message);
-        }
+        var result = await authService.CreateOwnerAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, result);
     }
 
-    /// <summary>
-    /// Test endpoint to verify JWT is working.
-    /// </summary>
-    [HttpGet("verify")]
-    [Authorize]
-    public ActionResult<object> Verify()
-    {
-        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var username = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+    [HttpGet("me")]
+    [HasPermission(PermissionCatalog.ProfileView)]
+    public Task<CurrentUserDto> Me(CancellationToken cancellationToken) =>
+        authService.GetCurrentUserAsync(CurrentUserId, cancellationToken);
 
-        return Ok(new
-        {
-            message = "Token is valid",
-            userId,
-            username
-        });
-    }
-}
+    [HttpPut("me")]
+    [HasPermission(PermissionCatalog.ProfileUpdate)]
+    public Task<CurrentUserDto> UpdateProfile(UpdateProfileRequest request, CancellationToken cancellationToken) =>
+        authService.UpdateProfileAsync(CurrentUserId, request, cancellationToken);
 
-/// <summary>
-/// DTO for owner setup request.
-/// </summary>
-public class SetupOwnerRequest
-{
-    public required string Username { get; set; }
-    public required string Email { get; set; }
-    public required string FullName { get; set; }
-    public required string Password { get; set; }
+    [HttpPost("change-password")]
+    [HasPermission(PermissionCatalog.ProfileChangePassword)]
+    public Task<LoginResponse> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken) =>
+        authService.ChangePasswordAsync(CurrentUserId, request, cancellationToken);
+
+    private Guid CurrentUserId =>
+        Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
+            ? id
+            : throw new UnauthorizedAccessException();
 }

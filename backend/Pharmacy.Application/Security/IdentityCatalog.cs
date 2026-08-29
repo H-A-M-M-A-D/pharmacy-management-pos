@@ -1,0 +1,48 @@
+namespace Pharmacy.Application.Security;
+
+public static class PermissionCatalog
+{
+    public const string UsersView = "users.view";
+    public const string UsersCreate = "users.create";
+    public const string UsersUpdate = "users.update";
+    public const string UsersActivate = "users.activate";
+    public const string UsersDeactivate = "users.deactivate";
+    public const string UsersResetPassword = "users.reset_password";
+    public const string UsersManageOwner = "users.manage_owner";
+    public const string RolesView = "roles.view";
+    public const string RolesManage = "roles.manage";
+    public const string PermissionsView = "permissions.view";
+    public const string ProfileView = "profile.view";
+    public const string ProfileUpdate = "profile.update";
+    public const string ProfileChangePassword = "profile.change_password";
+    public const string AuditView = "audit.view";
+
+    public static readonly IReadOnlyList<string> All =
+    [
+        UsersView, UsersCreate, UsersUpdate, UsersActivate, UsersDeactivate,
+        UsersResetPassword, UsersManageOwner, RolesView, RolesManage,
+        PermissionsView, ProfileView, ProfileUpdate, ProfileChangePassword, AuditView
+    ];
+}
+
+public static class RoleCatalog
+{
+    public const string Owner = "Owner";
+    public const string Manager = "Manager";
+    public const string Pharmacist = "Pharmacist";
+    public const string Cashier = "Cashier";
+    public const string PurchaseManager = "PurchaseManager";
+    public const string Accountant = "Accountant";
+    public const string StoreKeeper = "StoreKeeper";
+
+    public static readonly IReadOnlyList<string> All =
+    [Owner, Manager, Pharmacist, Cashier, PurchaseManager, Accountant, StoreKeeper];
+}
+
+public sealed class AuthenticationSecurityOptions
+{
+    public const string SectionName = "AuthenticationSecurity";
+
+    public int MaximumFailedAttempts { get; set; } = 5;
+    public int LockoutMinutes { get; set; } = 15;
+}

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Pharmacy.Application.DTOs.Auth;
 using Pharmacy.Application.Services.Auth;
 
 namespace Pharmacy.Infrastructure.Services.Auth;
@@ -10,18 +11,21 @@ namespace Pharmacy.Infrastructure.Services.Auth;
 public sealed class JwtTokenService : ITokenService
 {
     private readonly IConfiguration _configuration;
+    private readonly TimeProvider _timeProvider;
 
-    public JwtTokenService(IConfiguration configuration)
+    public JwtTokenService(IConfiguration configuration, TimeProvider timeProvider)
     {
         _configuration = configuration;
+        _timeProvider = timeProvider;
     }
 
-    public string CreateToken(Guid userId, string username, string email, string fullName, string roleName, Guid roleId, Guid branchId, IReadOnlyCollection<string> permissionCodes)
+    public AccessTokenResult CreateToken(CurrentUserDto user, int tokenVersion)
     {
         var secretKey = _configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured.");
-        if (string.IsNullOrWhiteSpace(secretKey) || secretKey.Length < 32 || secretKey.StartsWith("<") || secretKey.Contains("change-this", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(secretKey) || secretKey.Length < 32 || secretKey.StartsWith('<') ||
+            secretKey.Contains("change-this", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("JWT signing key must be set via configuration or environment variables in production.");
+            throw new InvalidOperationException("JWT signing key must be supplied through secure configuration.");
         }
 
         var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("JWT Issuer not configured.");
@@ -31,32 +35,32 @@ public sealed class JwtTokenService : ITokenService
             throw new InvalidOperationException("JWT ExpirationMinutes must be a positive integer.");
         }
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
-        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var expiresAtUtc = now.AddMinutes(expirationMinutes);
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId.ToString()),
-            new(ClaimTypes.Name, username),
-            new(ClaimTypes.Email, email),
-            new("FullName", fullName),
-            new(ClaimTypes.Role, roleName),
-            new("RoleId", roleId.ToString()),
-            new("BranchId", branchId.ToString())
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.Username),
+            new("FullName", user.FullName),
+            new("BranchId", user.Branch.Id.ToString()),
+            new("token_version", tokenVersion.ToString()),
+            new("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant())
         };
-
-        foreach (var permission in permissionCodes.Distinct())
+        if (user.Email is not null)
         {
-            claims.Add(new Claim("permission", permission));
+            claims.Add(new Claim(ClaimTypes.Email, user.Email));
         }
 
-        var token = new JwtSecurityToken(
-            issuer: issuer,
-            audience: audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(expirationMinutes),
-            signingCredentials: credentials);
+        foreach (var role in user.Roles)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role.Name));
+            claims.Add(new Claim("RoleId", role.Id.ToString()));
+        }
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        claims.AddRange(user.Permissions.Distinct(StringComparer.Ordinal).Select(code => new Claim("permission", code)));
+        var credentials = new SigningCredentials(
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)), SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(issuer, audience, claims, now, expiresAtUtc, credentials);
+        return new AccessTokenResult(new JwtSecurityTokenHandler().WriteToken(token), expiresAtUtc);
     }
 }

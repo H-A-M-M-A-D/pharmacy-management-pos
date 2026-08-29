@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The migration file is `20260829211152_InitialCreate`. Seeing it in the list verifies migration discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate` and `20260829223012_AddUserSecurityAndManagement`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. The migration has been applied to both databases, and `__EFMigrationsHistory` contains `20260829211152_InitialCreate`. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. Both migrations are applied to both databases, and `__EFMigrationsHistory` contains both migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -65,7 +65,7 @@ dotnet run --project Pharmacy.Api
 
 Development OpenAPI JSON is mapped at `/openapi/v1.json`; health is at `/api/health`.
 
-`POST /api/auth/setup-owner` is only for an empty database. The application rejects it after any user exists. `POST /api/auth/login` rejects inactive users and returns role and permission claims in the JWT.
+`POST /api/auth/setup-owner` is only for an empty database and requires a strong user-selected password. The application rejects it after any user exists. `POST /api/auth/login` uses a generic failure response for invalid, inactive, or locked accounts. `GET /api/auth/me` is the authoritative current-session profile.
 
 ## Verify Flutter
 
@@ -82,4 +82,4 @@ Run against a chosen API URL with:
 flutter run -d windows --dart-define=API_BASE_URL=http://localhost:5000
 ```
 
-The client currently keeps the JWT in memory only. Secure persistent session storage is a later concern.
+The client stores the JWT through `flutter_secure_storage`; on Windows the plugin protects its encryption key with Windows Credential Manager. The API still uses self-contained access tokens rather than refresh tokens.

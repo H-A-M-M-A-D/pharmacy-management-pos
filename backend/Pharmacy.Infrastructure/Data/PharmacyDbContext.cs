@@ -192,14 +192,18 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Username).IsRequired().HasMaxLength(100);
-        entity.Property(e => e.Email).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.NormalizedUsername).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.Email).HasMaxLength(100);
+        entity.Property(e => e.NormalizedEmail).HasMaxLength(100);
         entity.Property(e => e.FullName).IsRequired().HasMaxLength(200);
         entity.Property(e => e.PasswordHash).IsRequired();
         entity.Property(e => e.PhoneNumber).HasMaxLength(20);
 
-        entity.HasIndex(e => e.Username).IsUnique();
-        entity.HasIndex(e => e.Email).IsUnique();
+        entity.HasIndex(e => e.NormalizedUsername).IsUnique();
+        entity.HasIndex(e => e.NormalizedEmail).IsUnique().HasFilter("\"NormalizedEmail\" IS NOT NULL");
         entity.HasIndex(e => new { e.BranchId, e.IsActive });
+        entity.HasIndex(e => new { e.RoleId, e.IsActive });
+        entity.HasIndex(e => e.LockoutEndUtc);
 
         entity.HasOne(e => e.Branch)
             .WithMany(b => b.Users)

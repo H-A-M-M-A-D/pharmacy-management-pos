@@ -3,6 +3,7 @@ using Moq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Pharmacy.Application.DTOs.Auth;
+using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Auth;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Domain.Entities;
@@ -314,6 +315,7 @@ public class PharmacyFoundationTests
         var user = new User
         {
             Username = "cashier1",
+            NormalizedUsername = "CASHIER1",
             Email = "cashier@pharmacy.com",
             FullName = "John Doe",
             PasswordHash = "hashed_password",
@@ -669,6 +671,7 @@ public class AuthenticationTests
         var user = new User
         {
             Username = "testuser",
+            NormalizedUsername = "TESTUSER",
             Email = "test@pharmacy.com",
             FullName = "Test User",
             PasswordHash = "hashed",
@@ -690,17 +693,25 @@ public class AuthenticationTests
     {
         var repository = new Mock<IUserAccountRepository>();
         repository
-            .Setup(r => r.GetActiveUserByUsernameAsync("inactive", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((User?)null);
+            .Setup(r => r.GetByNormalizedUsernameAsync("INACTIVE", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User
+            {
+                Username = "inactive",
+                NormalizedUsername = "INACTIVE",
+                FullName = "Inactive User",
+                PasswordHash = "not-checked",
+                IsActive = false
+            });
         var hasher = new Mock<IPasswordHasher>(MockBehavior.Strict);
         var tokenService = new Mock<ITokenService>(MockBehavior.Strict);
-        var service = new AuthService(repository.Object, hasher.Object, tokenService.Object);
+        var service = new AuthService(
+            repository.Object,
+            hasher.Object,
+            tokenService.Object,
+            new AuthenticationSecurityOptions(),
+            TimeProvider.System);
 
-        var result = await service.LoginAsync(new LoginRequest
-        {
-            Username = "inactive",
-            Password = "not-checked"
-        });
+        var result = await service.LoginAsync(new LoginRequest("inactive", "not-checked"));
 
         Assert.Null(result);
         hasher.VerifyNoOtherCalls();
@@ -715,19 +726,19 @@ public class AuthenticationTests
         configuration.Setup(c => c["Jwt:Issuer"]).Returns("test-issuer");
         configuration.Setup(c => c["Jwt:Audience"]).Returns("test-audience");
         configuration.Setup(c => c["Jwt:ExpirationMinutes"]).Returns("30");
-        var service = new JwtTokenService(configuration.Object);
-
-        var encoded = service.CreateToken(
+        var service = new JwtTokenService(configuration.Object, TimeProvider.System);
+        var encoded = service.CreateToken(new CurrentUserDto(
             Guid.NewGuid(),
             "owner",
-            "owner@example.test",
             "Owner User",
-            "Owner",
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            new[] { "inventory.view", "inventory.adjust", "inventory.view" });
+            "owner@example.test",
+            null,
+            new BranchDto(Guid.NewGuid(), "HQ", "Head Office"),
+            [new RoleDto(Guid.NewGuid(), "Owner", null)],
+            ["inventory.view", "inventory.adjust", "inventory.view"],
+            false), 0);
 
-        var token = new JwtSecurityTokenHandler().ReadJwtToken(encoded);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(encoded.Token);
         Assert.Equal("test-issuer", token.Issuer);
         Assert.Contains("test-audience", token.Audiences);
         Assert.InRange(token.ValidTo, DateTime.UtcNow.AddMinutes(29), DateTime.UtcNow.AddMinutes(31));

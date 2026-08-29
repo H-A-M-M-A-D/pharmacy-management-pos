@@ -1,18 +1,20 @@
 # Pharmacy Management System POS
 
-Phase 1 foundation for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema have been verified locally. This project is not production-ready and Phase 2 has not started.
+Pharmacy management foundation with a Phase 2 authentication and user-management module for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Product, inventory transaction, and POS modules have not started.
 
 ## Current Scope
 
 - Clean Architecture backend targeting .NET 10
 - PostgreSQL persistence through EF Core and Npgsql
-- JWT login, PBKDF2 password hashing, role/permission claims, and dynamic permission policies
+- JWT login, PBKDF2 password hashing, temporary lockout, forced password changes, token-version invalidation, and dynamic permission policies
+- Paged user management, profile editing, activation/deactivation, password reset, Owner protection, and security audit events
+- Idempotently seeded roles, focused permission catalog, and customizable role-permission defaults
 - Branch-aware inventory entities, permanent stock ledger, and controlled current-balance projections
 - Reusable FEFO batch allocation service
-- Flutter app shell, API client, in-memory authentication state, login, and placeholder dashboard
+- Flutter desktop shell, secure token storage, session restoration, login, forced password change, users, and profile screens
 - Backend unit/foundation and PostgreSQL integration tests, plus a Flutter widget smoke test
 
-No POS, purchasing, product-management, inventory-management, reporting, or full user-management workflow is implemented.
+No POS, purchasing, product-management, inventory-management, or reporting workflow is implemented.
 
 ## Dependency Graph
 
@@ -39,13 +41,23 @@ Pharmacy.Tests           -> projects required by its tests
 
 ## Database Status
 
-PostgreSQL 17 is the verified development provider. The current migration is:
+PostgreSQL 17 is the verified development provider. Applied migrations are:
 
 ```text
 backend/Pharmacy.Infrastructure/Migrations/20260829211152_InitialCreate.cs
+backend/Pharmacy.Infrastructure/Migrations/20260829223012_AddUserSecurityAndManagement.cs
 ```
 
-`20260829211152_InitialCreate` has been applied to local `pharmacy_dev` and `pharmacy_test` databases through the non-superuser `pharmacy_app_dev` role. The real schema contains 13 application tables plus `__EFMigrationsHistory`; PostgreSQL catalog metadata and rollback-isolated integration tests verify its types and key constraints. Credentials remain in user-scoped environment variables and are not stored in the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+Both migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 13 application tables plus `__EFMigrationsHistory`; Phase 2 adds security columns, normalized identity indexes, and role/permission seed data. Credentials remain in user-scoped environment variables and are not stored in the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+
+## Identity Policy
+
+- Usernames are immutable for the MVP, normalized case-insensitively, and globally unique.
+- Email is optional and unique only when provided; phone numbers are not unique.
+- Five consecutive failures lock an account for 15 minutes. Successful login clears the counter.
+- New and administratively reset users must change their password before accessing other modules.
+- Deactivation, password changes, resets, and role/branch changes increment a token version checked on every authenticated request.
+- The last active Owner cannot be deactivated or lose the Owner role. Owner accounts require `users.manage_owner` to modify.
 
 ## Key Inventory Rules
 
