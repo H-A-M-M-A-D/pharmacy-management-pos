@@ -37,6 +37,18 @@ public sealed class ApiAuthorizationTests
     }
 
     [Fact]
+    public async Task Product_permission_policy_is_claim_based()
+    {
+        var provider = new PermissionPolicyProvider(Options.Create(new AuthorizationOptions()));
+        var policy = await provider.GetPolicyAsync(PermissionAuthorization.PolicyPrefix + PermissionCatalog.ProductsCreate);
+        Assert.NotNull(policy);
+        var denied = new AuthorizationHandlerContext(policy.Requirements, new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")), null);
+        await HandleRequirementsAsync(policy, denied); Assert.False(denied.HasSucceeded);
+        var allowed = new AuthorizationHandlerContext(policy.Requirements, new ClaimsPrincipal(new ClaimsIdentity([new Claim(PermissionAuthorization.ClaimType, PermissionCatalog.ProductsCreate)], "test")), null);
+        await HandleRequirementsAsync(policy, allowed); Assert.True(allowed.HasSucceeded);
+    }
+
+    [Fact]
     public async Task Forced_password_change_blocks_other_backend_routes()
     {
         var nextCalled = false;

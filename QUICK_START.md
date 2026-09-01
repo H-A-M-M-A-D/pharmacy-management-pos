@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations are `20260829211152_InitialCreate` and `20260829223012_AddUserSecurityAndManagement`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, and `20260901194508_CompleteProductMaster`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. Both migrations are applied to both databases, and `__EFMigrationsHistory` contains both migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All three migrations are applied to both databases, and `__EFMigrationsHistory` contains all three migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 

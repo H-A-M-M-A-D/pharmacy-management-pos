@@ -21,13 +21,14 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            2L,
+            3L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
                 WHERE "MigrationId" IN (
                     '20260829211152_InitialCreate',
-                    '20260829223012_AddUserSecurityAndManagement');
+                    '20260829223012_AddUserSecurityAndManagement',
+                    '20260901194508_CompleteProductMaster');
                 """));
 
         Assert.Equal(
@@ -126,9 +127,9 @@ public sealed class PostgreSqlIntegrationTests
 
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "ProductCategories"
-                ("Id", "Name", "IsActive", "CreatedAt", "UpdatedAt")
-            VALUES (@id, @name, true, now(), now());
-            """, ("id", categoryId), ("name", Unique("category")));
+                ("Id", "Name", "NormalizedName", "IsActive", "CreatedAt", "UpdatedAt")
+            VALUES (@id, @name, @normalized, true, now(), now());
+            """, ("id", categoryId), ("name", Unique("category")), ("normalized", Unique("category").ToUpperInvariant()));
 
         await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null);
         await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null);
@@ -151,6 +152,44 @@ public sealed class PostgreSqlIntegrationTests
             PostgresErrorCodes.UniqueViolation,
             () => InsertProductAsync(connection, transaction, categoryId, Unique("sku"), duplicateBarcode));
 
+        await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Product_master_constraints_and_normalized_catalog_names_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var manufacturerId = Guid.NewGuid();
+        await InsertCategoryAsync(connection, transaction, categoryId, "Tablets", "TABLETS");
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Manufacturers" ("Id","Name","NormalizedName","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,'Acme Pharma','ACME PHARMA',true,now(),now());
+            """, ("id", manufacturerId));
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_category_name", PostgresErrorCodes.UniqueViolation,
+            () => InsertCategoryAsync(connection, transaction, Guid.NewGuid(), " tablets ", "TABLETS"));
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_manufacturer_name", PostgresErrorCodes.UniqueViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Manufacturers" ("Id","Name","NormalizedName","IsActive","CreatedAt","UpdatedAt")
+                VALUES (@id,'acme pharma','ACME PHARMA',true,now(),now());
+                """, ("id", Guid.NewGuid())));
+        await InsertProductAsync(connection, transaction, categoryId, "Mixed-Case", null, null, "MIXED-CASE", manufacturerId);
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_normalized_sku", PostgresErrorCodes.UniqueViolation,
+            () => InsertProductAsync(connection, transaction, categoryId, "mixed-case", null, null, "MIXED-CASE"));
+        await AssertDatabaseErrorAsync(connection, transaction, "invalid_product_fk", PostgresErrorCodes.ForeignKeyViolation,
+            () => InsertProductAsync(connection, transaction, Guid.NewGuid(), Unique("sku"), null));
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_price", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Products" ("Id","SKU","NormalizedSku","Name","CategoryId","Unit","PackSize","PurchasePrice","RetailPrice","ReorderLevel","MaximumDiscountPercent","IsActive","CreatedAt","UpdatedAt")
+                VALUES (@id,@sku,@normalized,'Invalid',@category,'Piece',1,-1,1,0,0,true,now(),now());
+                """, ("id", Guid.NewGuid()), ("sku", Unique("sku")), ("normalized", Unique("sku").ToUpperInvariant()), ("category", categoryId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "invalid_discount", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Products" ("Id","SKU","NormalizedSku","Name","CategoryId","Unit","PackSize","PurchasePrice","RetailPrice","ReorderLevel","MaximumDiscountPercent","IsActive","CreatedAt","UpdatedAt")
+                VALUES (@id,@sku,@normalized,'Invalid',@category,'Piece',1,1,1,0,101,true,now(),now());
+                """, ("id", Guid.NewGuid()), ("sku", Unique("sku")), ("normalized", Unique("sku").ToUpperInvariant()), ("category", categoryId)));
         await transaction.RollbackAsync();
     }
 
@@ -232,12 +271,14 @@ public sealed class PostgreSqlIntegrationTests
     private static async Task InsertCategoryAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
-        Guid id) =>
+        Guid id,
+        string? name = null,
+        string? normalized = null) =>
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "ProductCategories"
-                ("Id", "Name", "IsActive", "CreatedAt", "UpdatedAt")
-            VALUES (@id, @name, true, now(), now());
-            """, ("id", id), ("name", Unique("category")));
+                ("Id", "Name", "NormalizedName", "IsActive", "CreatedAt", "UpdatedAt")
+            VALUES (@id, @name, @normalized, true, now(), now());
+            """, ("id", id), ("name", name ?? Unique("category")), ("normalized", normalized ?? Unique("category").ToUpperInvariant()));
 
     private static async Task InsertBranchAsync(
         NpgsqlConnection connection,
@@ -255,21 +296,26 @@ public sealed class PostgreSqlIntegrationTests
         Guid categoryId,
         string sku,
         string? barcode,
-        Guid? id = null) =>
+        Guid? id = null,
+        string? normalizedSku = null,
+        Guid? manufacturerId = null) =>
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "Products"
-                ("Id", "SKU", "Barcode", "Name", "CategoryId", "Unit", "PackSize",
+                ("Id", "SKU", "NormalizedSku", "Barcode", "NormalizedBarcode", "Name", "CategoryId", "ManufacturerId", "Unit", "PackSize",
                  "PurchasePrice", "RetailPrice", "ReorderLevel", "MaximumDiscountPercent",
                  "IsActive", "CreatedAt", "UpdatedAt")
             VALUES
-                (@id, @sku, @barcode, @name, @categoryId, 'piece', 1,
+                (@id, @sku, @normalizedSku, @barcode, @normalizedBarcode, @name, @categoryId, @manufacturerId, 'piece', 1,
                  10.00, 12.00, 0, 0.00, true, now(), now());
             """,
             ("id", id ?? Guid.NewGuid()),
             ("sku", sku),
+            ("normalizedSku", normalizedSku ?? sku.Trim().ToUpperInvariant()),
             ("barcode", barcode is null ? DBNull.Value : barcode),
+            ("normalizedBarcode", barcode is null ? DBNull.Value : barcode.Trim().ToUpperInvariant()),
             ("name", Unique("product")),
-            ("categoryId", categoryId));
+            ("categoryId", categoryId),
+            ("manufacturerId", manufacturerId.HasValue ? manufacturerId.Value : DBNull.Value));
 
     private static async Task InsertBatchAsync(
         NpgsqlConnection connection,

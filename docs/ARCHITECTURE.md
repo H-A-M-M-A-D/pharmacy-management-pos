@@ -11,7 +11,7 @@ Application -> Domain
 Domain -> no project
 ```
 
-Application owns auth and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
+Application owns auth, Product Master, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
 
 ## Authentication and Authorization
 
@@ -26,6 +26,14 @@ Application owns auth and FEFO contracts/use-case orchestration. Infrastructure 
 Phase 2 adds global case-insensitive username normalization, optional normalized-email uniqueness, configurable five-attempt/15-minute lockout defaults, forced first-login password changes, and token-version validation against the database. Username is immutable for the MVP. User changes are permission-oriented; `users.manage_owner` is additionally required for Owner targets, and backend logic prevents removal or deactivation of the last active Owner.
 
 Default roles are `Owner`, `Manager`, `Pharmacist`, `Cashier`, `PurchaseManager`, `Accountant`, and `StoreKeeper`. Owner receives all current permissions. Manager receives user administration except Owner management and role mutation, plus catalog/profile/audit access. Other roles initially receive profile view/update/change-password permissions. Migration seed SQL is conflict-safe, runs once through EF history, and does not continuously restore mappings that administrators later customize.
+
+## Product Master
+
+Product Master manages global `Product`, `ProductCategory`, and `Manufacturer` catalog data only. SKU is immutable after creation and unique through `NormalizedSku`; optional barcode uniqueness uses `NormalizedBarcode` with a nullable filtered index. Category and manufacturer names use normalized unique keys. Products support medicines and general pharmacy retail goods, so brand, generic name, barcode, and manufacturer are optional.
+
+`Unit` is selected from a controlled application list and `PackSize` is a positive integer count. This preserves an upgrade path to structured packaging and conversions without implementing conversion in Phase 3. Product prices are catalog/default prices; `ProductBatch` prices remain batch-specific operational values. Catalog actions never create batches, inventory balances, or stock movements.
+
+Products, categories, and manufacturers are activated/deactivated rather than deleted. Product list queries use SQL filtering, projection, deterministic sorting, pagination, and `AsNoTracking`. Product Master changes produce focused audit events.
 
 ## FEFO Policy
 
@@ -85,8 +93,10 @@ Audit data:
 
 ## Database Constraints
 
-- Product SKU has a unique index.
-- Product barcode has a nullable unique index. PostgreSQL permits multiple null barcodes while enforcing uniqueness for non-null values.
+- Product normalized SKU has a unique index.
+- Product normalized barcode has a nullable filtered unique index. PostgreSQL permits multiple null barcodes while enforcing uniqueness for non-null values.
+- Category and manufacturer normalized names are unique.
+- Product check constraints require positive pack size, non-negative prices/reorder level, and a discount from 0 through 100.
 - Batch uniqueness is `(BranchId, ProductId, BatchNumber)`; a batch number is not globally unique.
 - Inventory uniqueness is `(BranchId, ProductId, ProductBatchId)`.
 - Role/permission, usernames, emails, branch codes, and permission codes have appropriate unique indexes.
@@ -110,21 +120,22 @@ These statements are verified in the EF model, migration, and real PostgreSQL 17
 - Directory: `backend/Pharmacy.Infrastructure/Migrations`
 - Migration: `20260829211152_InitialCreate`
 - Migration: `20260829223012_AddUserSecurityAndManagement`
+- Migration: `20260901194508_CompleteProductMaster`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: both Phase 1 and Phase 2 migrations recorded with product version `10.0.11`
-- Real schema: 13 application tables plus `__EFMigrationsHistory`, 17 foreign keys, and 59 indexes including primary keys
+- EF history: Phase 1, Phase 2, and Phase 3 migrations recorded with product version `10.0.11`
+- Real schema: 13 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, and profile screens. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, and manufacturers screens. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Phase 1 Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No POS, purchases, product UI, inventory UI, transfers, reports, or background expiry processing.
+- No POS, purchases, inventory UI, transfers, reports, unit conversion, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.

@@ -12,6 +12,10 @@ public class Manufacturer : Entity
     /// </summary>
     public required string Name { get; set; }
 
+    public string NormalizedName { get; set; } = string.Empty;
+
+    public string? ShortName { get; set; }
+
     /// <summary>
     /// Manufacturer country of origin.
     /// </summary>
@@ -31,6 +35,8 @@ public class Manufacturer : Entity
     /// Physical address.
     /// </summary>
     public string? Address { get; set; }
+
+    public string? Website { get; set; }
 
     /// <summary>
     /// Whether the manufacturer is currently active.

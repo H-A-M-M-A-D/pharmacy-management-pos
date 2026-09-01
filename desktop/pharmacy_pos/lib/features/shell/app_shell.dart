@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_state.dart';
 import '../profile/profile_screen.dart';
+import '../catalog/products_screen.dart';
+import '../catalog/catalog_masters_screen.dart';
 import '../users/users_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -19,6 +21,9 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final canViewUsers = widget.authState.can('users.view');
+    final canViewProducts = widget.authState.can('products.view');
+    final canViewCategories = widget.authState.can('categories.view');
+    final canViewManufacturers = widget.authState.can('manufacturers.view');
     final destinations = <NavigationRailDestination>[
       const NavigationRailDestination(
         icon: Icon(Icons.dashboard_outlined),
@@ -31,6 +36,24 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.manage_accounts),
           label: Text('Users'),
         ),
+      if (canViewProducts)
+        const NavigationRailDestination(
+          icon: Icon(Icons.medication_outlined),
+          selectedIcon: Icon(Icons.medication),
+          label: Text('Products'),
+        ),
+      if (canViewCategories)
+        const NavigationRailDestination(
+          icon: Icon(Icons.category_outlined),
+          selectedIcon: Icon(Icons.category),
+          label: Text('Categories'),
+        ),
+      if (canViewManufacturers)
+        const NavigationRailDestination(
+          icon: Icon(Icons.factory_outlined),
+          selectedIcon: Icon(Icons.factory),
+          label: Text('Manufacturers'),
+        ),
       const NavigationRailDestination(
         icon: Icon(Icons.account_circle_outlined),
         selectedIcon: Icon(Icons.account_circle),
@@ -40,6 +63,17 @@ class _AppShellState extends State<AppShell> {
     final pages = <Widget>[
       _Dashboard(authState: widget.authState),
       if (canViewUsers) UsersScreen(authState: widget.authState),
+      if (canViewProducts) ProductsScreen(authState: widget.authState),
+      if (canViewCategories)
+        CatalogMastersScreen(
+          authState: widget.authState,
+          mode: CatalogMasterMode.categories,
+        ),
+      if (canViewManufacturers)
+        CatalogMastersScreen(
+          authState: widget.authState,
+          mode: CatalogMasterMode.manufacturers,
+        ),
       ProfileScreen(authState: widget.authState),
     ];
     if (_selected >= pages.length) _selected = 0;

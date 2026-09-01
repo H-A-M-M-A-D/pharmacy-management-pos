@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management foundation with a Phase 2 authentication and user-management module for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Product, inventory transaction, and POS modules have not started.
+Pharmacy management foundation with completed authentication, user management, and Product Master modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Inventory transaction and POS workflows have not started.
 
 ## Current Scope
 
@@ -12,9 +12,10 @@ Pharmacy management foundation with a Phase 2 authentication and user-management
 - Branch-aware inventory entities, permanent stock ledger, and controlled current-balance projections
 - Reusable FEFO batch allocation service
 - Flutter desktop shell, secure token storage, session restoration, login, forced password change, users, and profile screens
+- Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Backend unit/foundation and PostgreSQL integration tests, plus a Flutter widget smoke test
 
-No POS, purchasing, product-management, inventory-management, or reporting workflow is implemented.
+No POS, purchasing, inventory-management, or reporting workflow is implemented.
 
 ## Dependency Graph
 
@@ -46,9 +47,19 @@ PostgreSQL 17 is the verified development provider. Applied migrations are:
 ```text
 backend/Pharmacy.Infrastructure/Migrations/20260829211152_InitialCreate.cs
 backend/Pharmacy.Infrastructure/Migrations/20260829223012_AddUserSecurityAndManagement.cs
+backend/Pharmacy.Infrastructure/Migrations/20260901194508_CompleteProductMaster.cs
 ```
 
-Both migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 13 application tables plus `__EFMigrationsHistory`; Phase 2 adds security columns, normalized identity indexes, and role/permission seed data. Credentials remain in user-scoped environment variables and are not stored in the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All three migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 13 application tables plus `__EFMigrationsHistory`; Phase 3 adds normalized catalog keys, product checks/indexes, manufacturer metadata, and Product Master permissions. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+
+## Product Master Policy
+
+- SKU is trimmed, globally unique by normalized value, and immutable after creation.
+- Barcode is optional, stored as text, and unique by normalized value when present; multiple null barcodes are allowed.
+- Product name is the primary display name. Brand and generic names are optional so general retail products remain valid.
+- Unit is selected from a controlled Phase 3 value list and pack size is a positive integer count. Unit conversion is intentionally deferred.
+- Product prices are current catalog defaults. `ProductBatch` prices remain actual batch-specific values and are not rewritten by Product Master operations.
+- Product, category, and manufacturer records use activation/deactivation; no stock, batch, inventory, or movement row is created by catalog operations.
 
 ## Identity Policy
 

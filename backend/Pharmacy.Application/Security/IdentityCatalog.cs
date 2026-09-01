@@ -16,12 +16,23 @@ public static class PermissionCatalog
     public const string ProfileUpdate = "profile.update";
     public const string ProfileChangePassword = "profile.change_password";
     public const string AuditView = "audit.view";
+    public const string ProductsView = "products.view";
+    public const string ProductsCreate = "products.create";
+    public const string ProductsUpdate = "products.update";
+    public const string ProductsActivate = "products.activate";
+    public const string ProductsDeactivate = "products.deactivate";
+    public const string CategoriesView = "categories.view";
+    public const string CategoriesManage = "categories.manage";
+    public const string ManufacturersView = "manufacturers.view";
+    public const string ManufacturersManage = "manufacturers.manage";
 
     public static readonly IReadOnlyList<string> All =
     [
         UsersView, UsersCreate, UsersUpdate, UsersActivate, UsersDeactivate,
         UsersResetPassword, UsersManageOwner, RolesView, RolesManage,
-        PermissionsView, ProfileView, ProfileUpdate, ProfileChangePassword, AuditView
+        PermissionsView, ProfileView, ProfileUpdate, ProfileChangePassword, AuditView,
+        ProductsView, ProductsCreate, ProductsUpdate, ProductsActivate, ProductsDeactivate,
+        CategoriesView, CategoriesManage, ManufacturersView, ManufacturersManage
     ];
 }
 

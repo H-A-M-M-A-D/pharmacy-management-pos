@@ -193,3 +193,184 @@ class UserOptions {
         .toList(),
   );
 }
+
+class CatalogLookup {
+  const CatalogLookup({
+    required this.id,
+    required this.name,
+    required this.isActive,
+  });
+  final String id;
+  final String name;
+  final bool isActive;
+  factory CatalogLookup.fromJson(Map<String, dynamic> json) => CatalogLookup(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class ProductListItem {
+  const ProductListItem({
+    required this.id,
+    required this.name,
+    required this.sku,
+    required this.category,
+    required this.unit,
+    required this.retailPrice,
+    required this.isActive,
+    this.barcode,
+    this.genericName,
+    this.brandName,
+    this.manufacturer,
+  });
+  final String id, name, sku, unit;
+  final String? barcode, genericName, brandName;
+  final CatalogLookup category;
+  final CatalogLookup? manufacturer;
+  final double retailPrice;
+  final bool isActive;
+  factory ProductListItem.fromJson(
+    Map<String, dynamic> json,
+  ) => ProductListItem(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    barcode: json['barcode'] as String?,
+    genericName: json['genericName'] as String?,
+    brandName: json['brandName'] as String?,
+    category: CatalogLookup.fromJson(json['category'] as Map<String, dynamic>),
+    manufacturer: json['manufacturer'] == null
+        ? null
+        : CatalogLookup.fromJson(json['manufacturer'] as Map<String, dynamic>),
+    unit: json['unit'] as String? ?? '',
+    retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class ProductDetails extends ProductListItem {
+  const ProductDetails({
+    required super.id,
+    required super.name,
+    required super.sku,
+    required super.category,
+    required super.unit,
+    required super.retailPrice,
+    required super.isActive,
+    required this.packSize,
+    required this.purchasePrice,
+    required this.maximumDiscountPercent,
+    required this.reorderLevel,
+    super.barcode,
+    super.genericName,
+    super.brandName,
+    super.manufacturer,
+    this.tradePrice,
+  });
+  final int packSize, reorderLevel;
+  final double purchasePrice, maximumDiscountPercent;
+  final double? tradePrice;
+  factory ProductDetails.fromJson(Map<String, dynamic> json) => ProductDetails(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    barcode: json['barcode'] as String?,
+    genericName: json['genericName'] as String?,
+    brandName: json['brandName'] as String?,
+    category: CatalogLookup.fromJson(json['category'] as Map<String, dynamic>),
+    manufacturer: json['manufacturer'] == null
+        ? null
+        : CatalogLookup.fromJson(json['manufacturer'] as Map<String, dynamic>),
+    unit: json['unit'] as String? ?? '',
+    packSize: json['packSize'] as int? ?? 1,
+    purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
+    retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
+    tradePrice: (json['tradePrice'] as num?)?.toDouble(),
+    maximumDiscountPercent:
+        (json['maximumDiscountPercent'] as num?)?.toDouble() ?? 0,
+    reorderLevel: json['reorderLevel'] as int? ?? 0,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class PagedProducts {
+  const PagedProducts({
+    required this.items,
+    required this.page,
+    required this.pageSize,
+    required this.totalCount,
+  });
+  final List<ProductListItem> items;
+  final int page, pageSize, totalCount;
+  factory PagedProducts.fromJson(Map<String, dynamic> json) => PagedProducts(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => ProductListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    page: json['page'] as int? ?? 1,
+    pageSize: json['pageSize'] as int? ?? 25,
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class CategoryInfo extends CatalogLookup {
+  const CategoryInfo({
+    required super.id,
+    required super.name,
+    required super.isActive,
+    this.description,
+  });
+  final String? description;
+  factory CategoryInfo.fromJson(Map<String, dynamic> json) => CategoryInfo(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String?,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class ManufacturerInfo extends CatalogLookup {
+  const ManufacturerInfo({
+    required super.id,
+    required super.name,
+    required super.isActive,
+    this.shortName,
+    this.phoneNumber,
+    this.email,
+    this.website,
+    this.country,
+    this.address,
+  });
+  final String? shortName, phoneNumber, email, website, country, address;
+  factory ManufacturerInfo.fromJson(Map<String, dynamic> json) =>
+      ManufacturerInfo(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '',
+        isActive: json['isActive'] as bool? ?? false,
+        shortName: json['shortName'] as String?,
+        phoneNumber: json['phoneNumber'] as String?,
+        email: json['email'] as String?,
+        website: json['website'] as String?,
+        country: json['country'] as String?,
+        address: json['address'] as String?,
+      );
+}
+
+class ProductOptions {
+  const ProductOptions({
+    required this.categories,
+    required this.manufacturers,
+    required this.units,
+  });
+  final List<CatalogLookup> categories, manufacturers;
+  final List<String> units;
+  factory ProductOptions.fromJson(Map<String, dynamic> json) => ProductOptions(
+    categories: (json['categories'] as List<dynamic>? ?? [])
+        .map((x) => CatalogLookup.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    manufacturers: (json['manufacturers'] as List<dynamic>? ?? [])
+        .map((x) => CatalogLookup.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    units: (json['units'] as List<dynamic>? ?? []).cast<String>(),
+  );
+}

@@ -45,6 +45,48 @@ abstract interface class PharmacyApi {
   );
   Future<void> setUserActive(String token, String id, bool active);
   Future<void> resetPassword(String token, String id, String password);
+  Future<PagedProducts> listProducts(
+    String token, {
+    int page = 1,
+    String? search,
+    String? categoryId,
+    String? manufacturerId,
+    bool? isActive,
+  });
+  Future<ProductOptions> productOptions(String token);
+  Future<ProductDetails> productDetails(String token, String id);
+  Future<ProductDetails> createProduct(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<ProductDetails> updateProduct(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> setProductActive(String token, String id, bool active);
+  Future<List<CategoryInfo>> listCategories(
+    String token, {
+    String? search,
+    bool? isActive,
+  });
+  Future<CategoryInfo> saveCategory(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  });
+  Future<void> setCategoryActive(String token, String id, bool active);
+  Future<List<ManufacturerInfo>> listManufacturers(
+    String token, {
+    String? search,
+    bool? isActive,
+  });
+  Future<ManufacturerInfo> saveManufacturer(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  });
+  Future<void> setManufacturerActive(String token, String id, bool active);
   void close();
 }
 
@@ -185,6 +227,146 @@ class ApiClient implements PharmacyApi {
       body: {'temporaryPassword': password},
       expectBody: false,
     );
+  }
+
+  @override
+  Future<PagedProducts> listProducts(
+    String token, {
+    int page = 1,
+    String? search,
+    String? categoryId,
+    String? manufacturerId,
+    bool? isActive,
+  }) async {
+    final query = <String, String>{'page': '$page', 'pageSize': '25'};
+    if (search?.trim().isNotEmpty == true) query['search'] = search!.trim();
+    if (categoryId != null) query['categoryId'] = categoryId;
+    if (manufacturerId != null) query['manufacturerId'] = manufacturerId;
+    if (isActive != null) query['isActive'] = '$isActive';
+    return PagedProducts.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/products', queryParameters: query).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<ProductOptions> productOptions(String token) async =>
+      ProductOptions.fromJson(
+        (await _request('GET', '/api/products/options', token: token))!,
+      );
+  @override
+  Future<ProductDetails> productDetails(String token, String id) async =>
+      ProductDetails.fromJson(
+        (await _request('GET', '/api/products/$id', token: token))!,
+      );
+  @override
+  Future<ProductDetails> createProduct(
+    String token,
+    Map<String, dynamic> values,
+  ) async => ProductDetails.fromJson(
+    (await _request('POST', '/api/products', token: token, body: values))!,
+  );
+  @override
+  Future<ProductDetails> updateProduct(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => ProductDetails.fromJson(
+    (await _request('PUT', '/api/products/$id', token: token, body: values))!,
+  );
+  @override
+  Future<void> setProductActive(String token, String id, bool active) async =>
+      _void(
+        'POST',
+        '/api/products/$id/${active ? 'activate' : 'deactivate'}',
+        token,
+      );
+  @override
+  Future<List<CategoryInfo>> listCategories(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async {
+    final q = <String, String>{};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (isActive != null) q['isActive'] = '$isActive';
+    final data = (await _request(
+      'GET',
+      Uri(path: '/api/product-categories', queryParameters: q).toString(),
+      token: token,
+    ))!;
+    return (data['items'] as List<dynamic>? ?? const [])
+        .map((x) => CategoryInfo.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<CategoryInfo> saveCategory(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  }) async => CategoryInfo.fromJson(
+    (await _request(
+      id == null ? 'POST' : 'PUT',
+      id == null ? '/api/product-categories' : '/api/product-categories/$id',
+      token: token,
+      body: values,
+    ))!,
+  );
+  @override
+  Future<void> setCategoryActive(String token, String id, bool active) async =>
+      _void(
+        'POST',
+        '/api/product-categories/$id/${active ? 'activate' : 'deactivate'}',
+        token,
+      );
+  @override
+  Future<List<ManufacturerInfo>> listManufacturers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async {
+    final q = <String, String>{};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (isActive != null) q['isActive'] = '$isActive';
+    final data = (await _request(
+      'GET',
+      Uri(path: '/api/manufacturers', queryParameters: q).toString(),
+      token: token,
+    ))!;
+    return (data['items'] as List<dynamic>? ?? const [])
+        .map((x) => ManufacturerInfo.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<ManufacturerInfo> saveManufacturer(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  }) async => ManufacturerInfo.fromJson(
+    (await _request(
+      id == null ? 'POST' : 'PUT',
+      id == null ? '/api/manufacturers' : '/api/manufacturers/$id',
+      token: token,
+      body: values,
+    ))!,
+  );
+  @override
+  Future<void> setManufacturerActive(
+    String token,
+    String id,
+    bool active,
+  ) async => _void(
+    'POST',
+    '/api/manufacturers/$id/${active ? 'activate' : 'deactivate'}',
+    token,
+  );
+  Future<void> _void(String method, String path, String token) async {
+    await _request(method, path, token: token, expectBody: false);
   }
 
   Future<Map<String, dynamic>?> _request(

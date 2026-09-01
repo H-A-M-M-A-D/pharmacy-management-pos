@@ -12,6 +12,8 @@ public class ProductCategory : Entity
     /// </summary>
     public required string Name { get; set; }
 
+    public string NormalizedName { get; set; } = string.Empty;
+
     /// <summary>
     /// Category description.
     /// </summary>

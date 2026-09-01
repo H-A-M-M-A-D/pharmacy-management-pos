@@ -7,6 +7,7 @@ using Pharmacy.Api.Authorization;
 using Pharmacy.Api.Middleware;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Auth;
+using Pharmacy.Application.Services.Catalog;
 using Pharmacy.Application.Services.Users;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
@@ -38,6 +39,8 @@ builder.Services.AddScoped<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+builder.Services.AddScoped<IProductMasterRepository, ProductMasterRepository>();
+builder.Services.AddScoped<IProductMasterService, ProductMasterService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key not configured. Set Jwt__Key or a user secret.");

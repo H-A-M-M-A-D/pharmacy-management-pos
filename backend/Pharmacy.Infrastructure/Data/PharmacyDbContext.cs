@@ -222,9 +222,10 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
         entity.Property(e => e.Description).HasMaxLength(500);
 
-        entity.HasIndex(e => e.Name).IsUnique();
+        entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.IsActive);
     }
 
@@ -234,12 +235,15 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.ShortName).HasMaxLength(100);
         entity.Property(e => e.Country).HasMaxLength(100);
         entity.Property(e => e.Email).HasMaxLength(100);
         entity.Property(e => e.PhoneNumber).HasMaxLength(20);
         entity.Property(e => e.Address).HasMaxLength(500);
+        entity.Property(e => e.Website).HasMaxLength(300);
 
-        entity.HasIndex(e => e.Name);
+        entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.IsActive);
     }
 
@@ -267,7 +271,9 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.SKU).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.NormalizedSku).IsRequired().HasMaxLength(100);
         entity.Property(e => e.Barcode).HasMaxLength(100);
+        entity.Property(e => e.NormalizedBarcode).HasMaxLength(100);
         entity.Property(e => e.Name).IsRequired().HasMaxLength(500);
         entity.Property(e => e.GenericName).HasMaxLength(500);
         entity.Property(e => e.BrandName).HasMaxLength(200);
@@ -277,12 +283,22 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.TradePrice).HasPrecision(18, 2);
         entity.Property(e => e.MaximumDiscountPercent).HasPrecision(5, 2);
 
-        entity.HasIndex(e => e.SKU).IsUnique();
-        entity.HasIndex(e => e.Barcode).IsUnique();
+        entity.HasIndex(e => e.NormalizedSku).IsUnique();
+        entity.HasIndex(e => e.NormalizedBarcode).IsUnique().HasFilter("\"NormalizedBarcode\" IS NOT NULL");
         entity.HasIndex(e => e.Name);
         entity.HasIndex(e => e.GenericName);
+        entity.HasIndex(e => e.BrandName);
         entity.HasIndex(e => e.CategoryId);
+        entity.HasIndex(e => e.ManufacturerId);
         entity.HasIndex(e => e.IsActive);
+
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Products_PackSize_Positive", "\"PackSize\" > 0");
+            table.HasCheckConstraint("CK_Products_Prices_NonNegative", "\"PurchasePrice\" >= 0 AND \"RetailPrice\" >= 0 AND (\"TradePrice\" IS NULL OR \"TradePrice\" >= 0)");
+            table.HasCheckConstraint("CK_Products_Discount_Range", "\"MaximumDiscountPercent\" >= 0 AND \"MaximumDiscountPercent\" <= 100");
+            table.HasCheckConstraint("CK_Products_ReorderLevel_NonNegative", "\"ReorderLevel\" >= 0");
+        });
 
         entity.HasOne(e => e.Category)
             .WithMany(c => c.Products)

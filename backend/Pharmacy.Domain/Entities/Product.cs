@@ -16,10 +16,14 @@ public class Product : Entity
     /// </summary>
     public required string SKU { get; set; }
 
+    public string NormalizedSku { get; set; } = string.Empty;
+
     /// <summary>
     /// Product barcode (optional, but must be unique when present).
     /// </summary>
     public string? Barcode { get; set; }
+
+    public string? NormalizedBarcode { get; set; }
 
     /// <summary>
     /// Commercial/brand product name.

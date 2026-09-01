@@ -92,6 +92,89 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('products navigation follows products.view permission', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'products.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Products'), findsOneWidget);
+  });
+
+  testWidgets('product list renders catalog data', (tester) async {
+    final fixture = TestFixture(permissions: {'products.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Products'));
+    await tester.pumpAndSettle();
+    expect(find.text('Panadol Extra'), findsOneWidget);
+    expect(find.text('PKR 25.00'), findsOneWidget);
+  });
+
+  testWidgets('add product validates required fields', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'products.view', 'products.create'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Products'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_product')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('product_sku')), '');
+    await tester.tap(find.byKey(const Key('save_product')));
+    await tester.pump();
+    expect(find.text('Required'), findsWidgets);
+  });
+
+  testWidgets('category and manufacturer navigation is permission aware', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'categories.view', 'manufacturers.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Categories'), findsOneWidget);
+    expect(find.text('Manufacturers'), findsOneWidget);
+  });
+
+  testWidgets('category form validates name', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'categories.view', 'categories.manage'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Categories'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_category')));
+    await tester.pump();
+    expect(find.text('Name is required'), findsOneWidget);
+  });
+
+  testWidgets('manufacturer form validates name', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'manufacturers.view', 'manufacturers.manage'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Manufacturers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_manufacturer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_manufacturer')));
+    await tester.pump();
+    expect(find.text('Name is required'), findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -239,6 +322,107 @@ class FakeApi implements PharmacyApi {
 
   @override
   Future<void> resetPassword(String token, String id, String password) async {}
+
+  CatalogLookup get category =>
+      const CatalogLookup(id: 'category-1', name: 'Tablets', isActive: true);
+  CatalogLookup get manufacturer => const CatalogLookup(
+    id: 'manufacturer-1',
+    name: 'Acme Pharma',
+    isActive: true,
+  );
+  ProductDetails get product => ProductDetails(
+    id: 'product-1',
+    name: 'Panadol Extra',
+    sku: 'MED-001',
+    category: category,
+    manufacturer: manufacturer,
+    unit: 'Box',
+    packSize: 10,
+    purchasePrice: 20,
+    retailPrice: 25,
+    maximumDiscountPercent: 5,
+    reorderLevel: 10,
+    isActive: true,
+    genericName: 'Paracetamol',
+  );
+
+  @override
+  Future<PagedProducts> listProducts(
+    String token, {
+    int page = 1,
+    String? search,
+    String? categoryId,
+    String? manufacturerId,
+    bool? isActive,
+  }) async =>
+      PagedProducts(items: [product], page: page, pageSize: 25, totalCount: 1);
+  @override
+  Future<ProductOptions> productOptions(String token) async => ProductOptions(
+    categories: [category],
+    manufacturers: [manufacturer],
+    units: const ['Box', 'Piece'],
+  );
+  @override
+  Future<ProductDetails> productDetails(String token, String id) async =>
+      product;
+  @override
+  Future<ProductDetails> createProduct(
+    String token,
+    Map<String, dynamic> values,
+  ) async => product;
+  @override
+  Future<ProductDetails> updateProduct(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => product;
+  @override
+  Future<void> setProductActive(String token, String id, bool active) async {}
+  @override
+  Future<List<CategoryInfo>> listCategories(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async => [
+    const CategoryInfo(id: 'category-1', name: 'Tablets', isActive: true),
+  ];
+  @override
+  Future<CategoryInfo> saveCategory(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  }) async =>
+      const CategoryInfo(id: 'category-1', name: 'Tablets', isActive: true);
+  @override
+  Future<void> setCategoryActive(String token, String id, bool active) async {}
+  @override
+  Future<List<ManufacturerInfo>> listManufacturers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async => [
+    const ManufacturerInfo(
+      id: 'manufacturer-1',
+      name: 'Acme Pharma',
+      isActive: true,
+    ),
+  ];
+  @override
+  Future<ManufacturerInfo> saveManufacturer(
+    String token,
+    Map<String, dynamic> values, {
+    String? id,
+  }) async => const ManufacturerInfo(
+    id: 'manufacturer-1',
+    name: 'Acme Pharma',
+    isActive: true,
+  );
+  @override
+  Future<void> setManufacturerActive(
+    String token,
+    String id,
+    bool active,
+  ) async {}
 
   @override
   Future<CurrentUser> updateProfile(

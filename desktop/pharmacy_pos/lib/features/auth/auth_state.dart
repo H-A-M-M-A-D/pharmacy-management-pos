@@ -138,6 +138,55 @@ class AuthState extends ChangeNotifier {
   Future<void> resetPassword(String id, String password) =>
       _api.resetPassword(_requiredToken, id, password);
 
+  Future<PagedProducts> listProducts({
+    int page = 1,
+    String? search,
+    String? categoryId,
+    String? manufacturerId,
+    bool? isActive,
+  }) => _api.listProducts(
+    _requiredToken,
+    page: page,
+    search: search,
+    categoryId: categoryId,
+    manufacturerId: manufacturerId,
+    isActive: isActive,
+  );
+  Future<ProductOptions> productOptions() =>
+      _api.productOptions(_requiredToken);
+  Future<ProductDetails> productDetails(String id) =>
+      _api.productDetails(_requiredToken, id);
+  Future<ProductDetails> createProduct(Map<String, dynamic> values) =>
+      _api.createProduct(_requiredToken, values);
+  Future<ProductDetails> updateProduct(
+    String id,
+    Map<String, dynamic> values,
+  ) => _api.updateProduct(_requiredToken, id, values);
+  Future<void> setProductActive(String id, bool active) =>
+      _api.setProductActive(_requiredToken, id, active);
+  Future<List<CategoryInfo>> listCategories({String? search, bool? isActive}) =>
+      _api.listCategories(_requiredToken, search: search, isActive: isActive);
+  Future<CategoryInfo> saveCategory(
+    Map<String, dynamic> values, {
+    String? id,
+  }) => _api.saveCategory(_requiredToken, values, id: id);
+  Future<void> setCategoryActive(String id, bool active) =>
+      _api.setCategoryActive(_requiredToken, id, active);
+  Future<List<ManufacturerInfo>> listManufacturers({
+    String? search,
+    bool? isActive,
+  }) => _api.listManufacturers(
+    _requiredToken,
+    search: search,
+    isActive: isActive,
+  );
+  Future<ManufacturerInfo> saveManufacturer(
+    Map<String, dynamic> values, {
+    String? id,
+  }) => _api.saveManufacturer(_requiredToken, values, id: id);
+  Future<void> setManufacturerActive(String id, bool active) =>
+      _api.setManufacturerActive(_requiredToken, id, active);
+
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;
