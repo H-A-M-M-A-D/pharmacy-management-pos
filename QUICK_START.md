@@ -1,4 +1,4 @@
-# Quick Start - Phase 1 Foundation
+# Quick Start - Pharmacy Management System
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, and `20260901194508_CompleteProductMaster`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, and `20260901215409_CompleteBatchAndInventoryManagement`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. All three migrations are applied to both databases, and `__EFMigrationsHistory` contains all three migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All four migrations are applied to both databases, and `__EFMigrationsHistory` contains all four migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -66,6 +66,8 @@ dotnet run --project Pharmacy.Api
 Development OpenAPI JSON is mapped at `/openapi/v1.json`; health is at `/api/health`.
 
 `POST /api/auth/setup-owner` is only for an empty database and requires a strong user-selected password. The application rejects it after any user exists. `POST /api/auth/login` uses a generic failure response for invalid, inactive, or locked accounts. `GET /api/auth/me` is the authoritative current-session profile.
+
+Phase 4 inventory endpoints are under `/api/inventory`, `/api/batches`, and `/api/stock-movements`. Opening stock, adjustments, stock counts, and expired disposal are controlled stock commands; do not edit `ProductBatch.QuantityAvailable` or `Inventory.QuantityInStock` directly.
 
 ## Verify Flutter
 

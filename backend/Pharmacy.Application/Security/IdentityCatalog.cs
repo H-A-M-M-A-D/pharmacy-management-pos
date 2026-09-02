@@ -25,6 +25,13 @@ public static class PermissionCatalog
     public const string CategoriesManage = "categories.manage";
     public const string ManufacturersView = "manufacturers.view";
     public const string ManufacturersManage = "manufacturers.manage";
+    public const string InventoryView = "inventory.view";
+    public const string InventoryOpeningStock = "inventory.opening_stock";
+    public const string InventoryAdjust = "inventory.adjust";
+    public const string InventoryStockCount = "inventory.stock_count";
+    public const string InventoryExpiryManage = "inventory.expiry_manage";
+    public const string InventoryMovementsView = "inventory.movements.view";
+    public const string BatchesView = "batches.view";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -32,7 +39,9 @@ public static class PermissionCatalog
         UsersResetPassword, UsersManageOwner, RolesView, RolesManage,
         PermissionsView, ProfileView, ProfileUpdate, ProfileChangePassword, AuditView,
         ProductsView, ProductsCreate, ProductsUpdate, ProductsActivate, ProductsDeactivate,
-        CategoriesView, CategoriesManage, ManufacturersView, ManufacturersManage
+        CategoriesView, CategoriesManage, ManufacturersView, ManufacturersManage,
+        InventoryView, InventoryOpeningStock, InventoryAdjust, InventoryStockCount,
+        InventoryExpiryManage, InventoryMovementsView, BatchesView
     ];
 }
 

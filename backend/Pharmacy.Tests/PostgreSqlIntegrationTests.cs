@@ -21,14 +21,15 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            3L,
+            4L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
                 WHERE "MigrationId" IN (
                     '20260829211152_InitialCreate',
                     '20260829223012_AddUserSecurityAndManagement',
-                    '20260901194508_CompleteProductMaster');
+                    '20260901194508_CompleteProductMaster',
+                    '20260901215409_CompleteBatchAndInventoryManagement');
                 """));
 
         Assert.Equal(
@@ -259,6 +260,122 @@ public sealed class PostgreSqlIntegrationTests
         await transaction.RollbackAsync();
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase4_inventory_constraints_indexes_and_permissions_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(
+            7L,
+            await ScalarAsync<long>(connection, null, """
+                SELECT count(*) FROM "Permissions"
+                WHERE "Code" IN ('inventory.view','inventory.opening_stock','inventory.adjust','inventory.stock_count',
+                    'inventory.expiry_manage','inventory.movements.view','batches.view');
+                """));
+
+        Assert.Equal(
+            6L,
+            await ScalarAsync<long>(connection, null, """
+                SELECT count(*) FROM information_schema.table_constraints
+                WHERE table_schema = 'public'
+                  AND constraint_name IN (
+                    'CK_ProductBatches_QuantityAvailable_NonNegative',
+                    'CK_ProductBatches_QuantityReceived_NonNegative',
+                    'CK_ProductBatches_Prices_NonNegative',
+                    'CK_ProductBatches_Manufacturing_Before_Expiry',
+                    'CK_Inventory_QuantityInStock_NonNegative',
+                    'CK_Inventory_ReorderLevel_NonNegative');
+                """));
+
+        Assert.Equal(
+            7L,
+            await ScalarAsync<long>(connection, null, """
+                SELECT count(*) FROM pg_indexes
+                WHERE schemaname = 'public'
+                  AND indexname IN (
+                    'IX_ProductBatches_BranchId_ExpiryDate',
+                    'IX_ProductBatches_BranchId_ProductId',
+                    'IX_ProductBatches_ProductId_BatchNumber',
+                    'IX_ProductBatches_QuantityAvailable',
+                    'IX_Inventory_BranchId_ProductId',
+                    'IX_StockMovements_BranchId_ProductId_CreatedAt',
+                    'IX_StockMovements_ProductBatchId_CreatedAt');
+                """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase4_non_negative_projection_constraints_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_batch_available", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "ProductBatches"
+                    ("Id","ProductId","BranchId","BatchNumber","ExpiryDate","PurchasePrice","RetailPrice","QuantityReceived","QuantityAvailable","IsDisposed","CreatedAt","UpdatedAt")
+                VALUES (@id,@product,@branch,@batch,current_date + 30,1,1,0,-1,false,now(),now());
+                """, ("id", batchId), ("product", productId), ("branch", branchId), ("batch", Unique("batch"))));
+
+        await InsertBatchAsync(connection, transaction, branchId, productId, Unique("batch"), batchId);
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_inventory", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Inventory" ("Id","BranchId","ProductId","ProductBatchId","QuantityInStock","ReorderLevel","LastCountedAt","CreatedAt","UpdatedAt")
+                VALUES (@id,@branch,@product,@batch,-1,0,now(),now(),now());
+                """, ("id", Guid.NewGuid()), ("branch", branchId), ("product", productId), ("batch", batchId)));
+
+        await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase4_opening_stock_rows_keep_ledger_and_projections_consistent()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(connection, transaction, branchId, productId, Unique("batch"), batchId);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Inventory" ("Id","BranchId","ProductId","ProductBatchId","QuantityInStock","ReorderLevel","LastCountedAt","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@product,@batch,100,10,now(),now(),now());
+            """, ("id", Guid.NewGuid()), ("branch", branchId), ("product", productId), ("batch", batchId));
+        await InsertMovementAsync(connection, transaction, branchId, productId, batchId, 1, 100);
+
+        Assert.Equal(
+            100,
+            await ScalarAsync<int>(connection, transaction, """
+                SELECT batch."QuantityAvailable"
+                FROM "ProductBatches" batch
+                JOIN "Inventory" inventory ON inventory."ProductBatchId" = batch."Id"
+                JOIN (
+                    SELECT "ProductBatchId", sum("Quantity") AS quantity
+                    FROM "StockMovements"
+                    GROUP BY "ProductBatchId"
+                ) movement ON movement."ProductBatchId" = batch."Id"
+                WHERE batch."Id" = @batch
+                  AND batch."QuantityAvailable" = inventory."QuantityInStock"
+                  AND batch."QuantityAvailable" = movement.quantity;
+                """, ("batch", batchId)));
+
+        await transaction.RollbackAsync();
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
@@ -419,9 +536,14 @@ public sealed class PostgreSqlIntegrationTests
     private static async Task<T> ScalarAsync<T>(
         NpgsqlConnection connection,
         NpgsqlTransaction? transaction,
-        string sql)
+        string sql,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = new NpgsqlCommand(sql, connection, transaction);
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
         return (T)(await command.ExecuteScalarAsync())!;
     }
 

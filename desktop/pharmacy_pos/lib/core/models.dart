@@ -374,3 +374,229 @@ class ProductOptions {
     units: (json['units'] as List<dynamic>? ?? []).cast<String>(),
   );
 }
+
+class InventoryLookup {
+  const InventoryLookup({required this.id, required this.name});
+  final String id;
+  final String name;
+  factory InventoryLookup.fromJson(Map<String, dynamic> json) =>
+      InventoryLookup(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '',
+      );
+}
+
+class ProductLookup {
+  const ProductLookup({
+    required this.id,
+    required this.name,
+    required this.sku,
+    required this.isActive,
+    this.barcode,
+    this.genericName,
+  });
+  final String id, name, sku;
+  final String? barcode, genericName;
+  final bool isActive;
+  factory ProductLookup.fromJson(Map<String, dynamic> json) => ProductLookup(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    barcode: json['barcode'] as String?,
+    genericName: json['genericName'] as String?,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class InventoryOptions {
+  const InventoryOptions({
+    required this.branches,
+    required this.categories,
+    required this.manufacturers,
+    required this.products,
+    required this.suppliers,
+  });
+  final List<InventoryLookup> branches, categories, manufacturers, suppliers;
+  final List<ProductLookup> products;
+  factory InventoryOptions.fromJson(Map<String, dynamic> json) =>
+      InventoryOptions(
+        branches: _lookups(json['branches']),
+        categories: _lookups(json['categories']),
+        manufacturers: _lookups(json['manufacturers']),
+        suppliers: _lookups(json['suppliers']),
+        products: (json['products'] as List<dynamic>? ?? [])
+            .map((x) => ProductLookup.fromJson(x as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class InventoryItem {
+  const InventoryItem({
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.category,
+    required this.quantityInStock,
+    required this.reorderLevel,
+    required this.stockStatus,
+    required this.activeBatchCount,
+    required this.estimatedStockValue,
+    this.genericName,
+    this.manufacturer,
+    this.nearestExpiryDate,
+  });
+  final String productId, productName, sku, category, stockStatus;
+  final String? genericName, manufacturer;
+  final int quantityInStock, reorderLevel, activeBatchCount;
+  final DateTime? nearestExpiryDate;
+  final double estimatedStockValue;
+  factory InventoryItem.fromJson(Map<String, dynamic> json) => InventoryItem(
+    productId: json['productId'] as String,
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    genericName: json['genericName'] as String?,
+    category: json['category'] as String? ?? '',
+    manufacturer: json['manufacturer'] as String?,
+    quantityInStock: json['quantityInStock'] as int? ?? 0,
+    reorderLevel: json['reorderLevel'] as int? ?? 0,
+    stockStatus: json['stockStatus'] as String? ?? '',
+    activeBatchCount: json['activeBatchCount'] as int? ?? 0,
+    nearestExpiryDate: _date(json['nearestExpiryDate']),
+    estimatedStockValue: (json['estimatedStockValue'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class PagedInventory {
+  const PagedInventory({required this.items, required this.totalCount});
+  final List<InventoryItem> items;
+  final int totalCount;
+  factory PagedInventory.fromJson(Map<String, dynamic> json) => PagedInventory(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => InventoryItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class BatchItem {
+  const BatchItem({
+    required this.batchId,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.batchNumber,
+    required this.branchId,
+    required this.branchName,
+    required this.expiryDate,
+    required this.quantityAvailable,
+    required this.purchasePrice,
+    required this.retailPrice,
+    required this.estimatedStockValue,
+    required this.state,
+  });
+  final String batchId,
+      productId,
+      productName,
+      sku,
+      batchNumber,
+      branchId,
+      branchName,
+      state;
+  final DateTime expiryDate;
+  final int quantityAvailable;
+  final double purchasePrice, retailPrice, estimatedStockValue;
+  factory BatchItem.fromJson(Map<String, dynamic> json) => BatchItem(
+    batchId: json['batchId'] as String,
+    productId: json['productId'] as String,
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    batchNumber: json['batchNumber'] as String? ?? '',
+    branchId: json['branchId'] as String,
+    branchName: json['branchName'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    quantityAvailable: json['quantityAvailable'] as int? ?? 0,
+    purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
+    retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
+    estimatedStockValue: (json['estimatedStockValue'] as num?)?.toDouble() ?? 0,
+    state: json['state'] as String? ?? '',
+  );
+}
+
+class PagedBatches {
+  const PagedBatches({required this.items, required this.totalCount});
+  final List<BatchItem> items;
+  final int totalCount;
+  factory PagedBatches.fromJson(Map<String, dynamic> json) => PagedBatches(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => BatchItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class ExpiryItem {
+  const ExpiryItem({
+    required this.batchId,
+    required this.productName,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.daysRemaining,
+    required this.quantityAvailable,
+    required this.estimatedStockValue,
+  });
+  final String batchId, productName, batchNumber;
+  final DateTime expiryDate;
+  final int daysRemaining, quantityAvailable;
+  final double estimatedStockValue;
+  factory ExpiryItem.fromJson(Map<String, dynamic> json) => ExpiryItem(
+    batchId: json['batchId'] as String,
+    productName: json['productName'] as String? ?? '',
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    daysRemaining: json['daysRemaining'] as int? ?? 0,
+    quantityAvailable: json['quantityAvailable'] as int? ?? 0,
+    estimatedStockValue: (json['estimatedStockValue'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class StockMovementItem {
+  const StockMovementItem({
+    required this.createdAt,
+    required this.productName,
+    required this.batchNumber,
+    required this.branchName,
+    required this.movementType,
+    required this.quantity,
+  });
+  final DateTime createdAt;
+  final String productName, batchNumber, branchName, movementType;
+  final int quantity;
+  factory StockMovementItem.fromJson(Map<String, dynamic> json) =>
+      StockMovementItem(
+        createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
+        productName: json['productName'] as String? ?? '',
+        batchNumber: json['batchNumber'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        movementType: json['movementType'] as String? ?? '',
+        quantity: json['quantity'] as int? ?? 0,
+      );
+}
+
+class PagedMovements {
+  const PagedMovements({required this.items, required this.totalCount});
+  final List<StockMovementItem> items;
+  final int totalCount;
+  factory PagedMovements.fromJson(Map<String, dynamic> json) => PagedMovements(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => StockMovementItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+List<InventoryLookup> _lookups(dynamic json) => (json as List<dynamic>? ?? [])
+    .map((x) => InventoryLookup.fromJson(x as Map<String, dynamic>))
+    .toList();
+
+DateTime? _date(dynamic value) =>
+    value == null ? null : DateTime.parse(value as String);

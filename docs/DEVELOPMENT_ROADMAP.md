@@ -147,64 +147,39 @@ The project is structured in 18 distinct phases, prioritized by business value a
 
 ---
 
-## Phase 4: Batch & Inventory Management
+## Phase 4: Batch & Inventory Management (COMPLETED)
 
 **Duration**: 1.5 sprints
 **Depends On**: Phase 3
 
-### Tasks
-1. **ProductBatch API**
-   - GET /api/batches (by product, by branch)
-   - GET /api/batches/{id}
-   - POST /api/batches (create batch)
-   - PUT /api/batches/{id} (update)
-   - GET /api/products/{id}/batches (all batches for product)
-
-2. **Inventory API**
-   - GET /api/inventory (by branch, by product)
-   - GET /api/inventory/low-stock (reorder alerts)
-   - GET /api/inventory/{batchId}
-   - Inventory summary by branch
-
-3. **Stock Movement Tracking**
-   - POST /api/stock-movements (create movement)
-   - GET /api/stock-movements (history)
-   - GET /api/stock-movements/{id}
-   - Filter by date range, movement type, product
-
-4. **Inventory Calculation Service**
-   - Calculate current quantity from StockMovement history
-   - Batch-level quantity tracking
-   - Branch-level totals
-   - Low stock detection
-
-5. **FEFO Logic (Foundation Only)**
-   - Service to get eligible batches for sale
-   - Batch selection logic (non-expired, soonest-to-expire)
-   - Integration ready (not used in POS yet)
-   - Unit tests for FEFO logic
-
-6. **Flutter UI**
-   - Inventory list by branch
-   - Batch view for product
-   - Low stock alerts
-   - Stock movement history
-   - Batch expiry tracking UI
-
-7. **Tests**
-   - Multiple batches allowed for one product
-   - Expired batches excluded from FEFO
-   - FEFO sorts by expiry date
-   - Stock movement calculations
-   - Inventory sync from movements
+### Completed
+- [x] Batch list/read model with branch/product filters and derived batch state
+- [x] Inventory API with paged branch/product stock, stock status, active batches, nearest expiry, and operational valuation
+- [x] Controlled opening stock command
+- [x] Controlled stock increase/decrease adjustment command
+- [x] Controlled damaged-stock removal through the adjustment flow
+- [x] Physical stock count reconciliation using variance movements
+- [x] Expiry view and expired stock disposal command
+- [x] Read-only stock movement history
+- [x] FEFO preview that does not mutate stock
+- [x] Inventory integrity check comparing ledger, batch projection, and inventory projection
+- [x] Inventory permissions seeded idempotently
+- [x] PostgreSQL non-negative quantity constraints and query indexes
+- [x] Flutter inventory workspace with Stock, Batches, Expiry, and Movements tabs
+- [x] Flutter opening stock, adjustment, and stock count dialogs
+- [x] Backend unit tests, PostgreSQL integration tests, and Flutter widget tests
 
 ### Deliverables
-- Product batch CRUD API
-- Inventory management API
-- Stock movement audit trail
-- FEFO selection logic
+- Batch and inventory management API
+- Controlled stock mutation service
+- Read-only stock movement ledger API
+- FEFO preview for future POS integration
 - Flutter inventory screens
-- Complete batch & inventory tests
+- Phase 4 migration: `20260901215409_CompleteBatchAndInventoryManagement`
+- Complete batch and inventory tests
+
+### Boundary
+- Purchase Orders, purchase receiving, Supplier Management, POS, sales, transfers, and reports remain future phases.
 
 ---
 
@@ -811,8 +786,15 @@ The project is structured in 18 distinct phases, prioritized by business value a
 - [x] Flutter Product Master screens functional
 - [x] Backend, PostgreSQL integration, and Flutter widget tests passing
 
-### Phase 4+
-Similar criteria for each phase...
+### Phase 4
+- [x] Opening stock, adjustment, stock count, expiry disposal, and FEFO preview use controlled backend workflows
+- [x] Stock movements remain immutable transaction history
+- [x] Batch and inventory projections are protected by application logic and PostgreSQL constraints
+- [x] Flutter inventory screens are permission-aware
+- [x] Backend, PostgreSQL integration, and Flutter widget tests passing
+
+### Phase 5+
+Similar criteria for each remaining phase...
 
 ---
 

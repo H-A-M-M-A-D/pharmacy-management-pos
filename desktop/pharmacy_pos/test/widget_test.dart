@@ -175,6 +175,92 @@ void main() {
     await tester.pump();
     expect(find.text('Name is required'), findsOneWidget);
   });
+
+  testWidgets('inventory navigation follows inventory.view permission', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Inventory'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'inventory.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Inventory'), findsOneWidget);
+  });
+
+  testWidgets('inventory stock list renders status labels', (tester) async {
+    final fixture = TestFixture(permissions: {'inventory.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    expect(find.text('Panadol Extra'), findsOneWidget);
+    expect(find.text('Low Stock'), findsOneWidget);
+    expect(find.text('PKR 80.00'), findsOneWidget);
+  });
+
+  testWidgets('opening stock form validates required fields', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'inventory.view', 'inventory.opening_stock'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('opening_stock')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_opening_stock')));
+    await tester.pump();
+    expect(find.text('Branch is required'), findsOneWidget);
+    expect(find.text('Product is required'), findsOneWidget);
+    expect(find.text('Enter a positive quantity'), findsOneWidget);
+  });
+
+  testWidgets('adjustment dialog displays insufficient stock error', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'inventory.view', 'inventory.adjust'},
+      adjustmentError: true,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adjust_stock')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('save_adjustment_quantity')),
+      '99',
+    );
+    await tester.enterText(find.byType(TextFormField).last, 'count');
+    await tester.tap(find.byKey(const Key('save_adjustment')));
+    await tester.pumpAndSettle();
+    expect(find.text('Insufficient stock in selected batch.'), findsOneWidget);
+  });
+
+  testWidgets('stock movements are read only', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'inventory.view', 'inventory.movements.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Movements'));
+    await tester.pumpAndSettle();
+    expect(find.text('OpeningStock'), findsOneWidget);
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -192,6 +278,7 @@ class TestFixture {
     this.loginError = false,
     this.mustChangePassword = false,
     this.permissions = const {},
+    this.adjustmentError = false,
   }) {
     api = FakeApi(
       user: CurrentUser(
@@ -204,6 +291,7 @@ class TestFixture {
         mustChangePassword: mustChangePassword,
       ),
       loginError: loginError,
+      adjustmentError: adjustmentError,
     );
     state = AuthState(api, MemoryTokenStore());
   }
@@ -211,6 +299,7 @@ class TestFixture {
   final bool loginError;
   final bool mustChangePassword;
   final Set<String> permissions;
+  final bool adjustmentError;
   final branch = const BranchInfo(
     id: 'branch-1',
     code: 'HQ',
@@ -224,10 +313,15 @@ class TestFixture {
 }
 
 class FakeApi implements PharmacyApi {
-  FakeApi({required this.user, required this.loginError});
+  FakeApi({
+    required this.user,
+    required this.loginError,
+    this.adjustmentError = false,
+  });
 
   CurrentUser user;
   final bool loginError;
+  final bool adjustmentError;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -423,6 +517,118 @@ class FakeApi implements PharmacyApi {
     String id,
     bool active,
   ) async {}
+
+  InventoryItem get stock => InventoryItem(
+    productId: 'product-1',
+    productName: 'Panadol Extra',
+    sku: 'MED-001',
+    category: 'Tablets',
+    quantityInStock: 10,
+    reorderLevel: 10,
+    stockStatus: 'LowStock',
+    activeBatchCount: 1,
+    nearestExpiryDate: DateTime(2026, 10, 1),
+    estimatedStockValue: 80,
+    genericName: 'Paracetamol',
+    manufacturer: 'Acme Pharma',
+  );
+
+  BatchItem get batch => BatchItem(
+    batchId: 'batch-1',
+    productId: 'product-1',
+    productName: 'Panadol Extra',
+    sku: 'MED-001',
+    batchNumber: 'B-001',
+    branchId: user.branch.id,
+    branchName: user.branch.name,
+    expiryDate: DateTime(2026, 10, 1),
+    quantityAvailable: 10,
+    purchasePrice: 8,
+    retailPrice: 12,
+    estimatedStockValue: 80,
+    state: 'NearExpiry',
+  );
+
+  @override
+  Future<PagedInventory> listInventory(String token, {String? search}) async =>
+      PagedInventory(items: [stock], totalCount: 1);
+
+  @override
+  Future<InventoryOptions> inventoryOptions(
+    String token, {
+    String? productSearch,
+  }) async => InventoryOptions(
+    branches: [InventoryLookup(id: user.branch.id, name: user.branch.name)],
+    categories: const [InventoryLookup(id: 'category-1', name: 'Tablets')],
+    manufacturers: const [
+      InventoryLookup(id: 'manufacturer-1', name: 'Acme Pharma'),
+    ],
+    products: const [
+      ProductLookup(
+        id: 'product-1',
+        name: 'Panadol Extra',
+        sku: 'MED-001',
+        isActive: true,
+      ),
+    ],
+    suppliers: const [],
+  );
+
+  @override
+  Future<void> addOpeningStock(
+    String token,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<void> adjustStock(
+    String token,
+    Map<String, dynamic> values, {
+    required bool increase,
+  }) async {
+    if (adjustmentError) {
+      throw const ApiException('Insufficient stock in selected batch.');
+    }
+  }
+
+  @override
+  Future<void> reconcileStockCount(
+    String token,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<List<ExpiryItem>> listExpiry(String token, {int? days}) async => [
+    ExpiryItem(
+      batchId: 'batch-1',
+      productName: 'Panadol Extra',
+      batchNumber: 'B-001',
+      expiryDate: DateTime(2026, 10, 1),
+      daysRemaining: 29,
+      quantityAvailable: 10,
+      estimatedStockValue: 80,
+    ),
+  ];
+
+  @override
+  Future<PagedBatches> listBatches(String token, {String? search}) async =>
+      PagedBatches(items: [batch], totalCount: 1);
+
+  @override
+  Future<PagedMovements> listMovements(String token, {String? search}) async =>
+      PagedMovements(
+        items: [
+          StockMovementItem(
+            createdAt: DateTime(2026, 9, 1, 10),
+            productName: 'Panadol Extra',
+            batchNumber: 'B-001',
+            branchName: user.branch.name,
+            movementType: 'OpeningStock',
+            quantity: 10,
+          ),
+        ],
+        totalCount: 1,
+      );
 
   @override
   Future<CurrentUser> updateProfile(

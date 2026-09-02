@@ -11,7 +11,7 @@ Application -> Domain
 Domain -> no project
 ```
 
-Application owns auth, Product Master, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
+Application owns auth, Product Master, inventory use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
 
 ## Authentication and Authorization
 
@@ -35,6 +35,20 @@ Product Master manages global `Product`, `ProductCategory`, and `Manufacturer` c
 
 Products, categories, and manufacturers are activated/deactivated rather than deleted. Product list queries use SQL filtering, projection, deterministic sorting, pagination, and `AsNoTracking`. Product Master changes produce focused audit events.
 
+## Batch and Inventory Management
+
+Phase 4 inventory operations are exposed through `IInventoryService`. Controllers do not directly mutate quantity columns. The service validates branch access, product/batch state, expiry rules, quantities, reasons, and permissions before asking Infrastructure to run the stock change in a serializable PostgreSQL transaction.
+
+Opening stock is the controlled initialization/import workflow. It creates a batch when needed, reuses an existing valid batch for incremental initialization entries, records a positive `OpeningStock` movement, and updates `ProductBatch.QuantityAvailable` plus the matching `Inventory.QuantityInStock` projection. Expired or inactive products are rejected for sellable opening stock. Product catalog prices are not overwritten by batch pricing.
+
+Stock adjustments accept positive user-entered quantities only. The backend derives ledger signs: increases create `AdjustmentIncrease`, decreases create `AdjustmentDecrease`, and damaged removal uses `Damaged`. Decreases cannot take batch or inventory projections below zero. Stock count reconciliation compares physical quantity to the current batch projection and records only the variance; zero variance records audit but no movement.
+
+Expired disposal creates a negative `Expired` stock movement and reduces projections. It requires the batch to be expired by the explicit business date policy and never silently removes stock. Supplier return workflow remains Phase 5/6 work, not Phase 4.
+
+Inventory listing groups batch-level projections into branch/product operational totals and reports status, active batch count, nearest expiry, and estimated stock value. Low stock is `QuantityInStock > 0 && QuantityInStock <= ReorderLevel`; out of stock is `QuantityInStock <= 0`; healthy is above reorder level. Inventory value is an operational cost view: available quantity multiplied by batch purchase price. It is not accounting journal valuation.
+
+All stock quantities currently operate in the product's configured inventory unit. Structured box/strip/tablet/bottle conversion is intentionally deferred.
+
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -57,7 +71,7 @@ Positive quantities: `OpeningStock`, `Purchase`, `SaleReturn`, `TransferIn`, `Ad
 
 Negative quantities: `Sale`, `PurchaseReturn`, `TransferOut`, `AdjustmentDecrease`, `Expired`, `Damaged`.
 
-Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Zero is invalid. Phase 1 does not include a transaction workflow that creates movements and updates projections; later use cases must perform all three changes atomically.
+Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Zero is invalid. Phase 4 adds the controlled transaction workflow that creates movements and updates projections atomically; `PharmacyDbContext` still rejects projection-only quantity edits.
 
 ## Entity and Table Truth
 
@@ -98,13 +112,15 @@ Audit data:
 - Category and manufacturer normalized names are unique.
 - Product check constraints require positive pack size, non-negative prices/reorder level, and a discount from 0 through 100.
 - Batch uniqueness is `(BranchId, ProductId, BatchNumber)`; a batch number is not globally unique.
+- Batch checks require non-negative received/available quantities, non-negative prices, and manufacturing date not after expiry when present.
 - Inventory uniqueness is `(BranchId, ProductId, ProductBatchId)`.
+- Inventory checks require non-negative quantity and reorder level.
 - Role/permission, usernames, emails, branch codes, and permission codes have appropriate unique indexes.
 - FEFO, branch, active-state, audit, and stock-ledger query paths have supporting indexes.
 - Foreign keys and delete behaviors are defined in `PharmacyDbContext` and generated into the migration.
 - Audit old/new value columns are configured as PostgreSQL `jsonb`.
 
-These statements are verified in the EF model, migration, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, and the stock sign check constraint.
+These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, and ledger/projection consistency.
 
 ## Dates, Time, Money, and Quantity
 
@@ -121,21 +137,22 @@ These statements are verified in the EF model, migration, and real PostgreSQL 17
 - Migration: `20260829211152_InitialCreate`
 - Migration: `20260829223012_AddUserSecurityAndManagement`
 - Migration: `20260901194508_CompleteProductMaster`
+- Migration: `20260901215409_CompleteBatchAndInventoryManagement`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1, Phase 2, and Phase 3 migrations recorded with product version `10.0.11`
+- EF history: Phase 1, Phase 2, Phase 3, and Phase 4 migrations recorded with product version `10.0.11`
 - Real schema: 13 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, and manufacturers screens. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, and inventory screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Phase 1 Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No POS, purchases, inventory UI, transfers, reports, unit conversion, or background expiry processing.
+- No POS, purchases, supplier management workflow, sales, transfers, reports, unit conversion, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.

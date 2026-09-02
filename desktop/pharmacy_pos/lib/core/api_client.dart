@@ -87,6 +87,21 @@ abstract interface class PharmacyApi {
     String? id,
   });
   Future<void> setManufacturerActive(String token, String id, bool active);
+  Future<PagedInventory> listInventory(String token, {String? search});
+  Future<InventoryOptions> inventoryOptions(
+    String token, {
+    String? productSearch,
+  });
+  Future<void> addOpeningStock(String token, Map<String, dynamic> values);
+  Future<void> adjustStock(
+    String token,
+    Map<String, dynamic> values, {
+    required bool increase,
+  });
+  Future<void> reconcileStockCount(String token, Map<String, dynamic> values);
+  Future<List<ExpiryItem>> listExpiry(String token, {int? days});
+  Future<PagedBatches> listBatches(String token, {String? search});
+  Future<PagedMovements> listMovements(String token, {String? search});
   void close();
 }
 
@@ -365,11 +380,117 @@ class ApiClient implements PharmacyApi {
     '/api/manufacturers/$id/${active ? 'activate' : 'deactivate'}',
     token,
   );
+
+  @override
+  Future<PagedInventory> listInventory(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedInventory.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/inventory', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<InventoryOptions> inventoryOptions(
+    String token, {
+    String? productSearch,
+  }) async {
+    final q = <String, String>{};
+    if (productSearch?.trim().isNotEmpty == true) {
+      q['productSearch'] = productSearch!.trim();
+    }
+    return InventoryOptions.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/inventory/options', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<void> addOpeningStock(
+    String token,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/inventory/opening-stock',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<void> adjustStock(
+    String token,
+    Map<String, dynamic> values, {
+    required bool increase,
+  }) async => _request(
+    'POST',
+    '/api/inventory/adjust/${increase ? 'increase' : 'decrease'}',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<void> reconcileStockCount(
+    String token,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/inventory/stock-count',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<List<ExpiryItem>> listExpiry(String token, {int? days}) async {
+    final q = <String, String>{};
+    if (days != null) q['days'] = '$days';
+    final data = await _request(
+      'GET',
+      Uri(path: '/api/inventory/expiry', queryParameters: q).toString(),
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => ExpiryItem.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<PagedBatches> listBatches(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedBatches.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/batches', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PagedMovements> listMovements(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedMovements.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/stock-movements', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
   Future<void> _void(String method, String path, String token) async {
     await _request(method, path, token: token, expectBody: false);
   }
 
-  Future<Map<String, dynamic>?> _request(
+  Future<dynamic> _request(
     String method,
     String path, {
     String? token,
@@ -403,7 +524,7 @@ class ApiClient implements PharmacyApi {
         throw ApiException(message, statusCode: response.statusCode);
       }
       if (!expectBody || responseBody.isEmpty) return null;
-      return jsonDecode(responseBody) as Map<String, dynamic>;
+      return jsonDecode(responseBody);
     } on ApiException {
       rethrow;
     } on TimeoutException {

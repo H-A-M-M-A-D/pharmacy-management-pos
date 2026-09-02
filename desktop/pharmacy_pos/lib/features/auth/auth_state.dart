@@ -187,6 +187,25 @@ class AuthState extends ChangeNotifier {
   Future<void> setManufacturerActive(String id, bool active) =>
       _api.setManufacturerActive(_requiredToken, id, active);
 
+  Future<PagedInventory> listInventory({String? search}) =>
+      _api.listInventory(_requiredToken, search: search);
+  Future<InventoryOptions> inventoryOptions({String? productSearch}) =>
+      _api.inventoryOptions(_requiredToken, productSearch: productSearch);
+  Future<void> addOpeningStock(Map<String, dynamic> values) =>
+      _api.addOpeningStock(_requiredToken, values);
+  Future<void> adjustStock(
+    Map<String, dynamic> values, {
+    required bool increase,
+  }) => _api.adjustStock(_requiredToken, values, increase: increase);
+  Future<void> reconcileStockCount(Map<String, dynamic> values) =>
+      _api.reconcileStockCount(_requiredToken, values);
+  Future<List<ExpiryItem>> listExpiry({int? days}) =>
+      _api.listExpiry(_requiredToken, days: days);
+  Future<PagedBatches> listBatches({String? search}) =>
+      _api.listBatches(_requiredToken, search: search);
+  Future<PagedMovements> listMovements({String? search}) =>
+      _api.listMovements(_requiredToken, search: search);
+
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;

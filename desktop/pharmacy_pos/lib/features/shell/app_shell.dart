@@ -4,6 +4,7 @@ import '../auth/auth_state.dart';
 import '../profile/profile_screen.dart';
 import '../catalog/products_screen.dart';
 import '../catalog/catalog_masters_screen.dart';
+import '../inventory/inventory_screen.dart';
 import '../users/users_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -24,6 +25,7 @@ class _AppShellState extends State<AppShell> {
     final canViewProducts = widget.authState.can('products.view');
     final canViewCategories = widget.authState.can('categories.view');
     final canViewManufacturers = widget.authState.can('manufacturers.view');
+    final canViewInventory = widget.authState.can('inventory.view');
     final destinations = <NavigationRailDestination>[
       const NavigationRailDestination(
         icon: Icon(Icons.dashboard_outlined),
@@ -54,6 +56,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.factory),
           label: Text('Manufacturers'),
         ),
+      if (canViewInventory)
+        const NavigationRailDestination(
+          icon: Icon(Icons.inventory_2_outlined),
+          selectedIcon: Icon(Icons.inventory_2),
+          label: Text('Inventory'),
+        ),
       const NavigationRailDestination(
         icon: Icon(Icons.account_circle_outlined),
         selectedIcon: Icon(Icons.account_circle),
@@ -74,6 +82,7 @@ class _AppShellState extends State<AppShell> {
           authState: widget.authState,
           mode: CatalogMasterMode.manufacturers,
         ),
+      if (canViewInventory) InventoryScreen(authState: widget.authState),
       ProfileScreen(authState: widget.authState),
     ];
     if (_selected >= pages.length) _selected = 0;

@@ -324,8 +324,18 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.BatchNumber }).IsUnique();
         entity.HasIndex(e => e.ExpiryDate);
+        entity.HasIndex(e => new { e.BranchId, e.ExpiryDate });
         entity.HasIndex(e => new { e.BranchId, e.ProductId });
+        entity.HasIndex(e => new { e.ProductId, e.BatchNumber });
         entity.HasIndex(e => e.IsDisposed);
+        entity.HasIndex(e => e.QuantityAvailable);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ProductBatches_QuantityAvailable_NonNegative", "\"QuantityAvailable\" >= 0");
+            table.HasCheckConstraint("CK_ProductBatches_QuantityReceived_NonNegative", "\"QuantityReceived\" >= 0");
+            table.HasCheckConstraint("CK_ProductBatches_Prices_NonNegative", "\"PurchasePrice\" >= 0 AND \"RetailPrice\" >= 0");
+            table.HasCheckConstraint("CK_ProductBatches_Manufacturing_Before_Expiry", "\"ManufacturingDate\" IS NULL OR \"ManufacturingDate\" <= \"ExpiryDate\"");
+        });
 
         entity.HasOne(e => e.Product)
             .WithMany(p => p.ProductBatches)
@@ -352,7 +362,13 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.ReorderLevel);
 
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.ProductBatchId }).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.ProductId });
         entity.HasIndex(e => new { e.BranchId, e.ReorderLevel }).HasFilter("\"QuantityInStock\" < \"ReorderLevel\"");
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Inventory_QuantityInStock_NonNegative", "\"QuantityInStock\" >= 0");
+            table.HasCheckConstraint("CK_Inventory_ReorderLevel_NonNegative", "\"ReorderLevel\" >= 0");
+        });
 
         entity.HasOne(e => e.Branch)
             .WithMany(b => b.Inventory)
@@ -382,6 +398,9 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.ProductBatchId });
         entity.HasIndex(e => new { e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.BranchId, e.ProductId, e.CreatedAt });
+        entity.HasIndex(e => new { e.ProductBatchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.MovementType, e.CreatedAt });
         entity.HasIndex(e => e.MovementType);
         entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId }).IncludeProperties(e => e.Quantity);
         entity.ToTable(table => table.HasCheckConstraint(
