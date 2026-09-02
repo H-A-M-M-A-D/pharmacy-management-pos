@@ -149,6 +149,20 @@ abstract interface class PharmacyApi {
     String token,
     Map<String, dynamic> values,
   );
+  Future<List<PosProduct>> searchPosProducts(String token, {String? query});
+  Future<SaleDetails> holdSale(String token, Map<String, dynamic> values);
+  Future<SaleDetails> postSale(String token, Map<String, dynamic> values);
+  Future<SaleDetails> postHeldSale(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> cancelHeldSale(String token, String id);
+  Future<PagedSales> listHeldSales(String token, {String? search});
+  Future<PagedSales> listSales(String token, {String? search});
+  Future<SaleDetails> saleDetails(String token, String id);
+  Future<SaleDetails> saleReceipt(String token, String id);
+  Future<SaleDetails> reprintSaleReceipt(String token, String id);
   void close();
 }
 
@@ -704,6 +718,100 @@ class ApiClient implements PharmacyApi {
     ))!,
   );
 
+  @override
+  Future<List<PosProduct>> searchPosProducts(
+    String token, {
+    String? query,
+  }) async {
+    final q = <String, String>{'take': '25'};
+    if (query?.trim().isNotEmpty == true) q['q'] = query!.trim();
+    final data = await _request(
+      'GET',
+      Uri(path: '/api/pos/products/search', queryParameters: q).toString(),
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => PosProduct.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<SaleDetails> holdSale(
+    String token,
+    Map<String, dynamic> values,
+  ) async => SaleDetails.fromJson(
+    (await _request('POST', '/api/sales/hold', token: token, body: values))!,
+  );
+
+  @override
+  Future<SaleDetails> postSale(
+    String token,
+    Map<String, dynamic> values,
+  ) async => SaleDetails.fromJson(
+    (await _request('POST', '/api/sales/post', token: token, body: values))!,
+  );
+
+  @override
+  Future<SaleDetails> postHeldSale(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => SaleDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/sales/held/$id/post',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<void> cancelHeldSale(String token, String id) async =>
+      _void('POST', '/api/sales/held/$id/cancel', token);
+
+  @override
+  Future<PagedSales> listHeldSales(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedSales.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/sales/held', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PagedSales> listSales(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedSales.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/sales', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<SaleDetails> saleDetails(String token, String id) async =>
+      SaleDetails.fromJson(
+        (await _request('GET', '/api/sales/$id', token: token))!,
+      );
+
+  @override
+  Future<SaleDetails> saleReceipt(String token, String id) async =>
+      SaleDetails.fromJson(
+        (await _request('GET', '/api/sales/$id/receipt', token: token))!,
+      );
+
+  @override
+  Future<SaleDetails> reprintSaleReceipt(String token, String id) async =>
+      SaleDetails.fromJson(
+        (await _request('POST', '/api/sales/$id/reprint', token: token))!,
+      );
   Future<void> _void(String method, String path, String token) async {
     await _request(method, path, token: token, expectBody: false);
   }

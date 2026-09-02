@@ -10,6 +10,7 @@ using Pharmacy.Application.Services.Auth;
 using Pharmacy.Application.Services.Catalog;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Application.Services.Purchasing;
+using Pharmacy.Application.Services.Sales;
 using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Application.Services.Users;
 using Pharmacy.Infrastructure.Data;
@@ -51,6 +52,8 @@ builder.Services.AddScoped<ISupplierRepository, SupplierRepository>();
 builder.Services.AddScoped<ISupplierService, SupplierService>();
 builder.Services.AddScoped<IPurchasingRepository, PurchasingRepository>();
 builder.Services.AddScoped<IPurchasingService, PurchasingService>();
+builder.Services.AddScoped<ISalesRepository, SalesRepository>();
+builder.Services.AddScoped<ISalesService, SalesService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key not configured. Set Jwt__Key or a user secret.");

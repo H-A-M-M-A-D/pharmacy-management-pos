@@ -456,6 +456,69 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('sales navigation follows sales permissions', (tester) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Sales'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'sales.view', 'sales.create'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Sales'), findsOneWidget);
+  });
+
+  testWidgets('pos search adds product and checkout shows receipt', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'sales.view', 'sales.create'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('Total PKR 12.00'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('checkout_sale')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_payment')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('receipt_preview')), findsOneWidget);
+    expect(find.textContaining('INV-2026-000001'), findsOneWidget);
+  });
+
+  testWidgets('sales discount input follows sales.discount permission', (
+    tester,
+  ) async {
+    final denied = TestFixture(permissions: {'sales.view', 'sales.create'});
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('line_discount')), findsNothing);
+
+    final allowed = TestFixture(
+      permissions: {'sales.view', 'sales.create', 'sales.discount'},
+    );
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('line_discount')), findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -622,6 +685,136 @@ class FakeApi implements PharmacyApi {
   @override
   Future<void> resetPassword(String token, String id, String password) async {}
 
+  PosProduct get posProduct => const PosProduct(
+    productId: 'product-1',
+    name: 'Panadol Extra',
+    sku: 'MED-001',
+    barcode: '12345',
+    genericName: 'Paracetamol',
+    unit: 'Tablet',
+    availableQuantity: 10,
+    indicativeRetailPrice: 12,
+    maximumDiscountPercent: 5,
+    isActive: true,
+  );
+
+  SaleDetails get sale => SaleDetails(
+    id: 'sale-1',
+    invoiceNumber: 'INV-2026-000001',
+    status: 'Posted',
+    createdAt: DateTime(2026, 9, 3, 10),
+    postedAtUtc: DateTime(2026, 9, 3, 10),
+    branchName: user.branch.name,
+    cashierName: user.fullName,
+    subtotal: 12,
+    discountTotal: 0,
+    taxTotal: 0,
+    netTotal: 12,
+    amountPaid: 12,
+    changeGiven: 0,
+    items: [
+      SaleItemDetail(
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        requestedQuantity: 1,
+        discountPercent: 0,
+        grossAmount: 12,
+        discountAmount: 0,
+        netAmount: 12,
+        allocations: [
+          SaleAllocation(
+            batchNumber: 'B-001',
+            expiryDate: DateTime(2027, 9, 3),
+            quantity: 1,
+            unitRetailPriceSnapshot: 12,
+            unitSalePriceSnapshot: 12,
+            netAmount: 12,
+          ),
+        ],
+      ),
+    ],
+    payments: const [
+      SalePaymentDetail(method: 'Cash', amountApplied: 12, tenderedAmount: 12),
+    ],
+  );
+
+  @override
+  Future<List<PosProduct>> searchPosProducts(
+    String token, {
+    String? query,
+  }) async => [posProduct];
+
+  @override
+  Future<SaleDetails> holdSale(
+    String token,
+    Map<String, dynamic> values,
+  ) async => SaleDetails(
+    id: 'hold-1',
+    holdNumber: 'HOLD-2026-000001',
+    status: 'Held',
+    createdAt: DateTime(2026, 9, 3, 10),
+    branchName: user.branch.name,
+    cashierName: user.fullName,
+    subtotal: 0,
+    discountTotal: 0,
+    taxTotal: 0,
+    netTotal: 0,
+    amountPaid: 0,
+    changeGiven: 0,
+    items: const [],
+    payments: const [],
+  );
+
+  @override
+  Future<SaleDetails> postSale(
+    String token,
+    Map<String, dynamic> values,
+  ) async => sale;
+
+  @override
+  Future<SaleDetails> postHeldSale(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => sale;
+
+  @override
+  Future<void> cancelHeldSale(String token, String id) async {}
+
+  @override
+  Future<PagedSales> listHeldSales(String token, {String? search}) async =>
+      const PagedSales(items: [], totalCount: 0);
+
+  @override
+  Future<PagedSales> listSales(String token, {String? search}) async =>
+      PagedSales(
+        items: [
+          SaleListItem(
+            id: 'sale-1',
+            invoiceNumber: 'INV-2026-000001',
+            status: 'Posted',
+            createdAt: DateTime(2026, 9, 3, 10),
+            postedAtUtc: DateTime(2026, 9, 3, 10),
+            branchName: user.branch.name,
+            cashierName: user.fullName,
+            itemCount: 1,
+            netTotal: 12,
+            amountPaid: 12,
+            changeGiven: 0,
+            paymentSummary: 'Cash:12',
+          ),
+        ],
+        totalCount: 1,
+      );
+
+  @override
+  Future<SaleDetails> saleDetails(String token, String id) async => sale;
+
+  @override
+  Future<SaleDetails> saleReceipt(String token, String id) async => sale;
+
+  @override
+  Future<SaleDetails> reprintSaleReceipt(String token, String id) async => sale;
   CatalogLookup get category =>
       const CatalogLookup(id: 'category-1', name: 'Tablets', isActive: true);
   CatalogLookup get manufacturer => const CatalogLookup(

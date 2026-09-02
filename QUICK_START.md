@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, `20260902051500_CompleteSupplierManagement`, and `20260902055022_CompletePurchasingAndGoodsReceiving`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, `20260902051500_CompleteSupplierManagement`, `20260902055022_CompletePurchasingAndGoodsReceiving`, and `20260902114037_CompletePosAndSales`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. All six migrations are applied to both databases, and `__EFMigrationsHistory` contains all six migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All seven migrations are applied to both databases, and `__EFMigrationsHistory` contains all seven migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -72,6 +72,8 @@ Phase 4 inventory endpoints are under `/api/inventory`, `/api/batches`, and `/ap
 Phase 5 supplier endpoints are under `/api/suppliers`. Supplier master records are global, supplier ledger entries are branch-scoped, and payments/adjustments are controlled financial ledger commands.
 
 Phase 6 purchasing endpoints are under `/api/purchase-orders`, `/api/goods-receipts`, `/api/purchases`, `/api/purchases/direct`, and `/api/purchasing/options`. Purchase orders do not affect stock until goods are received; posted goods receipts update batches, inventory projections, stock movements, and supplier payables atomically.
+
+Phase 7 POS and sales endpoints are under `/api/pos/products/search` and `/api/sales`. Posted sales allocate batches through FEFO, update stock projections, create negative sale stock movements, persist batch allocation price snapshots, and support held sales, split payments, cash tender/change, sales history, receipt preview, and permission-gated receipt reprint.
 
 ## Verify Flutter
 

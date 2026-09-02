@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            6L,
+            7L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -31,11 +31,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260901194508_CompleteProductMaster',
                     '20260901215409_CompleteBatchAndInventoryManagement',
                     '20260902051500_CompleteSupplierManagement',
-                    '20260902055022_CompletePurchasingAndGoodsReceiving');
+                    '20260902055022_CompletePurchasingAndGoodsReceiving',
+                    '20260902114037_CompletePosAndSales');
                 """));
 
         Assert.Equal(
-            18L,
+            22L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -59,7 +60,10 @@ public sealed class PostgreSqlIntegrationTests
                   ('GoodsReceiptItems', 'ExpiryDate'),
                   ('GoodsReceiptItems', 'DiscountPercent'),
                   ('GoodsReceiptItems', 'NetLineAmount'),
-                  ('StockMovements', 'CreatedAt'));
+                  ('StockMovements', 'CreatedAt'),
+                  ('Sales', 'PostedAtUtc'),
+                  ('Sales', 'NetTotal'),
+                  ('SaleItemBatchAllocations', 'ExpiryDateSnapshot'));
             """, connection))
         await using (var reader = await command.ExecuteReaderAsync())
         {
@@ -79,6 +83,9 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("numeric", types["GoodsReceiptItems.DiscountPercent"]);
         Assert.Equal("numeric", types["GoodsReceiptItems.NetLineAmount"]);
         Assert.Equal("timestamp with time zone", types["StockMovements.CreatedAt"]);
+        Assert.Equal("timestamp with time zone", types["Sales.PostedAtUtc"]);
+        Assert.Equal("numeric", types["Sales.NetTotal"]);
+        Assert.Equal("date", types["SaleItemBatchAllocations.ExpiryDateSnapshot"]);
     }
 
     [PostgreSqlFact]
@@ -488,6 +495,112 @@ public sealed class PostgreSqlIntegrationTests
         await transaction.RollbackAsync();
     }
 
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase7_sales_constraints_indexes_permissions_and_allocations_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var branchId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var inventoryId = Guid.NewGuid();
+        var saleId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, """
+            SELECT "Id" FROM "Roles" WHERE "Name" = 'Cashier';
+            """);
+        var userId = Guid.NewGuid();
+
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), Unique("barcode"), productId);
+        await InsertUserAsync(connection, transaction, branchId, roleId, Unique("cashier"), Unique("cashier").ToUpperInvariant(), null, null, userId);
+        await InsertBatchAsync(connection, transaction, branchId, productId, "SALE-BATCH", batchId);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Inventory" ("Id","BranchId","ProductId","ProductBatchId","QuantityInStock","ReorderLevel","LastCountedAt","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@product,@batch,100,0,now(),now(),now());
+            """, ("id", inventoryId), ("branch", branchId), ("product", productId), ("batch", batchId));
+
+        Assert.Equal(5L, await ScalarAsync<long>(connection, transaction, """
+            SELECT count(*) FROM "Permissions"
+            WHERE "Code" IN ('sales.view','sales.create','sales.hold','sales.discount','sales.reprint');
+            """));
+
+        Assert.Equal(15L, await ScalarAsync<long>(connection, transaction, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname IN (
+                'IX_Sales_InvoiceNumber',
+                'IX_Sales_HoldNumber',
+                'IX_Sales_BranchId_PostedAtUtc',
+                'IX_Sales_CashierUserId_PostedAtUtc',
+                'IX_Sales_Status_CreatedAt',
+                'IX_Sales_CustomerPhone',
+                'IX_SaleItems_SaleId',
+                'IX_SaleItems_ProductId',
+                'IX_SaleItemBatchAllocations_SaleItemId',
+                'IX_SaleItemBatchAllocations_ProductBatchId',
+                'IX_SalePayments_SaleId',
+                'IX_SalePayments_Method_CreatedAt',
+                'IX_ProductBatches_ExpiryDate',
+                'IX_ProductBatches_BranchId_ProductId',
+                'IX_StockMovements_ReferenceType_ReferenceId');
+            """));
+
+        await AssertDatabaseErrorAsync(connection, transaction, "posted_without_invoice", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Sales" ("Id","BranchId","Status","PostedAtUtc","CashierUserId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","ChangeGiven","CreatedAt","UpdatedAt")
+                VALUES (@id,@branch,2,now(),@cashier,12,0,0,12,12,0,now(),now());
+                """, ("id", Guid.NewGuid()), ("branch", branchId), ("cashier", userId)));
+
+        await InsertPostedSaleAsync(connection, transaction, saleId, branchId, userId, "INV-PG-SALE-1", 12);
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_invoice", PostgresErrorCodes.UniqueViolation,
+            () => InsertPostedSaleAsync(connection, transaction, Guid.NewGuid(), branchId, userId, "INV-PG-SALE-1", 12));
+        await InsertHeldSaleAsync(connection, transaction, Guid.NewGuid(), branchId, userId, "HOLD-PG-1");
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_hold", PostgresErrorCodes.UniqueViolation,
+            () => InsertHeldSaleAsync(connection, transaction, Guid.NewGuid(), branchId, userId, "HOLD-PG-1"));
+
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SaleItems" ("Id","SaleId","ProductId","RequestedQuantity","DiscountPercent","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@sale,@product,1,0,12,0,0,12,now(),now());
+            """, ("id", itemId), ("sale", saleId), ("product", productId));
+        await AssertDatabaseErrorAsync(connection, transaction, "zero_sale_item_quantity", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SaleItems" ("Id","SaleId","ProductId","RequestedQuantity","DiscountPercent","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@sale,@product,0,0,12,0,0,12,now(),now());
+                """, ("id", Guid.NewGuid()), ("sale", saleId), ("product", productId)));
+
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SaleItemBatchAllocations" ("Id","SaleItemId","ProductBatchId","Quantity","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@item,@batch,1,12,12,10,current_date + 365,12,0,0,12,now(),now());
+            """, ("id", Guid.NewGuid()), ("item", itemId), ("batch", batchId));
+        await AssertDatabaseErrorAsync(connection, transaction, "zero_allocation_quantity", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SaleItemBatchAllocations" ("Id","SaleItemId","ProductBatchId","Quantity","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@item,@batch,0,12,12,10,current_date + 365,12,0,0,12,now(),now());
+                """, ("id", Guid.NewGuid()), ("item", itemId), ("batch", batchId)));
+
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SalePayments" ("Id","SaleId","Method","AmountApplied","TenderedAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@sale,1,12,20,now(),now());
+            """, ("id", Guid.NewGuid()), ("sale", saleId));
+        await AssertDatabaseErrorAsync(connection, transaction, "card_with_tender", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalePayments" ("Id","SaleId","Method","AmountApplied","TenderedAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@sale,2,12,12,now(),now());
+                """, ("id", Guid.NewGuid()), ("sale", saleId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "cash_under_tender", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalePayments" ("Id","SaleId","Method","AmountApplied","TenderedAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@sale,1,12,11,now(),now());
+                """, ("id", Guid.NewGuid()), ("sale", saleId)));
+
+        await InsertMovementAsync(connection, transaction, branchId, productId, batchId, 3, -1);
+        await transaction.RollbackAsync();
+    }
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
@@ -497,6 +610,31 @@ public sealed class PostgreSqlIntegrationTests
         return connection;
     }
 
+
+    private static async Task InsertPostedSaleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid branchId,
+        Guid cashierUserId,
+        string invoiceNumber,
+        decimal amount) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Sales" ("Id","BranchId","InvoiceNumber","Status","PostedAtUtc","CashierUserId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","ChangeGiven","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@invoice,2,now(),@cashier,@amount,0,0,@amount,@amount,0,now(),now());
+            """, ("id", id), ("branch", branchId), ("invoice", invoiceNumber), ("cashier", cashierUserId), ("amount", amount));
+
+    private static async Task InsertHeldSaleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid branchId,
+        Guid cashierUserId,
+        string holdNumber) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Sales" ("Id","BranchId","HoldNumber","Status","CashierUserId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","ChangeGiven","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@hold,1,@cashier,0,0,0,0,0,0,now(),now());
+            """, ("id", id), ("branch", branchId), ("hold", holdNumber), ("cashier", cashierUserId));
     private static async Task InsertCategoryAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -685,7 +823,8 @@ public sealed class PostgreSqlIntegrationTests
         string username,
         string normalizedUsername,
         string? email,
-        string? normalizedEmail) =>
+        string? normalizedEmail,
+        Guid? id = null) =>
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "Users"
                 ("Id", "Username", "NormalizedUsername", "Email", "NormalizedEmail",
@@ -696,7 +835,7 @@ public sealed class PostgreSqlIntegrationTests
                  'Integration User', 'not-a-real-password-hash', @branchId, @roleId, true,
                  true, 0, 0, now(), now());
             """,
-            ("id", Guid.NewGuid()),
+            ("id", id ?? Guid.NewGuid()),
             ("username", username),
             ("normalizedUsername", normalizedUsername),
             ("email", email is null ? DBNull.Value : email),

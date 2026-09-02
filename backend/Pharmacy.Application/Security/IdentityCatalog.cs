@@ -49,6 +49,11 @@ public static class PermissionCatalog
     public const string PurchaseOrdersCreate = "purchase_orders.create";
     public const string PurchaseOrdersUpdate = "purchase_orders.update";
     public const string PurchaseOrdersCancel = "purchase_orders.cancel";
+    public const string SalesView = "sales.view";
+    public const string SalesCreate = "sales.create";
+    public const string SalesHold = "sales.hold";
+    public const string SalesDiscount = "sales.discount";
+    public const string SalesReprint = "sales.reprint";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -64,7 +69,8 @@ public static class PermissionCatalog
         SuppliersAdjustBalance,
         PurchasesView, PurchasesCreate, PurchasesUpdateDraft, PurchasesCancel,
         PurchasesReceive, PurchaseOrdersView, PurchaseOrdersCreate,
-        PurchaseOrdersUpdate, PurchaseOrdersCancel
+        PurchaseOrdersUpdate, PurchaseOrdersCancel,
+        SalesView, SalesCreate, SalesHold, SalesDiscount, SalesReprint
     ];
 }
 

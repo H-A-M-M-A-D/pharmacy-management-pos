@@ -242,6 +242,26 @@ class AuthState extends ChangeNotifier {
   Future<PurchaseDetails> postDirectPurchase(Map<String, dynamic> values) =>
       _api.postDirectPurchase(_requiredToken, values);
 
+  Future<List<PosProduct>> searchPosProducts({String? query}) =>
+      _api.searchPosProducts(_requiredToken, query: query);
+  Future<SaleDetails> holdSale(Map<String, dynamic> values) =>
+      _api.holdSale(_requiredToken, values);
+  Future<SaleDetails> postSale(Map<String, dynamic> values) =>
+      _api.postSale(_requiredToken, values);
+  Future<SaleDetails> postHeldSale(String id, Map<String, dynamic> values) =>
+      _api.postHeldSale(_requiredToken, id, values);
+  Future<void> cancelHeldSale(String id) =>
+      _api.cancelHeldSale(_requiredToken, id);
+  Future<PagedSales> listHeldSales({String? search}) =>
+      _api.listHeldSales(_requiredToken, search: search);
+  Future<PagedSales> listSales({String? search}) =>
+      _api.listSales(_requiredToken, search: search);
+  Future<SaleDetails> saleDetails(String id) =>
+      _api.saleDetails(_requiredToken, id);
+  Future<SaleDetails> saleReceipt(String id) =>
+      _api.saleReceipt(_requiredToken, id);
+  Future<SaleDetails> reprintSaleReceipt(String id) =>
+      _api.reprintSaleReceipt(_requiredToken, id);
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;

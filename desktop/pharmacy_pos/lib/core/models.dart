@@ -916,3 +916,238 @@ List<InventoryLookup> _lookups(dynamic json) => (json as List<dynamic>? ?? [])
 
 DateTime? _date(dynamic value) =>
     value == null ? null : DateTime.parse(value as String);
+
+class PosProduct {
+  const PosProduct({
+    required this.productId,
+    required this.name,
+    required this.sku,
+    required this.unit,
+    required this.availableQuantity,
+    required this.maximumDiscountPercent,
+    required this.isActive,
+    this.barcode,
+    this.genericName,
+    this.brandName,
+    this.nearestExpiryDate,
+    this.indicativeRetailPrice,
+  });
+
+  final String productId, name, sku, unit;
+  final String? barcode, genericName, brandName;
+  final int availableQuantity;
+  final DateTime? nearestExpiryDate;
+  final double? indicativeRetailPrice;
+  final double maximumDiscountPercent;
+  final bool isActive;
+
+  factory PosProduct.fromJson(Map<String, dynamic> json) => PosProduct(
+    productId: json['productId'] as String,
+    name: json['name'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    barcode: json['barcode'] as String?,
+    genericName: json['genericName'] as String?,
+    brandName: json['brandName'] as String?,
+    unit: json['unit'] as String? ?? '',
+    availableQuantity: json['availableQuantity'] as int? ?? 0,
+    nearestExpiryDate: _date(json['nearestExpiryDate']),
+    indicativeRetailPrice: (json['indicativeRetailPrice'] as num?)?.toDouble(),
+    maximumDiscountPercent:
+        (json['maximumDiscountPercent'] as num?)?.toDouble() ?? 0,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class SaleListItem {
+  const SaleListItem({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    required this.branchName,
+    required this.cashierName,
+    required this.itemCount,
+    required this.netTotal,
+    required this.amountPaid,
+    required this.changeGiven,
+    required this.paymentSummary,
+    this.invoiceNumber,
+    this.holdNumber,
+    this.postedAtUtc,
+    this.customerName,
+    this.customerPhone,
+  });
+
+  final String id, status, branchName, cashierName, paymentSummary;
+  final String? invoiceNumber, holdNumber, customerName, customerPhone;
+  final DateTime createdAt;
+  final DateTime? postedAtUtc;
+  final int itemCount;
+  final double netTotal, amountPaid, changeGiven;
+
+  factory SaleListItem.fromJson(Map<String, dynamic> json) => SaleListItem(
+    id: json['id'] as String? ?? '',
+    invoiceNumber: json['invoiceNumber'] as String?,
+    holdNumber: json['holdNumber'] as String?,
+    status: json['status'] as String? ?? 'Posted',
+    createdAt: DateTime.parse((json['createdAt'] ?? json['postedAtUtc']) as String).toLocal(),
+    postedAtUtc: json['postedAtUtc'] == null
+        ? null
+        : DateTime.parse(json['postedAtUtc'] as String).toLocal(),
+    branchName: json['branchName'] as String? ?? '',
+    cashierName: json['cashierName'] as String? ?? '',
+    customerName: json['customerName'] as String?,
+    customerPhone: json['customerPhone'] as String?,
+    itemCount: json['itemCount'] as int? ?? 0,
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
+    changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
+    paymentSummary: json['paymentSummary'] as String? ?? '',
+  );
+}
+
+class PagedSales {
+  const PagedSales({required this.items, required this.totalCount});
+  final List<SaleListItem> items;
+  final int totalCount;
+  factory PagedSales.fromJson(Map<String, dynamic> json) => PagedSales(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SaleListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class SaleAllocation {
+  const SaleAllocation({
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.quantity,
+    required this.unitRetailPriceSnapshot,
+    required this.unitSalePriceSnapshot,
+    required this.netAmount,
+  });
+  final String batchNumber;
+  final DateTime expiryDate;
+  final int quantity;
+  final double unitRetailPriceSnapshot, unitSalePriceSnapshot, netAmount;
+  factory SaleAllocation.fromJson(Map<String, dynamic> json) => SaleAllocation(
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    quantity: json['quantity'] as int? ?? 0,
+    unitRetailPriceSnapshot:
+        (json['unitRetailPriceSnapshot'] as num?)?.toDouble() ?? 0,
+    unitSalePriceSnapshot:
+        (json['unitSalePriceSnapshot'] as num?)?.toDouble() ?? 0,
+    netAmount: (json['netAmount'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class SaleItemDetail {
+  const SaleItemDetail({
+    required this.productName,
+    required this.sku,
+    required this.requestedQuantity,
+    required this.discountPercent,
+    required this.grossAmount,
+    required this.discountAmount,
+    required this.netAmount,
+    required this.allocations,
+  });
+  final String productName, sku;
+  final int requestedQuantity;
+  final double discountPercent, grossAmount, discountAmount, netAmount;
+  final List<SaleAllocation> allocations;
+  factory SaleItemDetail.fromJson(Map<String, dynamic> json) => SaleItemDetail(
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    requestedQuantity: json['requestedQuantity'] as int? ?? 0,
+    discountPercent: (json['discountPercent'] as num?)?.toDouble() ?? 0,
+    grossAmount: (json['grossAmount'] as num?)?.toDouble() ?? 0,
+    discountAmount: (json['discountAmount'] as num?)?.toDouble() ?? 0,
+    netAmount: (json['netAmount'] as num?)?.toDouble() ?? 0,
+    allocations: (json['allocations'] as List<dynamic>? ?? [])
+        .map((x) => SaleAllocation.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class SalePaymentDetail {
+  const SalePaymentDetail({
+    required this.method,
+    required this.amountApplied,
+    this.tenderedAmount,
+    this.referenceNumber,
+  });
+  final String method;
+  final double amountApplied;
+  final double? tenderedAmount;
+  final String? referenceNumber;
+  factory SalePaymentDetail.fromJson(Map<String, dynamic> json) =>
+      SalePaymentDetail(
+        method: json['method'] as String? ?? '',
+        amountApplied: (json['amountApplied'] as num?)?.toDouble() ?? 0,
+        tenderedAmount: (json['tenderedAmount'] as num?)?.toDouble(),
+        referenceNumber: json['referenceNumber'] as String?,
+      );
+}
+
+class SaleDetails {
+  const SaleDetails({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    required this.branchName,
+    required this.cashierName,
+    required this.subtotal,
+    required this.discountTotal,
+    required this.taxTotal,
+    required this.netTotal,
+    required this.amountPaid,
+    required this.changeGiven,
+    required this.items,
+    required this.payments,
+    this.invoiceNumber,
+    this.holdNumber,
+    this.postedAtUtc,
+    this.customerName,
+    this.customerPhone,
+  });
+  final String id, status, branchName, cashierName;
+  final String? invoiceNumber, holdNumber, customerName, customerPhone;
+  final DateTime createdAt;
+  final DateTime? postedAtUtc;
+  final double subtotal,
+      discountTotal,
+      taxTotal,
+      netTotal,
+      amountPaid,
+      changeGiven;
+  final List<SaleItemDetail> items;
+  final List<SalePaymentDetail> payments;
+  factory SaleDetails.fromJson(Map<String, dynamic> json) => SaleDetails(
+    id: json['id'] as String? ?? '',
+    invoiceNumber: json['invoiceNumber'] as String?,
+    holdNumber: json['holdNumber'] as String?,
+    status: json['status'] as String? ?? 'Posted',
+    createdAt: DateTime.parse((json['createdAt'] ?? json['postedAtUtc']) as String).toLocal(),
+    postedAtUtc: json['postedAtUtc'] == null
+        ? null
+        : DateTime.parse(json['postedAtUtc'] as String).toLocal(),
+    branchName: json['branchName'] as String? ?? '',
+    cashierName: json['cashierName'] as String? ?? '',
+    customerName: json['customerName'] as String?,
+    customerPhone: json['customerPhone'] as String?,
+    subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
+    discountTotal: (json['discountTotal'] as num?)?.toDouble() ?? 0,
+    taxTotal: (json['taxTotal'] as num?)?.toDouble() ?? 0,
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
+    changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SaleItemDetail.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    payments: (json['payments'] as List<dynamic>? ?? [])
+        .map((x) => SalePaymentDetail.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}

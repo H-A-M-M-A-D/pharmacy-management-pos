@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management foundation with completed authentication, user management, Product Master, Batch & Inventory, Supplier Management, and Purchasing & Goods Receiving modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. POS, sales, customer billing, and reporting workflows have not started.
+Pharmacy management system with completed Phase 7 POS and Sales foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Customer credit billing, sales returns, accounting general ledger, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -15,10 +15,10 @@ Pharmacy management foundation with completed authentication, user management, P
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
 - Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
-- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, and supplier payable ledger integration
+- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, POS checkout, sales posting, held sales, split payments, receipt preview/reprint, and sales history
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 
-No POS, sales, customer billing, accounting general ledger, purchase return, or reporting module is implemented.
+Sales returns, customer credit billing, accounting general ledger, purchase return, and reporting modules are not implemented.
 
 ## Dependency Graph
 
@@ -54,9 +54,10 @@ backend/Pharmacy.Infrastructure/Migrations/20260901194508_CompleteProductMaster.
 backend/Pharmacy.Infrastructure/Migrations/20260901215409_CompleteBatchAndInventoryManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902051500_CompleteSupplierManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902055022_CompletePurchasingAndGoodsReceiving.cs
+backend/Pharmacy.Infrastructure/Migrations/20260902114037_CompletePosAndSales.cs
 ```
 
-All six migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 18 application tables plus `__EFMigrationsHistory`; Phase 6 adds purchase order, goods receipt, receipt item, posting, supplier-invoice, and purchasing permission constraints/indexes. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All seven migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 22 application tables plus `__EFMigrationsHistory`; Phase 7 adds sales, sale items, sale batch allocations, sale payments, sales permission seeds, receipt/history indexes, and PostgreSQL check constraints. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Product Master Policy
 
@@ -113,6 +114,18 @@ All six migrations are applied to local `pharmacy_dev` and `pharmacy_test` throu
 - Supplier invoice number is optional, but when present it is unique per supplier by normalized value. Multiple receipts without invoice numbers are allowed.
 - Posted goods receipts and receipt items are immutable through the DbContext. Purchase returns and invoice settlement remain future phases.
 
+
+## POS and Sales Policy
+
+- POS search uses active products and branch-scoped available batches. Exact barcode/SKU matches are prioritized, with name, brand, and generic search as fallback.
+- Sale posting is the inventory-affecting event. Held sales do not reserve inventory and can become stale if stock changes before posting.
+- Posting uses `FefoAllocationService` as the authoritative batch allocator. Operators do not manually override sale batches in Phase 7.
+- FEFO allocations are persisted in `SaleItemBatchAllocations` with quantity, batch, expiry, retail price, sale price, and cost snapshots so future return/report workflows can trace the original source batch.
+- Posting creates negative `Sale` stock movements and updates `ProductBatch.QuantityAvailable` plus `Inventory.QuantityInStock` in one serializable PostgreSQL transaction.
+- Posted sales, sale payments, and sale batch allocations are immutable through DbContext validation. Held sales may be edited or cancelled before posting.
+- Split payments are supported for cash, card, bank transfer, Easypaisa, JazzCash, and other. Cash requires tendered amount and records change. Non-cash payments may include a reference number.
+- Product-level discounts require `sales.discount` and cannot exceed `Product.MaximumDiscountPercent`. Tax is intentionally fixed at zero until a real tax model is introduced.
+- Invoice numbers are generated in a serializable transaction and protected by a unique index. The current MVP does not include an automatic retry loop if a rare serial collision still reaches the database.
 ## FEFO and Expiry
 
 `FefoAllocationService` filters by branch and product, excludes disposed, expired, and empty batches, orders deterministically by expiry/creation/batch/id, and allocates across batches. Expiry and manufacturing dates use `DateOnly` and PostgreSQL `date`. A batch expiring on the sale date is considered sellable for that entire date in the current fixed MVP policy.

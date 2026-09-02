@@ -32,12 +32,17 @@ public class PharmacyDbContext : DbContext
     public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; } = null!;
     public DbSet<GoodsReceipt> GoodsReceipts { get; set; } = null!;
     public DbSet<GoodsReceiptItem> GoodsReceiptItems { get; set; } = null!;
+    public DbSet<Sale> Sales { get; set; } = null!;
+    public DbSet<SaleItem> SaleItems { get; set; } = null!;
+    public DbSet<SaleItemBatchAllocation> SaleItemBatchAllocations { get; set; } = null!;
+    public DbSet<SalePayment> SalePayments { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
         ValidatePurchasingDocuments();
+        ValidateSalesDocuments();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -46,6 +51,7 @@ public class PharmacyDbContext : DbContext
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
         ValidatePurchasingDocuments();
+        ValidateSalesDocuments();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -69,6 +75,39 @@ public class PharmacyDbContext : DbContext
         }
     }
 
+
+    private void ValidateSalesDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<Sale>())
+        {
+            if (entry.State == EntityState.Deleted)
+            {
+                throw new InvalidOperationException("Sale history is permanent and cannot be deleted.");
+            }
+
+            if (entry.State == EntityState.Modified && entry.OriginalValues.GetValue<SaleStatus>(nameof(Sale.Status)) == SaleStatus.Posted)
+            {
+                throw new InvalidOperationException("Posted sales are permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SalePayment>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+            {
+                throw new InvalidOperationException("Sale payment history is permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SaleItemBatchAllocation>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+            {
+                throw new InvalidOperationException("Sale batch allocation history is permanent and cannot be updated or deleted.");
+            }
+        }
+    }
     private void ValidateSupplierLedgerEntries()
     {
         ChangeTracker.DetectChanges();
@@ -176,6 +215,10 @@ public class PharmacyDbContext : DbContext
         ConfigurePurchaseOrderItem(modelBuilder);
         ConfigureGoodsReceipt(modelBuilder);
         ConfigureGoodsReceiptItem(modelBuilder);
+        ConfigureSale(modelBuilder);
+        ConfigureSaleItem(modelBuilder);
+        ConfigureSaleItemBatchAllocation(modelBuilder);
+        ConfigureSalePayment(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -655,5 +698,98 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.PurchaseOrderItem).WithMany(i => i.GoodsReceiptItems).HasForeignKey(e => e.PurchaseOrderItemId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
+    }
+    private void ConfigureSale(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<Sale>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.InvoiceNumber).HasMaxLength(50);
+        entity.Property(e => e.HoldNumber).HasMaxLength(50);
+        entity.Property(e => e.CustomerName).HasMaxLength(200);
+        entity.Property(e => e.CustomerPhone).HasMaxLength(30);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.Subtotal).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountTotal).HasPrecision(18, 2);
+        entity.Property(e => e.TaxTotal).HasPrecision(18, 2);
+        entity.Property(e => e.NetTotal).HasPrecision(18, 2);
+        entity.Property(e => e.AmountPaid).HasPrecision(18, 2);
+        entity.Property(e => e.ChangeGiven).HasPrecision(18, 2);
+        entity.HasIndex(e => e.InvoiceNumber).IsUnique().HasFilter("\"InvoiceNumber\" IS NOT NULL");
+        entity.HasIndex(e => e.HoldNumber).IsUnique().HasFilter("\"HoldNumber\" IS NOT NULL");
+        entity.HasIndex(e => new { e.BranchId, e.PostedAtUtc });
+        entity.HasIndex(e => new { e.CashierUserId, e.PostedAtUtc });
+        entity.HasIndex(e => new { e.Status, e.CreatedAt });
+        entity.HasIndex(e => e.CustomerPhone);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Sales_Status", "\"Status\" IN (1, 2, 3)");
+            table.HasCheckConstraint("CK_Sales_Posted_HasInvoice", "(\"Status\" <> 2) OR (\"InvoiceNumber\" IS NOT NULL AND \"PostedAtUtc\" IS NOT NULL)");
+            table.HasCheckConstraint("CK_Sales_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"TaxTotal\" >= 0 AND \"NetTotal\" >= 0 AND \"AmountPaid\" >= 0 AND \"ChangeGiven\" >= 0");
+            table.HasCheckConstraint("CK_Sales_Posted_Paid", "(\"Status\" <> 2) OR (\"AmountPaid\" = \"NetTotal\")");
+        });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSaleItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SaleItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.DiscountPercent).HasPrecision(5, 2);
+        entity.Property(e => e.GrossAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxAmount).HasPrecision(18, 2);
+        entity.Property(e => e.NetAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SaleId);
+        entity.HasIndex(e => e.ProductId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SaleItems_Quantity_Positive", "\"RequestedQuantity\" > 0");
+            table.HasCheckConstraint("CK_SaleItems_Discount_Range", "\"DiscountPercent\" >= 0 AND \"DiscountPercent\" <= 100 AND \"DiscountAmount\" >= 0");
+            table.HasCheckConstraint("CK_SaleItems_Money_NonNegative", "\"GrossAmount\" >= 0 AND \"TaxAmount\" >= 0 AND \"NetAmount\" >= 0");
+        });
+        entity.HasOne(e => e.Sale).WithMany(s => s.Items).HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSaleItemBatchAllocation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SaleItemBatchAllocation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ExpiryDateSnapshot).HasColumnType("date").IsRequired();
+        entity.Property(e => e.UnitRetailPriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.UnitSalePriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.UnitCostPriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.GrossAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxAmount).HasPrecision(18, 2);
+        entity.Property(e => e.NetAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SaleItemId);
+        entity.HasIndex(e => e.ProductBatchId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SaleItemBatchAllocations_Quantity_Positive", "\"Quantity\" > 0");
+            table.HasCheckConstraint("CK_SaleItemBatchAllocations_Money_NonNegative", "\"UnitRetailPriceSnapshot\" >= 0 AND \"UnitSalePriceSnapshot\" >= 0 AND \"UnitCostPriceSnapshot\" >= 0 AND \"GrossAmount\" >= 0 AND \"DiscountAmount\" >= 0 AND \"TaxAmount\" >= 0 AND \"NetAmount\" >= 0");
+        });
+        entity.HasOne(e => e.SaleItem).WithMany(i => i.Allocations).HasForeignKey(e => e.SaleItemId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalePayment(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalePayment>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AmountApplied).HasPrecision(18, 2);
+        entity.Property(e => e.TenderedAmount).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.HasIndex(e => e.SaleId);
+        entity.HasIndex(e => new { e.Method, e.CreatedAt });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalePayments_Method", "\"Method\" IN (1, 2, 3, 4, 5, 6)");
+            table.HasCheckConstraint("CK_SalePayments_Amount_Positive", "\"AmountApplied\" > 0");
+            table.HasCheckConstraint("CK_SalePayments_CashTender", "(\"Method\" = 1 AND \"TenderedAmount\" IS NOT NULL AND \"TenderedAmount\" >= \"AmountApplied\") OR (\"Method\" <> 1 AND \"TenderedAmount\" IS NULL)");
+        });
+        entity.HasOne(e => e.Sale).WithMany(s => s.Payments).HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Cascade);
     }
 }
