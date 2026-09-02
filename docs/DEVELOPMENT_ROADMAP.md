@@ -224,62 +224,57 @@ The project is structured in 18 distinct phases, prioritized by business value a
 - Backend, PostgreSQL integration, and Flutter widget tests
 
 ### Boundary
-- Purchase orders, goods receiving, purchase returns, accounting general ledger, POS, sales, and reports remain future phases.
+- Purchase returns, accounting general ledger, POS, sales, and reports remain future phases.
 
 ---
 
-## Phase 6: Purchase Orders & Receiving
+## Phase 6: Purchase Orders & Receiving (COMPLETED)
 
 **Duration**: 2 sprints
 **Depends On**: Phase 4, Phase 5
 
-### Tasks
-1. **Purchase Entity** (Add to domain)
-   - PurchaseId, SupplierId, BranchId, OrderDate, DeliveryDate
-   - Items, TotalAmount, Status (Pending, Received, Partial)
-   - Notes, CreatedByUserId
+### Completed
+1. **Purchase Order Foundation**
+   - Branch-scoped purchase orders and purchase order items
+   - Draft, submitted, partially received, completed, and cancelled states
+   - Ordered vs received quantity tracking
 
-2. **Purchase Item Entity**
-   - ProductId, Quantity, UnitPrice, TotalPrice
-   - ReceivedQuantity, ReturnedQuantity
+2. **Goods Receiving**
+   - Direct purchases and PO-linked receiving
+   - Paid and bonus quantity handling
+   - Batch creation/reuse with metadata validation
+   - Atomic inventory, stock movement, and supplier payable posting
 
-3. **Purchase API**
-   - POST /api/purchases (create PO)
-   - GET /api/purchases (search, filter by status)
-   - PUT /api/purchases/{id} (update)
-   - POST /api/purchases/{id}/receive (goods receipt)
-   - GET /api/purchases/{id}/items
+3. **Purchasing API**
+   - GET/POST/PUT purchase orders
+   - Submit and cancel purchase order actions
+   - Goods receipt posting, direct purchase posting, purchase history, and purchasing options
 
-4. **Goods Receipt Process**
-   - Receive full/partial quantities
-   - Create ProductBatch records
-   - Auto-create StockMovement (Purchase type)
-   - Update Inventory
+4. **Database and Permissions**
+   - Phase 6 migration: `20260902055022_CompletePurchasingAndGoodsReceiving`
+   - Purchase/receipt constraints, indexes, and foreign keys verified in PostgreSQL
+   - Purchasing permission catalog and role defaults seeded idempotently
 
-5. **Purchase Validation**
-   - Product exists
-   - Supplier exists
-   - Quantities are positive
-   - Prices are positive
+5. **Flutter UI**
+   - Purchasing navigation is permission-aware
+   - Purchase order list/create/submit/cancel
+   - Direct purchase and receive-goods dialogs
+   - Purchase history display
 
-6. **Flutter UI**
-   - Create purchase order form
-   - Purchase list with status
-   - Goods receipt screen
-   - Quantity received vs ordered tracking
-
-7. **Tests**
-   - Purchase creation
-   - Goods receipt creates StockMovement
-   - Batch quantity tracking
-   - Inventory update on receipt
+6. **Tests**
+   - Purchasing service behavior tests
+   - PostgreSQL integration tests for purchasing constraints and seeds
+   - Flutter purchasing widget tests
 
 ### Deliverables
-- Purchase order domain entities
-- Purchase management API
-- Goods receipt workflow
-- Flutter purchase screens
-- Integration tests
+- Purchase order and goods receipt domain entities
+- Purchasing application service, EF repository, and API controllers
+- Phase 6 migration and PostgreSQL verification
+- Flutter purchasing screens
+- Backend, PostgreSQL integration, and Flutter widget tests
+
+### Boundary
+- Purchase returns, POS, sales, accounting general ledger, reports, and supplier payment allocation remain future phases.
 
 ---
 
@@ -816,7 +811,15 @@ The project is structured in 18 distinct phases, prioritized by business value a
 - [x] PostgreSQL constraints and indexes verified for suppliers and supplier ledger entries
 - [x] Backend, PostgreSQL integration, and Flutter widget tests passing
 
-### Phase 6+
+### Phase 6
+- [x] Purchase orders support create, submit, cancel, and received quantity tracking
+- [x] Goods receipt posting updates batches, inventory projections, stock movements, and supplier ledger entries atomically
+- [x] Direct purchases and PO-linked receiving are permission-aware
+- [x] Paid vs bonus quantity and supplier invoice uniqueness rules are enforced
+- [x] PostgreSQL constraints and indexes verified for purchase orders and goods receipts
+- [x] Backend, PostgreSQL integration, and Flutter widget tests passing
+
+### Phase 7+
 Similar criteria for each remaining phase...
 
 ---

@@ -362,6 +362,100 @@ void main() {
     expect(find.text('Enter a positive amount'), findsOneWidget);
     expect(find.text('Required'), findsOneWidget);
   });
+
+  testWidgets('purchasing navigation follows purchasing permissions', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'purchases.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Purchasing'), findsOneWidget);
+  });
+
+  testWidgets('purchase order form validates required quantity', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'purchases.view',
+        'purchase_orders.view',
+        'purchase_orders.create',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new_purchase_order')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_purchase_order')));
+    await tester.pump();
+    expect(find.text('Enter a positive number'), findsOneWidget);
+  });
+
+  testWidgets('direct purchase shows bonus quantity totals', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'purchases.view', 'purchases.create', 'purchases.receive'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('direct_purchase')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-100');
+    await tester.enterText(find.byKey(const Key('receipt_paid')), '100');
+    await tester.enterText(find.byKey(const Key('receipt_bonus')), '10');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Purchase Price'),
+      '50',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Retail Price'),
+      '60',
+    );
+    await tester.pump();
+    expect(
+      find.textContaining('Inventory quantity = paid + bonus'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('PKR 5000.00'), findsOneWidget);
+  });
+
+  testWidgets('direct purchase duplicate invoice error is safe', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'purchases.view', 'purchases.create', 'purchases.receive'},
+      purchaseError: true,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('direct_purchase')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-100');
+    await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Purchase Price'),
+      '50',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Retail Price'),
+      '60',
+    );
+    await tester.tap(find.byKey(const Key('post_purchase')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('This supplier invoice has already been recorded.'),
+      findsOneWidget,
+    );
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -381,6 +475,7 @@ class TestFixture {
     this.permissions = const {},
     this.adjustmentError = false,
     this.supplierError = false,
+    this.purchaseError = false,
   }) {
     api = FakeApi(
       user: CurrentUser(
@@ -395,6 +490,7 @@ class TestFixture {
       loginError: loginError,
       adjustmentError: adjustmentError,
       supplierError: supplierError,
+      purchaseError: purchaseError,
     );
     state = AuthState(api, MemoryTokenStore());
   }
@@ -404,6 +500,7 @@ class TestFixture {
   final Set<String> permissions;
   final bool adjustmentError;
   final bool supplierError;
+  final bool purchaseError;
   final branch = const BranchInfo(
     id: 'branch-1',
     code: 'HQ',
@@ -422,12 +519,14 @@ class FakeApi implements PharmacyApi {
     required this.loginError,
     this.adjustmentError = false,
     this.supplierError = false,
+    this.purchaseError = false,
   });
 
   CurrentUser user;
   final bool loginError;
   final bool adjustmentError;
   final bool supplierError;
+  final bool purchaseError;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -677,7 +776,7 @@ class FakeApi implements PharmacyApi {
         isActive: true,
       ),
     ],
-    suppliers: const [],
+    suppliers: const [InventoryLookup(id: 'supplier-1', name: 'ABC Pharma')],
   );
 
   @override
@@ -805,6 +904,153 @@ class FakeApi implements PharmacyApi {
     String id,
     Map<String, dynamic> values,
   ) async {}
+
+  PurchaseOrderListItem get purchaseOrder => PurchaseOrderListItem(
+    id: 'po-1',
+    orderNumber: 'PO-2026-000001',
+    orderDate: DateTime(2026, 9, 2),
+    supplierId: 'supplier-1',
+    supplierName: 'ABC Pharma',
+    branchId: user.branch.id,
+    branchName: user.branch.name,
+    itemCount: 1,
+    orderedQuantity: 100,
+    receivedQuantity: 60,
+    status: 'PartiallyReceived',
+  );
+
+  PurchaseDetails get purchase => PurchaseDetails(
+    id: 'grn-1',
+    grnNumber: 'GRN-2026-000001',
+    supplierInvoiceNumber: 'INV-001',
+    receiptDate: DateTime(2026, 9, 2),
+    supplierName: 'ABC Pharma',
+    branchName: user.branch.name,
+    subtotal: 5000,
+    discountTotal: 0,
+    taxTotal: 0,
+    netTotal: 5000,
+    status: 'Posted',
+    items: [
+      PurchaseItem(
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        batchNumber: 'B-100',
+        expiryDate: DateTime(2027, 9, 2),
+        purchasedQuantity: 100,
+        bonusQuantity: 10,
+        inventoryQuantity: 110,
+        purchasePrice: 50,
+        netLineAmount: 5000,
+      ),
+    ],
+  );
+
+  @override
+  Future<PagedPurchaseOrders> listPurchaseOrders(
+    String token, {
+    String? search,
+  }) async => PagedPurchaseOrders(items: [purchaseOrder], totalCount: 1);
+
+  @override
+  Future<PurchaseOrderDetails> purchaseOrderDetails(
+    String token,
+    String id,
+  ) async => PurchaseOrderDetails(
+    id: id,
+    orderNumber: purchaseOrder.orderNumber,
+    orderDate: purchaseOrder.orderDate,
+    supplierId: purchaseOrder.supplierId,
+    supplierName: purchaseOrder.supplierName,
+    branchId: purchaseOrder.branchId,
+    branchName: purchaseOrder.branchName,
+    itemCount: 1,
+    orderedQuantity: 100,
+    receivedQuantity: 60,
+    status: 'PartiallyReceived',
+    items: const [
+      PurchaseOrderItem(
+        id: 'po-item-1',
+        productId: 'product-1',
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        orderedQuantity: 100,
+        receivedQuantity: 60,
+        remainingQuantity: 40,
+        expectedPurchasePrice: 50,
+      ),
+    ],
+  );
+  @override
+  Future<PurchaseOrderDetails> createPurchaseOrder(
+    String token,
+    Map<String, dynamic> values,
+  ) async => PurchaseOrderDetails(
+    id: 'po-new',
+    orderNumber: 'PO-2026-000002',
+    orderDate: DateTime(2026, 9, 2),
+    supplierId: 'supplier-1',
+    supplierName: 'ABC Pharma',
+    branchId: user.branch.id,
+    branchName: user.branch.name,
+    itemCount: 1,
+    orderedQuantity: 100,
+    receivedQuantity: 0,
+    status: 'Draft',
+    items: const [],
+  );
+
+  @override
+  Future<PurchaseOrderDetails> submitPurchaseOrder(
+    String token,
+    String id,
+  ) async => PurchaseOrderDetails(
+    id: id,
+    orderNumber: purchaseOrder.orderNumber,
+    orderDate: purchaseOrder.orderDate,
+    supplierId: purchaseOrder.supplierId,
+    supplierName: purchaseOrder.supplierName,
+    branchId: purchaseOrder.branchId,
+    branchName: purchaseOrder.branchName,
+    itemCount: purchaseOrder.itemCount,
+    orderedQuantity: purchaseOrder.orderedQuantity,
+    receivedQuantity: purchaseOrder.receivedQuantity,
+    status: 'Submitted',
+    items: const [],
+  );
+
+  @override
+  Future<PurchaseOrderDetails> cancelPurchaseOrder(
+    String token,
+    String id,
+  ) async => submitPurchaseOrder(token, id);
+
+  @override
+  Future<PagedPurchases> listPurchases(String token, {String? search}) async =>
+      PagedPurchases(items: [purchase], totalCount: 1);
+
+  @override
+  Future<PurchaseDetails> purchaseDetails(String token, String id) async =>
+      purchase;
+
+  @override
+  Future<PurchaseDetails> postGoodsReceipt(
+    String token,
+    Map<String, dynamic> values,
+  ) async => purchase;
+
+  @override
+  Future<PurchaseDetails> postDirectPurchase(
+    String token,
+    Map<String, dynamic> values,
+  ) async {
+    if (purchaseError) {
+      throw const ApiException(
+        'This supplier invoice has already been recorded.',
+      );
+    }
+    return purchase;
+  }
 
   @override
   Future<CurrentUser> updateProfile(

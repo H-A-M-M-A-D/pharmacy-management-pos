@@ -681,6 +681,235 @@ class PagedSupplierLedger {
       );
 }
 
+class PurchaseOrderItem {
+  const PurchaseOrderItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.orderedQuantity,
+    required this.receivedQuantity,
+    required this.remainingQuantity,
+    this.expectedPurchasePrice,
+  });
+  final String id, productId, productName, sku;
+  final int orderedQuantity, receivedQuantity, remainingQuantity;
+  final double? expectedPurchasePrice;
+  factory PurchaseOrderItem.fromJson(Map<String, dynamic> json) =>
+      PurchaseOrderItem(
+        id: json['id'] as String,
+        productId: json['productId'] as String,
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        orderedQuantity: json['orderedQuantity'] as int? ?? 0,
+        receivedQuantity: json['receivedQuantity'] as int? ?? 0,
+        remainingQuantity: json['remainingQuantity'] as int? ?? 0,
+        expectedPurchasePrice: (json['expectedPurchasePrice'] as num?)
+            ?.toDouble(),
+      );
+}
+
+class PurchaseOrderListItem {
+  const PurchaseOrderListItem({
+    required this.id,
+    required this.orderNumber,
+    required this.orderDate,
+    required this.supplierId,
+    required this.supplierName,
+    required this.branchId,
+    required this.branchName,
+    required this.itemCount,
+    required this.orderedQuantity,
+    required this.receivedQuantity,
+    required this.status,
+    this.expectedDate,
+  });
+  final String id,
+      orderNumber,
+      supplierId,
+      supplierName,
+      branchId,
+      branchName,
+      status;
+  final DateTime orderDate;
+  final DateTime? expectedDate;
+  final int itemCount, orderedQuantity, receivedQuantity;
+  factory PurchaseOrderListItem.fromJson(Map<String, dynamic> json) =>
+      PurchaseOrderListItem(
+        id: json['id'] as String,
+        orderNumber: json['orderNumber'] as String? ?? '',
+        orderDate: _date(json['orderDate']) ?? DateTime.now(),
+        expectedDate: _date(json['expectedDate']),
+        supplierId: json['supplierId'] as String? ?? '',
+        supplierName: json['supplierName'] as String? ?? '',
+        branchId: json['branchId'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        itemCount: json['itemCount'] as int? ?? 0,
+        orderedQuantity: json['orderedQuantity'] as int? ?? 0,
+        receivedQuantity: json['receivedQuantity'] as int? ?? 0,
+        status: json['status'] as String? ?? '',
+      );
+}
+
+class PurchaseOrderDetails extends PurchaseOrderListItem {
+  const PurchaseOrderDetails({
+    required super.id,
+    required super.orderNumber,
+    required super.orderDate,
+    required super.supplierId,
+    required super.supplierName,
+    required super.branchId,
+    required super.branchName,
+    required super.itemCount,
+    required super.orderedQuantity,
+    required super.receivedQuantity,
+    required super.status,
+    required this.items,
+    super.expectedDate,
+  });
+  final List<PurchaseOrderItem> items;
+  factory PurchaseOrderDetails.fromJson(Map<String, dynamic> json) {
+    final items = (json['items'] as List<dynamic>? ?? [])
+        .map((x) => PurchaseOrderItem.fromJson(x as Map<String, dynamic>))
+        .toList();
+    return PurchaseOrderDetails(
+      id: json['id'] as String,
+      orderNumber: json['orderNumber'] as String? ?? '',
+      orderDate: _date(json['orderDate']) ?? DateTime.now(),
+      expectedDate: _date(json['expectedDate']),
+      supplierId: json['supplierId'] as String? ?? '',
+      supplierName: json['supplierName'] as String? ?? '',
+      branchId: json['branchId'] as String? ?? '',
+      branchName: json['branchName'] as String? ?? '',
+      itemCount: items.length,
+      orderedQuantity: items.fold(0, (sum, x) => sum + x.orderedQuantity),
+      receivedQuantity: items.fold(0, (sum, x) => sum + x.receivedQuantity),
+      status: json['status'] as String? ?? '',
+      items: items,
+    );
+  }
+}
+
+class PagedPurchaseOrders {
+  const PagedPurchaseOrders({required this.items, required this.totalCount});
+  final List<PurchaseOrderListItem> items;
+  final int totalCount;
+  factory PagedPurchaseOrders.fromJson(Map<String, dynamic> json) =>
+      PagedPurchaseOrders(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map(
+              (x) => PurchaseOrderListItem.fromJson(x as Map<String, dynamic>),
+            )
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
+class PurchaseItem {
+  const PurchaseItem({
+    required this.productName,
+    required this.sku,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.purchasedQuantity,
+    required this.bonusQuantity,
+    required this.inventoryQuantity,
+    required this.purchasePrice,
+    required this.netLineAmount,
+  });
+  final String productName, sku, batchNumber;
+  final DateTime expiryDate;
+  final int purchasedQuantity, bonusQuantity, inventoryQuantity;
+  final double purchasePrice, netLineAmount;
+  factory PurchaseItem.fromJson(Map<String, dynamic> json) => PurchaseItem(
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    purchasedQuantity: json['purchasedQuantity'] as int? ?? 0,
+    bonusQuantity: json['bonusQuantity'] as int? ?? 0,
+    inventoryQuantity: json['inventoryQuantity'] as int? ?? 0,
+    purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
+    netLineAmount: (json['netLineAmount'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class PurchaseHistoryItem {
+  const PurchaseHistoryItem({
+    required this.id,
+    required this.grnNumber,
+    required this.receiptDate,
+    required this.supplierName,
+    required this.branchName,
+    required this.netTotal,
+    required this.status,
+    this.supplierInvoiceNumber,
+  });
+  final String id, grnNumber, supplierName, branchName, status;
+  final String? supplierInvoiceNumber;
+  final DateTime receiptDate;
+  final double netTotal;
+  factory PurchaseHistoryItem.fromJson(Map<String, dynamic> json) =>
+      PurchaseHistoryItem(
+        id: json['id'] as String,
+        grnNumber: json['grnNumber'] as String? ?? '',
+        supplierInvoiceNumber: json['supplierInvoiceNumber'] as String?,
+        receiptDate: _date(json['receiptDate']) ?? DateTime.now(),
+        supplierName: json['supplierName'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+        status: json['status'] as String? ?? '',
+      );
+}
+
+class PurchaseDetails extends PurchaseHistoryItem {
+  const PurchaseDetails({
+    required super.id,
+    required super.grnNumber,
+    required super.receiptDate,
+    required super.supplierName,
+    required super.branchName,
+    required super.netTotal,
+    required super.status,
+    required this.subtotal,
+    required this.discountTotal,
+    required this.taxTotal,
+    required this.items,
+    super.supplierInvoiceNumber,
+  });
+  final double subtotal, discountTotal, taxTotal;
+  final List<PurchaseItem> items;
+  factory PurchaseDetails.fromJson(Map<String, dynamic> json) =>
+      PurchaseDetails(
+        id: json['id'] as String,
+        grnNumber: json['grnNumber'] as String? ?? '',
+        supplierInvoiceNumber: json['supplierInvoiceNumber'] as String?,
+        receiptDate: _date(json['receiptDate']) ?? DateTime.now(),
+        supplierName: json['supplierName'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
+        discountTotal: (json['discountTotal'] as num?)?.toDouble() ?? 0,
+        taxTotal: (json['taxTotal'] as num?)?.toDouble() ?? 0,
+        netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+        status: json['status'] as String? ?? '',
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => PurchaseItem.fromJson(x as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class PagedPurchases {
+  const PagedPurchases({required this.items, required this.totalCount});
+  final List<PurchaseHistoryItem> items;
+  final int totalCount;
+  factory PagedPurchases.fromJson(Map<String, dynamic> json) => PagedPurchases(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => PurchaseHistoryItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
 List<InventoryLookup> _lookups(dynamic json) => (json as List<dynamic>? ?? [])
     .map((x) => InventoryLookup.fromJson(x as Map<String, dynamic>))
     .toList();

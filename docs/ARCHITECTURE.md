@@ -11,7 +11,7 @@ Application -> Domain
 Domain -> no project
 ```
 
-Application owns auth, Product Master, inventory, supplier-management use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
+Application owns auth, Product Master, inventory, supplier-management, purchasing use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
 
 ## Authentication and Authorization
 
@@ -43,7 +43,7 @@ Opening stock is the controlled initialization/import workflow. It creates a bat
 
 Stock adjustments accept positive user-entered quantities only. The backend derives ledger signs: increases create `AdjustmentIncrease`, decreases create `AdjustmentDecrease`, and damaged removal uses `Damaged`. Decreases cannot take batch or inventory projections below zero. Stock count reconciliation compares physical quantity to the current batch projection and records only the variance; zero variance records audit but no movement.
 
-Expired disposal creates a negative `Expired` stock movement and reduces projections. It requires the batch to be expired by the explicit business date policy and never silently removes stock. Supplier return workflow remains Phase 5/6 work, not Phase 4.
+Expired disposal creates a negative `Expired` stock movement and reduces projections. It requires the batch to be expired by the explicit business date policy and never silently removes stock. Supplier return workflow remains later purchase-return work, not Phase 4.
 
 Inventory listing groups batch-level projections into branch/product operational totals and reports status, active batch count, nearest expiry, and estimated stock value. Low stock is `QuantityInStock > 0 && QuantityInStock <= ReorderLevel`; out of stock is `QuantityInStock <= 0`; healthy is above reorder level. Inventory value is an operational cost view: available quantity multiplied by batch purchase price. It is not accounting journal valuation.
 
@@ -57,8 +57,18 @@ Supplier names are normalized and globally unique. Contact, city, NTN, STRN, pay
 
 `SupplierLedgerEntry` is the supplier balance source of truth. Outstanding balances and running balances are calculated from immutable ledger entries. Positive amounts mean payable to the supplier; negative amounts mean pharmacy advance/credit. Opening balance allows either sign, payments are negative, debit adjustments are positive, and credit adjustments are negative. The DbContext rejects ledger updates/deletes, and PostgreSQL enforces sign validity through `CK_SupplierLedgerEntries_AmountSign`.
 
-Opening balance is recorded only during supplier creation when non-zero. Editing supplier master data does not rewrite opening balance. Payments and balance adjustments run in serializable PostgreSQL transactions and create audit events. Purchase and purchase-return ledger entries are reserved for Phase 6/9 workflows and are not exposed as standalone supplier UI actions in Phase 5.
+Opening balance is recorded only during supplier creation when non-zero. Editing supplier master data does not rewrite opening balance. Payments and balance adjustments run in serializable PostgreSQL transactions and create audit events. Purchase ledger entries are created by Phase 6 goods-receipt posting. Purchase-return ledger entries remain reserved for Phase 9 and are not exposed as standalone supplier UI actions.
 
+
+## Purchasing and Goods Receiving
+
+Phase 6 purchasing operations are exposed through `IPurchasingService`. Purchase orders are branch-scoped planning documents: draft orders can be edited, submitted orders can be received, and partially/completely received orders are protected from cancellation in this phase.
+
+Goods receipt posting is the stock and payable boundary. Direct purchases post without a purchase order; ordered receipts must reference a matching purchase order item. Paid quantity increments purchase-order received quantity and payable value. Bonus quantity increases inventory but does not increase supplier payable.
+
+Posting runs in a serializable PostgreSQL transaction. It creates or reuses a compatible `ProductBatch`, updates `ProductBatch.QuantityAvailable` and `Inventory.QuantityInStock`, creates a positive `Purchase` `StockMovement`, and creates a positive supplier ledger `Purchase` entry when the receipt net total is greater than zero. Existing batch metadata must match expiry, manufacturing date, supplier, and prices.
+
+Supplier invoice numbers are optional and normalized. PostgreSQL enforces uniqueness per supplier when an invoice number is present while allowing multiple null invoices. Posted goods receipts and receipt items are immutable through DbContext validation. Purchase returns, supplier payment allocation, tax reporting, and accounting general ledger posting remain future phases.
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -85,7 +95,7 @@ Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Z
 
 ## Entity and Table Truth
 
-There are 14 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
+There are 18 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
 
 Global/catalog and organization data:
 
@@ -109,6 +119,10 @@ Branch-scoped operational data:
 | Inventory | Inventory | Branch/product/batch projection |
 | StockMovement | StockMovements | Branch/product/batch ledger |
 | SupplierLedgerEntry | SupplierLedgerEntries | Branch/supplier financial ledger |
+| PurchaseOrder | PurchaseOrders | Branch/supplier planning document |
+| PurchaseOrderItem | PurchaseOrderItems | Purchase order line |
+| GoodsReceipt | GoodsReceipts | Branch/supplier posted receipt |
+| GoodsReceiptItem | GoodsReceiptItems | Posted receipt line linked to product/batch |
 
 Audit data:
 
@@ -130,19 +144,21 @@ Audit data:
 - Supplier normalized name is unique.
 - Supplier credit limit and payment terms have non-negative checks.
 - Supplier ledger sign rules are enforced by `CK_SupplierLedgerEntries_AmountSign`.
-- FEFO, branch, active-state, audit, stock-ledger, supplier, and supplier-ledger query paths have supporting indexes.
+- Purchase order status, ordered/received quantity range, receipt status, receipt totals, receipt item quantity, price, discount, tax, net amount, and manufacturing-before-expiry rules have PostgreSQL checks.
+- Purchase order numbers, GRN numbers, and supplier invoice numbers have unique indexes scoped to their business rules.
+- FEFO, branch, active-state, audit, stock-ledger, supplier, supplier-ledger, purchase-order, and goods-receipt query paths have supporting indexes.
 - Foreign keys and delete behaviors are defined in `PharmacyDbContext` and generated into the migration.
 - Audit old/new value columns are configured as PostgreSQL `jsonb`.
 
-These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, and supplier ledger sign checks.
+These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, supplier ledger sign checks, purchase/receipt uniqueness, purchase quantity checks, receipt item checks, and purchasing permission seeds.
 
 ## Dates, Time, Money, and Quantity
 
 - Base entity timestamps, login/count timestamps, and health timestamps are UTC `DateTime` values mapped to PostgreSQL timestamps with time zone.
 - Manufacturing and expiry are date-only business values mapped to PostgreSQL `date`.
 - Product and batch money use `decimal(18,2)`.
-- Supplier opening balance, credit limit, and supplier ledger amounts use `decimal(18,2)`.
-- Maximum discount percentage uses `decimal(5,2)`.
+- Supplier opening balance, credit limit, supplier ledger amounts, purchase prices, and purchase receipt totals use `decimal(18,2)`.
+- Maximum discount percentage, purchase discount percentage, and purchase tax percentage use `decimal(5,2)`.
 - Stock quantity, reorder levels, and pack sizes use integers.
 - Unit is a product label and pack size is retained, so future box/strip/tablet/bottle/piece modeling is not blocked. Unit conversion is not implemented.
 
@@ -154,21 +170,22 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260901194508_CompleteProductMaster`
 - Migration: `20260901215409_CompleteBatchAndInventoryManagement`
 - Migration: `20260902051500_CompleteSupplierManagement`
+- Migration: `20260902055022_CompletePurchasingAndGoodsReceiving`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1 through Phase 5 migrations recorded with product version `10.0.11`
-- Real schema: 14 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
+- EF history: Phase 1 through Phase 6 migrations recorded with product version `10.0.11`
+- Real schema: 18 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, and supplier screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, and supplier screens, and purchasing screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. Purchasing UI includes purchase-order list/create/submit/cancel, goods receiving, direct purchase posting, and purchase history. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Phase 1 Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No POS, purchases, goods receiving, sales, transfers, reports, unit conversion, accounting general ledger, or background expiry processing.
+- No POS, sales, purchase returns, transfers, reports, unit conversion, accounting general ledger, supplier payment allocation, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.

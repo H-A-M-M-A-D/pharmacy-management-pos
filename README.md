@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management foundation with completed authentication, user management, Product Master, Batch & Inventory, and Supplier Management modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Purchase, POS, sales, and reporting workflows have not started.
+Pharmacy management foundation with completed authentication, user management, Product Master, Batch & Inventory, Supplier Management, and Purchasing & Goods Receiving modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. POS, sales, customer billing, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -15,9 +15,10 @@ Pharmacy management foundation with completed authentication, user management, P
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
 - Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
-- Backend unit/foundation and PostgreSQL integration tests, plus a Flutter widget smoke test
+- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, and supplier payable ledger integration
+- Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 
-No POS, purchasing, sales, customer billing, accounting general ledger, or reporting module is implemented.
+No POS, sales, customer billing, accounting general ledger, purchase return, or reporting module is implemented.
 
 ## Dependency Graph
 
@@ -52,9 +53,10 @@ backend/Pharmacy.Infrastructure/Migrations/20260829223012_AddUserSecurityAndMana
 backend/Pharmacy.Infrastructure/Migrations/20260901194508_CompleteProductMaster.cs
 backend/Pharmacy.Infrastructure/Migrations/20260901215409_CompleteBatchAndInventoryManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902051500_CompleteSupplierManagement.cs
+backend/Pharmacy.Infrastructure/Migrations/20260902055022_CompletePurchasingAndGoodsReceiving.cs
 ```
 
-All five migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 14 application tables plus `__EFMigrationsHistory`; Phase 5 adds supplier financial constraints, supplier ledger constraints, query indexes, and supplier permissions. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All six migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 18 application tables plus `__EFMigrationsHistory`; Phase 6 adds purchase order, goods receipt, receipt item, posting, supplier-invoice, and purchasing permission constraints/indexes. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Product Master Policy
 
@@ -99,7 +101,17 @@ All five migrations are applied to local `pharmacy_dev` and `pharmacy_test` thro
 - Positive supplier ledger amounts mean payable to the supplier. Negative amounts mean supplier advance/credit in favor of the pharmacy.
 - Opening balance can be positive or negative and is recorded once as a ledger entry when a supplier is created. Editing supplier master data does not rewrite opening balance.
 - Payments are recorded as negative ledger entries. Debit adjustments are positive; credit adjustments are negative.
-- Supplier ledger entries cannot be updated or deleted through the DbContext. Purchase-linked supplier ledger entries are reserved for the purchasing phase.
+- Supplier ledger entries cannot be updated or deleted through the DbContext. Purchase-linked supplier ledger entries are created by posted goods receipts.
+
+
+## Purchasing and Goods Receiving Policy
+
+- `PurchaseOrder` is a branch-scoped planning document. Draft orders can be edited, submitted orders can be received, and received orders are not cancelled in this phase.
+- Goods receipt posting is the inventory-affecting event. Direct purchases have no purchase order; ordered receipts must reference the matching purchase order item.
+- Paid quantity updates purchase-order received quantity and supplier payable. Bonus quantity increases stock without increasing payable.
+- Posting creates or reuses a compatible product batch, increments batch and inventory projections, records a positive `Purchase` stock movement, and creates a positive supplier ledger purchase entry when net total is above zero.
+- Supplier invoice number is optional, but when present it is unique per supplier by normalized value. Multiple receipts without invoice numbers are allowed.
+- Posted goods receipts and receipt items are immutable through the DbContext. Purchase returns and invoice settlement remain future phases.
 
 ## FEFO and Expiry
 
@@ -110,8 +122,8 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 ## Precision
 
 - Money: `decimal(18,2)`
-- Supplier opening balance, credit limit, and ledger amounts: `decimal(18,2)`
-- Maximum discount percentage: `decimal(5,2)`
+- Supplier opening balance, credit limit, ledger amounts, purchase prices, and purchase receipt totals: `decimal(18,2)`
+- Maximum discount, purchase discount percentage, and purchase tax percentage: `decimal(5,2)`
 - Quantities and pack sizes: integer base-unit counts
 - Product unit labels and pack size preserve room for future box/strip/tablet/bottle/piece conversion, but conversion is not implemented.
 - Operational timestamps use UTC `DateTime`; medicine expiry/manufacturing values are date-only.

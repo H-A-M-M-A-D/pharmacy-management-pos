@@ -128,6 +128,27 @@ abstract interface class PharmacyApi {
     String id,
     Map<String, dynamic> values,
   );
+  Future<PagedPurchaseOrders> listPurchaseOrders(
+    String token, {
+    String? search,
+  });
+  Future<PurchaseOrderDetails> purchaseOrderDetails(String token, String id);
+  Future<PurchaseOrderDetails> createPurchaseOrder(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<PurchaseOrderDetails> submitPurchaseOrder(String token, String id);
+  Future<PurchaseOrderDetails> cancelPurchaseOrder(String token, String id);
+  Future<PagedPurchases> listPurchases(String token, {String? search});
+  Future<PurchaseDetails> purchaseDetails(String token, String id);
+  Future<PurchaseDetails> postGoodsReceipt(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<PurchaseDetails> postDirectPurchase(
+    String token,
+    Map<String, dynamic> values,
+  );
   void close();
 }
 
@@ -583,6 +604,104 @@ class ApiClient implements PharmacyApi {
     '/api/suppliers/$id/adjustments',
     token: token,
     body: values,
+  );
+
+  @override
+  Future<PagedPurchaseOrders> listPurchaseOrders(
+    String token, {
+    String? search,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedPurchaseOrders.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/purchase-orders', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PurchaseOrderDetails> purchaseOrderDetails(
+    String token,
+    String id,
+  ) async => PurchaseOrderDetails.fromJson(
+    (await _request('GET', '/api/purchase-orders/$id', token: token))!,
+  );
+
+  @override
+  Future<PurchaseOrderDetails> createPurchaseOrder(
+    String token,
+    Map<String, dynamic> values,
+  ) async => PurchaseOrderDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/purchase-orders',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<PurchaseOrderDetails> submitPurchaseOrder(
+    String token,
+    String id,
+  ) async => PurchaseOrderDetails.fromJson(
+    (await _request('POST', '/api/purchase-orders/$id/submit', token: token))!,
+  );
+
+  @override
+  Future<PurchaseOrderDetails> cancelPurchaseOrder(
+    String token,
+    String id,
+  ) async => PurchaseOrderDetails.fromJson(
+    (await _request('POST', '/api/purchase-orders/$id/cancel', token: token))!,
+  );
+
+  @override
+  Future<PagedPurchases> listPurchases(String token, {String? search}) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedPurchases.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/purchases', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PurchaseDetails> purchaseDetails(String token, String id) async =>
+      PurchaseDetails.fromJson(
+        (await _request('GET', '/api/purchases/$id', token: token))!,
+      );
+
+  @override
+  Future<PurchaseDetails> postGoodsReceipt(
+    String token,
+    Map<String, dynamic> values,
+  ) async => PurchaseDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/goods-receipts',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<PurchaseDetails> postDirectPurchase(
+    String token,
+    Map<String, dynamic> values,
+  ) async => PurchaseDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/purchases/direct',
+      token: token,
+      body: values,
+    ))!,
   );
 
   Future<void> _void(String method, String path, String token) async {

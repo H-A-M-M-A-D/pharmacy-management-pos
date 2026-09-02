@@ -222,6 +222,26 @@ class AuthState extends ChangeNotifier {
   Future<void> adjustSupplierBalance(String id, Map<String, dynamic> values) =>
       _api.adjustSupplierBalance(_requiredToken, id, values);
 
+  Future<PagedPurchaseOrders> listPurchaseOrders({String? search}) =>
+      _api.listPurchaseOrders(_requiredToken, search: search);
+  Future<PurchaseOrderDetails> purchaseOrderDetails(String id) =>
+      _api.purchaseOrderDetails(_requiredToken, id);
+  Future<PurchaseOrderDetails> createPurchaseOrder(
+    Map<String, dynamic> values,
+  ) => _api.createPurchaseOrder(_requiredToken, values);
+  Future<PurchaseOrderDetails> submitPurchaseOrder(String id) =>
+      _api.submitPurchaseOrder(_requiredToken, id);
+  Future<PurchaseOrderDetails> cancelPurchaseOrder(String id) =>
+      _api.cancelPurchaseOrder(_requiredToken, id);
+  Future<PagedPurchases> listPurchases({String? search}) =>
+      _api.listPurchases(_requiredToken, search: search);
+  Future<PurchaseDetails> purchaseDetails(String id) =>
+      _api.purchaseDetails(_requiredToken, id);
+  Future<PurchaseDetails> postGoodsReceipt(Map<String, dynamic> values) =>
+      _api.postGoodsReceipt(_requiredToken, values);
+  Future<PurchaseDetails> postDirectPurchase(Map<String, dynamic> values) =>
+      _api.postDirectPurchase(_requiredToken, values);
+
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;

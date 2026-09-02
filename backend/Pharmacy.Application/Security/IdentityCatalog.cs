@@ -40,6 +40,15 @@ public static class PermissionCatalog
     public const string SuppliersLedgerView = "suppliers.ledger.view";
     public const string SuppliersPaymentCreate = "suppliers.payment.create";
     public const string SuppliersAdjustBalance = "suppliers.adjust_balance";
+    public const string PurchasesView = "purchases.view";
+    public const string PurchasesCreate = "purchases.create";
+    public const string PurchasesUpdateDraft = "purchases.update_draft";
+    public const string PurchasesCancel = "purchases.cancel";
+    public const string PurchasesReceive = "purchases.receive";
+    public const string PurchaseOrdersView = "purchase_orders.view";
+    public const string PurchaseOrdersCreate = "purchase_orders.create";
+    public const string PurchaseOrdersUpdate = "purchase_orders.update";
+    public const string PurchaseOrdersCancel = "purchase_orders.cancel";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -52,7 +61,10 @@ public static class PermissionCatalog
         InventoryExpiryManage, InventoryMovementsView, BatchesView,
         SuppliersView, SuppliersCreate, SuppliersUpdate, SuppliersActivate,
         SuppliersDeactivate, SuppliersLedgerView, SuppliersPaymentCreate,
-        SuppliersAdjustBalance
+        SuppliersAdjustBalance,
+        PurchasesView, PurchasesCreate, PurchasesUpdateDraft, PurchasesCancel,
+        PurchasesReceive, PurchaseOrdersView, PurchaseOrdersCreate,
+        PurchaseOrdersUpdate, PurchaseOrdersCancel
     ];
 }
 

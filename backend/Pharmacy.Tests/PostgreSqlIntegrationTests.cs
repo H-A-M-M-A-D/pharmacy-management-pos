@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            5L,
+            6L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -30,11 +30,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260829223012_AddUserSecurityAndManagement',
                     '20260901194508_CompleteProductMaster',
                     '20260901215409_CompleteBatchAndInventoryManagement',
-                    '20260902051500_CompleteSupplierManagement');
+                    '20260902051500_CompleteSupplierManagement',
+                    '20260902055022_CompletePurchasingAndGoodsReceiving');
                 """));
 
         Assert.Equal(
-            14L,
+            18L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -53,6 +54,11 @@ public sealed class PostgreSqlIntegrationTests
                   ('AuditLogs', 'NewValues'),
                   ('ProductBatches', 'ExpiryDate'),
                   ('ProductBatches', 'ManufacturingDate'),
+                  ('PurchaseOrders', 'OrderDate'),
+                  ('GoodsReceipts', 'ReceiptDate'),
+                  ('GoodsReceiptItems', 'ExpiryDate'),
+                  ('GoodsReceiptItems', 'DiscountPercent'),
+                  ('GoodsReceiptItems', 'NetLineAmount'),
                   ('StockMovements', 'CreatedAt'));
             """, connection))
         await using (var reader = await command.ExecuteReaderAsync())
@@ -67,6 +73,11 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("jsonb", types["AuditLogs.NewValues"]);
         Assert.Equal("date", types["ProductBatches.ExpiryDate"]);
         Assert.Equal("date", types["ProductBatches.ManufacturingDate"]);
+        Assert.Equal("date", types["PurchaseOrders.OrderDate"]);
+        Assert.Equal("date", types["GoodsReceipts.ReceiptDate"]);
+        Assert.Equal("date", types["GoodsReceiptItems.ExpiryDate"]);
+        Assert.Equal("numeric", types["GoodsReceiptItems.DiscountPercent"]);
+        Assert.Equal("numeric", types["GoodsReceiptItems.NetLineAmount"]);
         Assert.Equal("timestamp with time zone", types["StockMovements.CreatedAt"]);
     }
 
@@ -420,6 +431,63 @@ public sealed class PostgreSqlIntegrationTests
         await transaction.RollbackAsync();
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase6_purchase_constraints_permissions_and_invoice_uniqueness_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var orderItemId = Guid.NewGuid();
+        var receiptId = Guid.NewGuid();
+
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertSupplierAsync(connection, transaction, supplierId, Unique("supplier"), Unique("supplier").ToUpperInvariant());
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+
+        Assert.Equal(9L, await ScalarAsync<long>(connection, transaction, """
+            SELECT count(*) FROM "Permissions" WHERE "Code" LIKE 'purchases.%' OR "Code" LIKE 'purchase_orders.%';
+            """));
+
+        await InsertPurchaseOrderAsync(connection, transaction, orderId, branchId, supplierId, "PO-TEST-001");
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_po_number", PostgresErrorCodes.UniqueViolation,
+            () => InsertPurchaseOrderAsync(connection, transaction, Guid.NewGuid(), branchId, supplierId, "PO-TEST-001"));
+        await InsertPurchaseOrderItemAsync(connection, transaction, orderItemId, orderId, productId, 100, 60);
+        await AssertDatabaseErrorAsync(connection, transaction, "po_over_received", PostgresErrorCodes.CheckViolation,
+            () => InsertPurchaseOrderItemAsync(connection, transaction, Guid.NewGuid(), orderId, productId, 100, 101));
+
+        await InsertGoodsReceiptAsync(connection, transaction, receiptId, branchId, supplierId, orderId, "GRN-TEST-001", "INV-001", 5000);
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_grn", PostgresErrorCodes.UniqueViolation,
+            () => InsertGoodsReceiptAsync(connection, transaction, Guid.NewGuid(), branchId, supplierId, null, "GRN-TEST-001", null, 100));
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_supplier_invoice", PostgresErrorCodes.UniqueViolation,
+            () => InsertGoodsReceiptAsync(connection, transaction, Guid.NewGuid(), branchId, supplierId, null, "GRN-TEST-002", " inv-001 ", 100));
+        await InsertGoodsReceiptAsync(connection, transaction, Guid.NewGuid(), branchId, supplierId, null, "GRN-TEST-003", null, 100);
+        await InsertGoodsReceiptAsync(connection, transaction, Guid.NewGuid(), branchId, supplierId, null, "GRN-TEST-004", null, 100);
+
+        await InsertGoodsReceiptItemAsync(connection, transaction, receiptId, productId, orderItemId, "B-PUR-1", 100, 10, 50, 5, 2, 4845);
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_bonus", PostgresErrorCodes.CheckViolation,
+            () => InsertGoodsReceiptItemAsync(connection, transaction, receiptId, productId, null, "B-PUR-2", 1, -1, 50, 0, 0, 50));
+        await AssertDatabaseErrorAsync(connection, transaction, "bad_discount", PostgresErrorCodes.CheckViolation,
+            () => InsertGoodsReceiptItemAsync(connection, transaction, receiptId, productId, null, "B-PUR-3", 1, 0, 50, 101, 0, 50));
+        await AssertDatabaseErrorAsync(connection, transaction, "manufacturing_after_expiry", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "GoodsReceiptItems"
+                    ("Id","GoodsReceiptId","ProductId","BatchNumber","ManufacturingDate","ExpiryDate","PurchasedQuantity","BonusQuantity","PurchasePrice","RetailPrice","DiscountPercent","DiscountAmount","TaxPercent","TaxAmount","NetLineAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@receipt,@product,'B-PUR-4',current_date + 20,current_date + 10,1,0,50,60,0,0,0,0,50,now(),now());
+                """, ("id", Guid.NewGuid()), ("receipt", receiptId), ("product", productId)));
+
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 5, 5000);
+        await AssertDatabaseErrorAsync(connection, transaction, "purchase_negative", PostgresErrorCodes.CheckViolation,
+            () => InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 5, -1));
+
+        await transaction.RollbackAsync();
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
@@ -521,6 +589,70 @@ public sealed class PostgreSqlIntegrationTests
             INSERT INTO "SupplierLedgerEntries" ("Id","SupplierId","BranchId","EntryType","Amount","EntryDate","CreatedAt","UpdatedAt")
             VALUES (@id,@supplier,@branch,@type,@amount,current_date,now(),now());
             """, ("id", Guid.NewGuid()), ("supplier", supplierId), ("branch", branchId), ("type", entryType), ("amount", amount));
+
+    private static async Task InsertPurchaseOrderAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid branchId,
+        Guid supplierId,
+        string orderNumber) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "PurchaseOrders" ("Id","BranchId","SupplierId","OrderNumber","OrderDate","Status","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@supplier,@number,current_date,2,now(),now());
+            """, ("id", id), ("branch", branchId), ("supplier", supplierId), ("number", orderNumber));
+
+    private static async Task InsertPurchaseOrderItemAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid orderId,
+        Guid productId,
+        int ordered,
+        int received) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "PurchaseOrderItems" ("Id","PurchaseOrderId","ProductId","OrderedQuantity","ReceivedQuantity","CreatedAt","UpdatedAt")
+            VALUES (@id,@order,@product,@ordered,@received,now(),now());
+            """, ("id", id), ("order", orderId), ("product", productId), ("ordered", ordered), ("received", received));
+
+    private static async Task InsertGoodsReceiptAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid branchId,
+        Guid supplierId,
+        Guid? orderId,
+        string grnNumber,
+        string? invoiceNumber,
+        decimal netTotal) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "GoodsReceipts"
+                ("Id","BranchId","SupplierId","PurchaseOrderId","GrnNumber","SupplierInvoiceNumber","NormalizedSupplierInvoiceNumber","ReceiptDate","Status","Subtotal","DiscountTotal","TaxTotal","NetTotal","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@supplier,@order,@grn,@invoice,@normalizedInvoice,current_date,2,@net,0,0,@net,now(),now());
+            """, ("id", id), ("branch", branchId), ("supplier", supplierId), ("order", orderId.HasValue ? orderId.Value : DBNull.Value),
+            ("grn", grnNumber), ("invoice", invoiceNumber is null ? DBNull.Value : invoiceNumber),
+            ("normalizedInvoice", invoiceNumber is null ? DBNull.Value : invoiceNumber.Trim().ToUpperInvariant()), ("net", netTotal));
+
+    private static async Task InsertGoodsReceiptItemAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid receiptId,
+        Guid productId,
+        Guid? orderItemId,
+        string batchNumber,
+        int purchasedQuantity,
+        int bonusQuantity,
+        decimal purchasePrice,
+        decimal discountPercent,
+        decimal taxPercent,
+        decimal netLineAmount) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "GoodsReceiptItems"
+                ("Id","GoodsReceiptId","ProductId","PurchaseOrderItemId","BatchNumber","ExpiryDate","PurchasedQuantity","BonusQuantity","PurchasePrice","RetailPrice","DiscountPercent","DiscountAmount","TaxPercent","TaxAmount","NetLineAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@receipt,@product,@orderItem,@batch,current_date + 365,@purchased,@bonus,@purchasePrice,@retailPrice,@discountPercent,0,@taxPercent,0,@net,now(),now());
+            """, ("id", Guid.NewGuid()), ("receipt", receiptId), ("product", productId), ("orderItem", orderItemId.HasValue ? orderItemId.Value : DBNull.Value),
+            ("batch", batchNumber), ("purchased", purchasedQuantity), ("bonus", bonusQuantity), ("purchasePrice", purchasePrice),
+            ("retailPrice", purchasePrice + 10), ("discountPercent", discountPercent), ("taxPercent", taxPercent), ("net", netLineAmount));
 
     private static async Task InsertMovementAsync(
         NpgsqlConnection connection,

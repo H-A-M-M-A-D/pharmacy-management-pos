@@ -28,11 +28,16 @@ public class PharmacyDbContext : DbContext
     public DbSet<StockMovement> StockMovements { get; set; } = null!;
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     public DbSet<SupplierLedgerEntry> SupplierLedgerEntries { get; set; } = null!;
+    public DbSet<PurchaseOrder> PurchaseOrders { get; set; } = null!;
+    public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; } = null!;
+    public DbSet<GoodsReceipt> GoodsReceipts { get; set; } = null!;
+    public DbSet<GoodsReceiptItem> GoodsReceiptItems { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
+        ValidatePurchasingDocuments();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -40,7 +45,28 @@ public class PharmacyDbContext : DbContext
     {
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
+        ValidatePurchasingDocuments();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidatePurchasingDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<GoodsReceipt>())
+        {
+            if (entry.State == EntityState.Deleted || (entry.State == EntityState.Modified && entry.Entity.Status == GoodsReceiptStatus.Posted))
+            {
+                throw new InvalidOperationException("Posted goods receipts are permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<GoodsReceiptItem>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Posted goods receipt item history is permanent and cannot be updated or deleted.");
+            }
+        }
     }
 
     private void ValidateSupplierLedgerEntries()
@@ -146,6 +172,10 @@ public class PharmacyDbContext : DbContext
         ConfigureStockMovement(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureSupplierLedgerEntry(modelBuilder);
+        ConfigurePurchaseOrder(modelBuilder);
+        ConfigurePurchaseOrderItem(modelBuilder);
+        ConfigureGoodsReceipt(modelBuilder);
+        ConfigureGoodsReceiptItem(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -517,5 +547,113 @@ public class PharmacyDbContext : DbContext
             .WithMany()
             .HasForeignKey(e => e.CreatedByUserId)
             .OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private void ConfigurePurchaseOrder(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PurchaseOrder>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.SupplierReference).HasMaxLength(100);
+        entity.Property(e => e.OrderDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.ExpectedDate).HasColumnType("date");
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.OrderNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.OrderDate });
+        entity.HasIndex(e => new { e.SupplierId, e.OrderDate });
+        entity.HasIndex(e => new { e.Status, e.OrderDate });
+        entity.ToTable(table => table.HasCheckConstraint("CK_PurchaseOrders_Status", "\"Status\" IN (1, 2, 3, 4, 5)"));
+
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private void ConfigurePurchaseOrderItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PurchaseOrderItem>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ExpectedPurchasePrice).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.PurchaseOrderId);
+        entity.HasIndex(e => e.ProductId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_PurchaseOrderItems_OrderedQuantity_Positive", "\"OrderedQuantity\" > 0");
+            table.HasCheckConstraint("CK_PurchaseOrderItems_ReceivedQuantity_Range", "\"ReceivedQuantity\" >= 0 AND \"ReceivedQuantity\" <= \"OrderedQuantity\"");
+            table.HasCheckConstraint("CK_PurchaseOrderItems_ExpectedPurchasePrice_NonNegative", "\"ExpectedPurchasePrice\" IS NULL OR \"ExpectedPurchasePrice\" >= 0");
+        });
+
+        entity.HasOne(e => e.PurchaseOrder).WithMany(o => o.Items).HasForeignKey(e => e.PurchaseOrderId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureGoodsReceipt(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<GoodsReceipt>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.GrnNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.SupplierInvoiceNumber).HasMaxLength(100);
+        entity.Property(e => e.NormalizedSupplierInvoiceNumber).HasMaxLength(100);
+        entity.Property(e => e.ReceiptDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.Subtotal).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountTotal).HasPrecision(18, 2);
+        entity.Property(e => e.TaxTotal).HasPrecision(18, 2);
+        entity.Property(e => e.NetTotal).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.GrnNumber).IsUnique();
+        entity.HasIndex(e => new { e.SupplierId, e.NormalizedSupplierInvoiceNumber }).IsUnique().HasFilter("\"NormalizedSupplierInvoiceNumber\" IS NOT NULL");
+        entity.HasIndex(e => new { e.BranchId, e.ReceiptDate });
+        entity.HasIndex(e => new { e.SupplierId, e.ReceiptDate });
+        entity.HasIndex(e => new { e.Status, e.ReceiptDate });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_GoodsReceipts_Status", "\"Status\" IN (1, 2, 3)");
+            table.HasCheckConstraint("CK_GoodsReceipts_Totals_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"TaxTotal\" >= 0 AND \"NetTotal\" >= 0");
+        });
+
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PurchaseOrder).WithMany(o => o.GoodsReceipts).HasForeignKey(e => e.PurchaseOrderId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReceivedByUser).WithMany().HasForeignKey(e => e.ReceivedByUserId).OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private void ConfigureGoodsReceiptItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<GoodsReceiptItem>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.BatchNumber).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.ManufacturingDate).HasColumnType("date");
+        entity.Property(e => e.ExpiryDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.PurchasePrice).HasPrecision(18, 2);
+        entity.Property(e => e.RetailPrice).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountPercent).HasPrecision(5, 2);
+        entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxPercent).HasPrecision(5, 2);
+        entity.Property(e => e.TaxAmount).HasPrecision(18, 2);
+        entity.Property(e => e.NetLineAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.GoodsReceiptId);
+        entity.HasIndex(e => e.ProductId);
+        entity.HasIndex(e => e.PurchaseOrderItemId);
+        entity.HasIndex(e => e.ProductBatchId);
+        entity.HasIndex(e => new { e.ProductId, e.BatchNumber });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_GoodsReceiptItems_Quantities", "\"PurchasedQuantity\" > 0 AND \"BonusQuantity\" >= 0");
+            table.HasCheckConstraint("CK_GoodsReceiptItems_Prices_NonNegative", "\"PurchasePrice\" >= 0 AND \"RetailPrice\" >= 0");
+            table.HasCheckConstraint("CK_GoodsReceiptItems_Discount_Range", "\"DiscountPercent\" >= 0 AND \"DiscountPercent\" <= 100 AND \"DiscountAmount\" >= 0");
+            table.HasCheckConstraint("CK_GoodsReceiptItems_Tax_Range", "\"TaxPercent\" >= 0 AND \"TaxPercent\" <= 100 AND \"TaxAmount\" >= 0");
+            table.HasCheckConstraint("CK_GoodsReceiptItems_NetLineAmount_NonNegative", "\"NetLineAmount\" >= 0");
+            table.HasCheckConstraint("CK_GoodsReceiptItems_Manufacturing_Before_Expiry", "\"ManufacturingDate\" IS NULL OR \"ManufacturingDate\" <= \"ExpiryDate\"");
+        });
+
+        entity.HasOne(e => e.GoodsReceipt).WithMany(r => r.Items).HasForeignKey(e => e.GoodsReceiptId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PurchaseOrderItem).WithMany(i => i.GoodsReceiptItems).HasForeignKey(e => e.PurchaseOrderItemId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
     }
 }

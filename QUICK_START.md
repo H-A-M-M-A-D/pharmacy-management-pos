@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, and `20260902051500_CompleteSupplierManagement`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, `20260902051500_CompleteSupplierManagement`, and `20260902055022_CompletePurchasingAndGoodsReceiving`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. All five migrations are applied to both databases, and `__EFMigrationsHistory` contains all five migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All six migrations are applied to both databases, and `__EFMigrationsHistory` contains all six migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -69,7 +69,9 @@ Development OpenAPI JSON is mapped at `/openapi/v1.json`; health is at `/api/hea
 
 Phase 4 inventory endpoints are under `/api/inventory`, `/api/batches`, and `/api/stock-movements`. Opening stock, adjustments, stock counts, and expired disposal are controlled stock commands; do not edit `ProductBatch.QuantityAvailable` or `Inventory.QuantityInStock` directly.
 
-Phase 5 supplier endpoints are under `/api/suppliers`. Supplier master records are global, supplier ledger entries are branch-scoped, and payments/adjustments are controlled financial ledger commands. Purchasing and goods receiving are still future work.
+Phase 5 supplier endpoints are under `/api/suppliers`. Supplier master records are global, supplier ledger entries are branch-scoped, and payments/adjustments are controlled financial ledger commands.
+
+Phase 6 purchasing endpoints are under `/api/purchase-orders`, `/api/goods-receipts`, `/api/purchases`, `/api/purchases/direct`, and `/api/purchasing/options`. Purchase orders do not affect stock until goods are received; posted goods receipts update batches, inventory projections, stock movements, and supplier payables atomically.
 
 ## Verify Flutter
 
