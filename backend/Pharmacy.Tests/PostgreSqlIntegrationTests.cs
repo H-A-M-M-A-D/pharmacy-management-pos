@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            4L,
+            5L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -29,11 +29,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260829211152_InitialCreate',
                     '20260829223012_AddUserSecurityAndManagement',
                     '20260901194508_CompleteProductMaster',
-                    '20260901215409_CompleteBatchAndInventoryManagement');
+                    '20260901215409_CompleteBatchAndInventoryManagement',
+                    '20260902051500_CompleteSupplierManagement');
                 """));
 
         Assert.Equal(
-            13L,
+            14L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -376,6 +377,49 @@ public sealed class PostgreSqlIntegrationTests
         await transaction.RollbackAsync();
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase5_supplier_constraints_permissions_and_ledger_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertSupplierAsync(connection, transaction, supplierId, "ABC Pharma", "ABC PHARMA");
+
+        Assert.Equal(
+            8L,
+            await ScalarAsync<long>(connection, transaction, """
+                SELECT count(*) FROM "Permissions"
+                WHERE "Code" IN ('suppliers.view','suppliers.create','suppliers.update','suppliers.activate',
+                    'suppliers.deactivate','suppliers.ledger.view','suppliers.payment.create','suppliers.adjust_balance');
+                """));
+
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_supplier_name", PostgresErrorCodes.UniqueViolation,
+            () => InsertSupplierAsync(connection, transaction, Guid.NewGuid(), "abc pharma", "ABC PHARMA"));
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_credit_limit", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Suppliers" ("Id","Name","NormalizedName","CreditLimit","IsActive","OpeningBalance","CreatedAt","UpdatedAt")
+                VALUES (@id,'Bad','BAD',-1,true,0,now(),now());
+                """, ("id", Guid.NewGuid())));
+
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 1, 10000);
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 1, -5000);
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 2, -4000);
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 3, 2000);
+        await InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 4, -1500);
+        await AssertDatabaseErrorAsync(connection, transaction, "payment_positive", PostgresErrorCodes.CheckViolation,
+            () => InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 2, 1));
+        await AssertDatabaseErrorAsync(connection, transaction, "zero_ledger", PostgresErrorCodes.CheckViolation,
+            () => InsertSupplierLedgerAsync(connection, transaction, supplierId, branchId, 3, 0));
+
+        Assert.Equal(1500, await ScalarAsync<decimal>(connection, transaction, """
+            SELECT sum("Amount") FROM "SupplierLedgerEntries" WHERE "SupplierId" = @supplier;
+            """, ("supplier", supplierId)));
+        await transaction.RollbackAsync();
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
@@ -454,6 +498,29 @@ public sealed class PostgreSqlIntegrationTests
             ("productId", productId),
             ("branchId", branchId),
             ("batchNumber", batchNumber));
+
+    private static async Task InsertSupplierAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        string name,
+        string normalizedName) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Suppliers" ("Id","Name","NormalizedName","IsActive","OpeningBalance","CreatedAt","UpdatedAt")
+            VALUES (@id,@name,@normalized,true,0,now(),now());
+            """, ("id", id), ("name", name), ("normalized", normalizedName));
+
+    private static async Task InsertSupplierLedgerAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid supplierId,
+        Guid branchId,
+        int entryType,
+        decimal amount) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SupplierLedgerEntries" ("Id","SupplierId","BranchId","EntryType","Amount","EntryDate","CreatedAt","UpdatedAt")
+            VALUES (@id,@supplier,@branch,@type,@amount,current_date,now(),now());
+            """, ("id", Guid.NewGuid()), ("supplier", supplierId), ("branch", branchId), ("type", entryType), ("amount", amount));
 
     private static async Task InsertMovementAsync(
         NpgsqlConnection connection,

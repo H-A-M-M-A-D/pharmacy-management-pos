@@ -261,6 +261,107 @@ void main() {
     expect(find.text('Edit'), findsNothing);
     expect(find.text('Delete'), findsNothing);
   });
+
+  testWidgets('suppliers navigation follows suppliers.view permission', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'suppliers.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Suppliers'), findsOneWidget);
+  });
+
+  testWidgets('supplier list renders balances semantically', (tester) async {
+    final fixture = TestFixture(permissions: {'suppliers.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Suppliers'));
+    await tester.pumpAndSettle();
+    expect(find.text('ABC Pharma'), findsOneWidget);
+    expect(find.text('PKR 10000.00 payable'), findsOneWidget);
+  });
+
+  testWidgets('add supplier validates and shows opening balance guidance', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'suppliers.view', 'suppliers.create'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Suppliers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_supplier')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Positive = payable. Negative = advance with supplier.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('save_supplier')));
+    await tester.pump();
+    expect(find.text('Required'), findsOneWidget);
+  });
+
+  testWidgets('supplier duplicate error is displayed safely', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'suppliers.view', 'suppliers.create'},
+      supplierError: true,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Suppliers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_supplier')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('supplier_name')),
+      'ABC Pharma',
+    );
+    await tester.tap(find.byKey(const Key('save_supplier')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('A supplier with this name already exists.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('supplier ledger payment and adjustment validation', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'suppliers.view',
+        'suppliers.ledger.view',
+        'suppliers.payment.create',
+        'suppliers.adjust_balance',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Suppliers'));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byType(SingleChildScrollView).last,
+      const Offset(-1000, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('View ledger'));
+    await tester.pumpAndSettle();
+    expect(find.text('OpeningBalance'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Record payment'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_supplier_payment')));
+    await tester.pump();
+    expect(find.text('Enter a positive amount'), findsOneWidget);
+    expect(find.text('Required'), findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -279,6 +380,7 @@ class TestFixture {
     this.mustChangePassword = false,
     this.permissions = const {},
     this.adjustmentError = false,
+    this.supplierError = false,
   }) {
     api = FakeApi(
       user: CurrentUser(
@@ -292,6 +394,7 @@ class TestFixture {
       ),
       loginError: loginError,
       adjustmentError: adjustmentError,
+      supplierError: supplierError,
     );
     state = AuthState(api, MemoryTokenStore());
   }
@@ -300,6 +403,7 @@ class TestFixture {
   final bool mustChangePassword;
   final Set<String> permissions;
   final bool adjustmentError;
+  final bool supplierError;
   final branch = const BranchInfo(
     id: 'branch-1',
     code: 'HQ',
@@ -317,11 +421,13 @@ class FakeApi implements PharmacyApi {
     required this.user,
     required this.loginError,
     this.adjustmentError = false,
+    this.supplierError = false,
   });
 
   CurrentUser user;
   final bool loginError;
   final bool adjustmentError;
+  final bool supplierError;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -629,6 +735,76 @@ class FakeApi implements PharmacyApi {
         ],
         totalCount: 1,
       );
+
+  SupplierListItem get supplier => const SupplierListItem(
+    id: 'supplier-1',
+    name: 'ABC Pharma',
+    shortName: 'ABC',
+    contactPerson: 'Ali',
+    phoneNumber: '+923001234567',
+    city: 'Lahore',
+    creditLimit: 20000,
+    outstandingBalance: 10000,
+    isActive: true,
+  );
+
+  @override
+  Future<PagedSuppliers> listSuppliers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async => PagedSuppliers(items: [supplier], totalCount: 1);
+
+  @override
+  Future<SupplierListItem> createSupplier(
+    String token,
+    Map<String, dynamic> values,
+  ) async {
+    if (supplierError) {
+      throw const ApiException('A supplier with this name already exists.');
+    }
+    return supplier;
+  }
+
+  @override
+  Future<SupplierListItem> updateSupplier(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => supplier;
+
+  @override
+  Future<void> setSupplierActive(String token, String id, bool active) async {}
+
+  @override
+  Future<PagedSupplierLedger> supplierLedger(String token, String id) async =>
+      PagedSupplierLedger(
+        items: [
+          SupplierLedgerItem(
+            entryDate: DateTime(2026, 9, 2),
+            entryType: 'OpeningBalance',
+            amount: 10000,
+            runningBalance: 10000,
+            branchName: user.branch.name,
+            notes: 'Opening balance',
+          ),
+        ],
+        totalCount: 1,
+      );
+
+  @override
+  Future<void> recordSupplierPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<void> adjustSupplierBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {}
 
   @override
   Future<CurrentUser> updateProfile(

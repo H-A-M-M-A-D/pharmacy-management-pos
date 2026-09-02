@@ -11,7 +11,7 @@ Application -> Domain
 Domain -> no project
 ```
 
-Application owns auth, Product Master, inventory use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
+Application owns auth, Product Master, inventory, supplier-management use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
 
 ## Authentication and Authorization
 
@@ -49,6 +49,16 @@ Inventory listing groups batch-level projections into branch/product operational
 
 All stock quantities currently operate in the product's configured inventory unit. Structured box/strip/tablet/bottle conversion is intentionally deferred.
 
+## Supplier Management
+
+Phase 5 supplier operations are exposed through `ISupplierService`. Supplier master records are global catalog data, while supplier financial activity is recorded in branch-scoped `SupplierLedgerEntry` rows. Controllers do not calculate balances or mutate ledger state directly.
+
+Supplier names are normalized and globally unique. Contact, city, NTN, STRN, payment terms, and credit limit are master-data attributes. Suppliers are activated/deactivated rather than deleted, so batch history and financial history remain stable. Inactive suppliers are excluded from normal lookup but remain available for historical display.
+
+`SupplierLedgerEntry` is the supplier balance source of truth. Outstanding balances and running balances are calculated from immutable ledger entries. Positive amounts mean payable to the supplier; negative amounts mean pharmacy advance/credit. Opening balance allows either sign, payments are negative, debit adjustments are positive, and credit adjustments are negative. The DbContext rejects ledger updates/deletes, and PostgreSQL enforces sign validity through `CK_SupplierLedgerEntries_AmountSign`.
+
+Opening balance is recorded only during supplier creation when non-zero. Editing supplier master data does not rewrite opening balance. Payments and balance adjustments run in serializable PostgreSQL transactions and create audit events. Purchase and purchase-return ledger entries are reserved for Phase 6/9 workflows and are not exposed as standalone supplier UI actions in Phase 5.
+
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -75,7 +85,7 @@ Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Z
 
 ## Entity and Table Truth
 
-There are 13 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
+There are 14 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
 
 Global/catalog and organization data:
 
@@ -98,6 +108,7 @@ Branch-scoped operational data:
 | ProductBatch | ProductBatches | Branch/product batch |
 | Inventory | Inventory | Branch/product/batch projection |
 | StockMovement | StockMovements | Branch/product/batch ledger |
+| SupplierLedgerEntry | SupplierLedgerEntries | Branch/supplier financial ledger |
 
 Audit data:
 
@@ -116,17 +127,21 @@ Audit data:
 - Inventory uniqueness is `(BranchId, ProductId, ProductBatchId)`.
 - Inventory checks require non-negative quantity and reorder level.
 - Role/permission, usernames, emails, branch codes, and permission codes have appropriate unique indexes.
-- FEFO, branch, active-state, audit, and stock-ledger query paths have supporting indexes.
+- Supplier normalized name is unique.
+- Supplier credit limit and payment terms have non-negative checks.
+- Supplier ledger sign rules are enforced by `CK_SupplierLedgerEntries_AmountSign`.
+- FEFO, branch, active-state, audit, stock-ledger, supplier, and supplier-ledger query paths have supporting indexes.
 - Foreign keys and delete behaviors are defined in `PharmacyDbContext` and generated into the migration.
 - Audit old/new value columns are configured as PostgreSQL `jsonb`.
 
-These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, and ledger/projection consistency.
+These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, and supplier ledger sign checks.
 
 ## Dates, Time, Money, and Quantity
 
 - Base entity timestamps, login/count timestamps, and health timestamps are UTC `DateTime` values mapped to PostgreSQL timestamps with time zone.
 - Manufacturing and expiry are date-only business values mapped to PostgreSQL `date`.
 - Product and batch money use `decimal(18,2)`.
+- Supplier opening balance, credit limit, and supplier ledger amounts use `decimal(18,2)`.
 - Maximum discount percentage uses `decimal(5,2)`.
 - Stock quantity, reorder levels, and pack sizes use integers.
 - Unit is a product label and pack size is retained, so future box/strip/tablet/bottle/piece modeling is not blocked. Unit conversion is not implemented.
@@ -138,21 +153,22 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260829223012_AddUserSecurityAndManagement`
 - Migration: `20260901194508_CompleteProductMaster`
 - Migration: `20260901215409_CompleteBatchAndInventoryManagement`
+- Migration: `20260902051500_CompleteSupplierManagement`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1, Phase 2, Phase 3, and Phase 4 migrations recorded with product version `10.0.11`
-- Real schema: 13 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
+- EF history: Phase 1 through Phase 5 migrations recorded with product version `10.0.11`
+- Real schema: 14 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, and inventory screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, and supplier screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Phase 1 Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No POS, purchases, supplier management workflow, sales, transfers, reports, unit conversion, or background expiry processing.
+- No POS, purchases, goods receiving, sales, transfers, reports, unit conversion, accounting general ledger, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.

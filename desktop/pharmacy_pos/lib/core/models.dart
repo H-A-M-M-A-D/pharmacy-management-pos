@@ -594,6 +594,93 @@ class PagedMovements {
   );
 }
 
+class SupplierListItem {
+  const SupplierListItem({
+    required this.id,
+    required this.name,
+    required this.outstandingBalance,
+    required this.isActive,
+    this.shortName,
+    this.contactPerson,
+    this.phoneNumber,
+    this.whatsApp,
+    this.email,
+    this.city,
+    this.creditLimit,
+  });
+  final String id, name;
+  final String? shortName, contactPerson, phoneNumber, whatsApp, email, city;
+  final double? creditLimit;
+  final double outstandingBalance;
+  final bool isActive;
+  factory SupplierListItem.fromJson(Map<String, dynamic> json) =>
+      SupplierListItem(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '',
+        shortName: json['shortName'] as String?,
+        contactPerson: json['contactPerson'] as String?,
+        phoneNumber: json['phoneNumber'] as String?,
+        whatsApp: json['whatsApp'] as String?,
+        email: json['email'] as String?,
+        city: json['city'] as String?,
+        creditLimit: (json['creditLimit'] as num?)?.toDouble(),
+        outstandingBalance:
+            (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? false,
+      );
+}
+
+class PagedSuppliers {
+  const PagedSuppliers({required this.items, required this.totalCount});
+  final List<SupplierListItem> items;
+  final int totalCount;
+  factory PagedSuppliers.fromJson(Map<String, dynamic> json) => PagedSuppliers(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SupplierListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class SupplierLedgerItem {
+  const SupplierLedgerItem({
+    required this.entryDate,
+    required this.entryType,
+    required this.amount,
+    required this.runningBalance,
+    required this.branchName,
+    this.userName,
+    this.notes,
+  });
+  final DateTime entryDate;
+  final String entryType, branchName;
+  final double amount, runningBalance;
+  final String? userName, notes;
+  factory SupplierLedgerItem.fromJson(Map<String, dynamic> json) =>
+      SupplierLedgerItem(
+        entryDate: _date(json['entryDate']) ?? DateTime.now(),
+        entryType: json['entryType'] as String? ?? '',
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        runningBalance: (json['runningBalance'] as num?)?.toDouble() ?? 0,
+        branchName: json['branchName'] as String? ?? '',
+        userName: json['userName'] as String?,
+        notes: json['notes'] as String?,
+      );
+}
+
+class PagedSupplierLedger {
+  const PagedSupplierLedger({required this.items, required this.totalCount});
+  final List<SupplierLedgerItem> items;
+  final int totalCount;
+  factory PagedSupplierLedger.fromJson(Map<String, dynamic> json) =>
+      PagedSupplierLedger(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => SupplierLedgerItem.fromJson(x as Map<String, dynamic>))
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
 List<InventoryLookup> _lookups(dynamic json) => (json as List<dynamic>? ?? [])
     .map((x) => InventoryLookup.fromJson(x as Map<String, dynamic>))
     .toList();

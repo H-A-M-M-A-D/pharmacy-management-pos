@@ -12,6 +12,10 @@ public class Supplier : Entity
     /// </summary>
     public required string Name { get; set; }
 
+    public string NormalizedName { get; set; } = string.Empty;
+
+    public string? ShortName { get; set; }
+
     /// <summary>
     /// Supplier contact person name.
     /// </summary>
@@ -26,6 +30,10 @@ public class Supplier : Entity
     /// Contact phone number.
     /// </summary>
     public string? PhoneNumber { get; set; }
+
+    public string? AlternatePhone { get; set; }
+
+    public string? WhatsApp { get; set; }
 
     /// <summary>
     /// Physical address.
@@ -42,10 +50,18 @@ public class Supplier : Entity
     /// </summary>
     public string? TaxNumber { get; set; }
 
+    public string? STRN { get; set; }
+
     /// <summary>
     /// Payment terms description.
     /// </summary>
     public string? PaymentTerms { get; set; }
+
+    public decimal OpeningBalance { get; set; }
+
+    public decimal? CreditLimit { get; set; }
+
+    public int? PaymentTermsDays { get; set; }
 
     /// <summary>
     /// Whether the supplier is currently active.
@@ -56,4 +72,6 @@ public class Supplier : Entity
     /// Navigation property for product batches supplied by this supplier.
     /// </summary>
     public ICollection<ProductBatch> ProductBatches { get; set; } = new List<ProductBatch>();
+
+    public ICollection<SupplierLedgerEntry> LedgerEntries { get; set; } = new List<SupplierLedgerEntry>();
 }

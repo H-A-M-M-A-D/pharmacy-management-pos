@@ -27,17 +27,37 @@ public class PharmacyDbContext : DbContext
     public DbSet<Inventory> Inventory { get; set; } = null!;
     public DbSet<StockMovement> StockMovements { get; set; } = null!;
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
+    public DbSet<SupplierLedgerEntry> SupplierLedgerEntries { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateStockMovements();
+        ValidateSupplierLedgerEntries();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         ValidateStockMovements();
+        ValidateSupplierLedgerEntries();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateSupplierLedgerEntries()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<SupplierLedgerEntry>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Supplier ledger history is permanent and cannot be updated or deleted.");
+            }
+
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Validate();
+            }
+        }
     }
 
     private void ValidateStockMovements()
@@ -125,6 +145,7 @@ public class PharmacyDbContext : DbContext
         ConfigureInventory(modelBuilder);
         ConfigureStockMovement(modelBuilder);
         ConfigureAuditLog(modelBuilder);
+        ConfigureSupplierLedgerEntry(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -253,16 +274,30 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.ShortName).HasMaxLength(100);
         entity.Property(e => e.ContactPerson).HasMaxLength(200);
         entity.Property(e => e.Email).HasMaxLength(100);
         entity.Property(e => e.PhoneNumber).HasMaxLength(20);
+        entity.Property(e => e.AlternatePhone).HasMaxLength(20);
+        entity.Property(e => e.WhatsApp).HasMaxLength(20);
         entity.Property(e => e.Address).HasMaxLength(500);
         entity.Property(e => e.City).HasMaxLength(100);
         entity.Property(e => e.TaxNumber).HasMaxLength(50);
+        entity.Property(e => e.STRN).HasMaxLength(50);
         entity.Property(e => e.PaymentTerms).HasMaxLength(500);
+        entity.Property(e => e.OpeningBalance).HasPrecision(18, 2);
+        entity.Property(e => e.CreditLimit).HasPrecision(18, 2);
 
+        entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.Name);
         entity.HasIndex(e => e.IsActive);
+        entity.HasIndex(e => e.City);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Suppliers_CreditLimit_NonNegative", "\"CreditLimit\" IS NULL OR \"CreditLimit\" >= 0");
+            table.HasCheckConstraint("CK_Suppliers_PaymentTermsDays_NonNegative", "\"PaymentTermsDays\" IS NULL OR \"PaymentTermsDays\" >= 0");
+        });
     }
 
     private void ConfigureProduct(ModelBuilder modelBuilder)
@@ -448,5 +483,39 @@ public class PharmacyDbContext : DbContext
             .WithMany(u => u.AuditLogs)
             .HasForeignKey(e => e.UserId)
             .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSupplierLedgerEntry(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SupplierLedgerEntry>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.EntryDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.PaymentMethod).HasMaxLength(50);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.ReferenceType).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => new { e.SupplierId, e.CreatedAt });
+        entity.HasIndex(e => new { e.SupplierId, e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.EntryType, e.CreatedAt });
+        entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId });
+        entity.ToTable(table => table.HasCheckConstraint(
+            "CK_SupplierLedgerEntries_AmountSign",
+            "\"Amount\" <> 0 AND ((\"EntryType\" = 1) OR (\"EntryType\" IN (3, 5) AND \"Amount\" > 0) OR (\"EntryType\" IN (2, 4, 6) AND \"Amount\" < 0))"));
+
+        entity.HasOne(e => e.Supplier)
+            .WithMany(s => s.LedgerEntries)
+            .HasForeignKey(e => e.SupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch)
+            .WithMany()
+            .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(e => e.CreatedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

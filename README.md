@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management foundation with completed authentication, user management, Product Master, and Batch & Inventory modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Purchase, POS, sales, and reporting workflows have not started.
+Pharmacy management foundation with completed authentication, user management, Product Master, Batch & Inventory, and Supplier Management modules for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally. Purchase, POS, sales, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -14,9 +14,10 @@ Pharmacy management foundation with completed authentication, user management, P
 - Flutter desktop shell, secure token storage, session restoration, login, forced password change, users, and profile screens
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
+- Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
 - Backend unit/foundation and PostgreSQL integration tests, plus a Flutter widget smoke test
 
-No POS, purchasing, supplier workflow, sales, customer billing, or reporting module is implemented.
+No POS, purchasing, sales, customer billing, accounting general ledger, or reporting module is implemented.
 
 ## Dependency Graph
 
@@ -50,9 +51,10 @@ backend/Pharmacy.Infrastructure/Migrations/20260829211152_InitialCreate.cs
 backend/Pharmacy.Infrastructure/Migrations/20260829223012_AddUserSecurityAndManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260901194508_CompleteProductMaster.cs
 backend/Pharmacy.Infrastructure/Migrations/20260901215409_CompleteBatchAndInventoryManagement.cs
+backend/Pharmacy.Infrastructure/Migrations/20260902051500_CompleteSupplierManagement.cs
 ```
 
-All four migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 13 application tables plus `__EFMigrationsHistory`; Phase 4 adds inventory constraints, query indexes, and inventory permissions. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All five migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 14 application tables plus `__EFMigrationsHistory`; Phase 5 adds supplier financial constraints, supplier ledger constraints, query indexes, and supplier permissions. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Product Master Policy
 
@@ -89,6 +91,16 @@ All four migrations are applied to local `pharmacy_dev` and `pharmacy_test` thro
 - Application validation and a PostgreSQL check constraint reject zero quantities and incorrect signs.
 - PostgreSQL also rejects negative batch/inventory projections and negative batch prices.
 
+## Supplier Management Policy
+
+- `Supplier` is a global master record. Supplier selection is shared across branches, while financial ledger entries are branch-scoped.
+- Supplier names are normalized and globally unique. Inactive suppliers remain in historical records and are hidden from normal lookup.
+- `SupplierLedgerEntry` is the supplier balance source of truth. Outstanding balance is calculated from immutable ledger entries, not a mutable balance column.
+- Positive supplier ledger amounts mean payable to the supplier. Negative amounts mean supplier advance/credit in favor of the pharmacy.
+- Opening balance can be positive or negative and is recorded once as a ledger entry when a supplier is created. Editing supplier master data does not rewrite opening balance.
+- Payments are recorded as negative ledger entries. Debit adjustments are positive; credit adjustments are negative.
+- Supplier ledger entries cannot be updated or deleted through the DbContext. Purchase-linked supplier ledger entries are reserved for the purchasing phase.
+
 ## FEFO and Expiry
 
 `FefoAllocationService` filters by branch and product, excludes disposed, expired, and empty batches, orders deterministically by expiry/creation/batch/id, and allocates across batches. Expiry and manufacturing dates use `DateOnly` and PostgreSQL `date`. A batch expiring on the sale date is considered sellable for that entire date in the current fixed MVP policy.
@@ -98,6 +110,7 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 ## Precision
 
 - Money: `decimal(18,2)`
+- Supplier opening balance, credit limit, and ledger amounts: `decimal(18,2)`
 - Maximum discount percentage: `decimal(5,2)`
 - Quantities and pack sizes: integer base-unit counts
 - Product unit labels and pack size preserve room for future box/strip/tablet/bottle/piece conversion, but conversion is not implemented.

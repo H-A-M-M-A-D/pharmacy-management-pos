@@ -205,6 +205,22 @@ class AuthState extends ChangeNotifier {
       _api.listBatches(_requiredToken, search: search);
   Future<PagedMovements> listMovements({String? search}) =>
       _api.listMovements(_requiredToken, search: search);
+  Future<PagedSuppliers> listSuppliers({String? search, bool? isActive}) =>
+      _api.listSuppliers(_requiredToken, search: search, isActive: isActive);
+  Future<SupplierListItem> createSupplier(Map<String, dynamic> values) =>
+      _api.createSupplier(_requiredToken, values);
+  Future<SupplierListItem> updateSupplier(
+    String id,
+    Map<String, dynamic> values,
+  ) => _api.updateSupplier(_requiredToken, id, values);
+  Future<void> setSupplierActive(String id, bool active) =>
+      _api.setSupplierActive(_requiredToken, id, active);
+  Future<PagedSupplierLedger> supplierLedger(String id) =>
+      _api.supplierLedger(_requiredToken, id);
+  Future<void> recordSupplierPayment(String id, Map<String, dynamic> values) =>
+      _api.recordSupplierPayment(_requiredToken, id, values);
+  Future<void> adjustSupplierBalance(String id, Map<String, dynamic> values) =>
+      _api.adjustSupplierBalance(_requiredToken, id, values);
 
   Future<void> logout() async {
     await _tokenStore.clear();

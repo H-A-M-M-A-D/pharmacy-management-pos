@@ -102,6 +102,32 @@ abstract interface class PharmacyApi {
   Future<List<ExpiryItem>> listExpiry(String token, {int? days});
   Future<PagedBatches> listBatches(String token, {String? search});
   Future<PagedMovements> listMovements(String token, {String? search});
+  Future<PagedSuppliers> listSuppliers(
+    String token, {
+    String? search,
+    bool? isActive,
+  });
+  Future<SupplierListItem> createSupplier(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<SupplierListItem> updateSupplier(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> setSupplierActive(String token, String id, bool active);
+  Future<PagedSupplierLedger> supplierLedger(String token, String id);
+  Future<void> recordSupplierPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> adjustSupplierBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
   void close();
 }
 
@@ -485,6 +511,79 @@ class ApiClient implements PharmacyApi {
       ))!,
     );
   }
+
+  @override
+  Future<PagedSuppliers> listSuppliers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (isActive != null) q['isActive'] = '$isActive';
+    return PagedSuppliers.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/suppliers', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<SupplierListItem> createSupplier(
+    String token,
+    Map<String, dynamic> values,
+  ) async => SupplierListItem.fromJson(
+    (await _request('POST', '/api/suppliers', token: token, body: values))!,
+  );
+
+  @override
+  Future<SupplierListItem> updateSupplier(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => SupplierListItem.fromJson(
+    (await _request('PUT', '/api/suppliers/$id', token: token, body: values))!,
+  );
+
+  @override
+  Future<void> setSupplierActive(String token, String id, bool active) async =>
+      _void(
+        'POST',
+        '/api/suppliers/$id/${active ? 'activate' : 'deactivate'}',
+        token,
+      );
+
+  @override
+  Future<PagedSupplierLedger> supplierLedger(String token, String id) async =>
+      PagedSupplierLedger.fromJson(
+        (await _request('GET', '/api/suppliers/$id/ledger', token: token))!,
+      );
+
+  @override
+  Future<void> recordSupplierPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/suppliers/$id/payments',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<void> adjustSupplierBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/suppliers/$id/adjustments',
+    token: token,
+    body: values,
+  );
 
   Future<void> _void(String method, String path, String token) async {
     await _request(method, path, token: token, expectBody: false);

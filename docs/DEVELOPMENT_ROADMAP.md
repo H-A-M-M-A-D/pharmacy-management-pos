@@ -179,37 +179,52 @@ The project is structured in 18 distinct phases, prioritized by business value a
 - Complete batch and inventory tests
 
 ### Boundary
-- Purchase Orders, purchase receiving, Supplier Management, POS, sales, transfers, and reports remain future phases.
+- Purchase Orders, purchase receiving, POS, sales, transfers, and reports remain future phases.
 
 ---
 
-## Phase 5: Supplier Management
+## Phase 5: Supplier Management (COMPLETED)
 
 **Duration**: 1 sprint
 **Depends On**: Phase 2
 
-### Tasks
+### Completed
 1. **Supplier API**
    - GET /api/suppliers
+   - GET /api/suppliers/lookup
+   - GET /api/suppliers/{id}
    - POST /api/suppliers
    - PUT /api/suppliers/{id}
-   - DELETE /api/suppliers/{id}
-   - Supplier details including payment terms
+   - POST /api/suppliers/{id}/activate
+   - POST /api/suppliers/{id}/deactivate
+   - GET /api/suppliers/{id}/ledger
+   - POST /api/suppliers/{id}/payments
+   - POST /api/suppliers/{id}/adjustments
 
-2. **Supplier-Batch Linking**
-   - Associate batch with supplier
-   - Supplier contact information
-   - Supplier payment history (future)
+2. **Supplier Financial Foundation**
+   - Global supplier master with normalized unique supplier names
+   - Branch-scoped immutable supplier ledger
+   - Opening balance, payment, debit adjustment, and credit adjustment entries
+   - Positive payable / negative advance sign convention
+   - Supplier ledger PostgreSQL check constraints and indexes
 
 3. **Flutter UI**
-   - Supplier list
-   - Supplier detail/create form
-   - Supplier search
+   - Supplier list/search
+   - Add and edit supplier dialogs
+   - Activation/deactivation actions
+   - Ledger statement dialog
+   - Payment and adjustment dialogs
+   - Permission-aware navigation and actions
 
 ### Deliverables
-- Supplier management CRUD
-- Supplier-batch relationship
+- Supplier management API and application service
+- Supplier ledger source-of-truth foundation
+- Phase 5 migration: `20260902051500_CompleteSupplierManagement`
 - Flutter supplier screens
+- Backend, PostgreSQL integration, and Flutter widget tests
+
+### Boundary
+- Purchase orders, goods receiving, purchase returns, accounting general ledger, POS, sales, and reports remain future phases.
 
 ---
 
@@ -793,7 +808,15 @@ The project is structured in 18 distinct phases, prioritized by business value a
 - [x] Flutter inventory screens are permission-aware
 - [x] Backend, PostgreSQL integration, and Flutter widget tests passing
 
-### Phase 5+
+### Phase 5
+- [x] Supplier master create/edit/search/lookup workflows are permission-aware
+- [x] Supplier activation/deactivation is explicit; suppliers are not deleted
+- [x] Supplier ledger is immutable and branch-scoped
+- [x] Opening balances, payments, and debit/credit adjustments follow the documented sign convention
+- [x] PostgreSQL constraints and indexes verified for suppliers and supplier ledger entries
+- [x] Backend, PostgreSQL integration, and Flutter widget tests passing
+
+### Phase 6+
 Similar criteria for each remaining phase...
 
 ---
