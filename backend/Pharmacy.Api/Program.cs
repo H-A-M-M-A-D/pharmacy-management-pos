@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -20,7 +21,7 @@ using Pharmacy.Infrastructure.Services.Auth;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -54,6 +55,8 @@ builder.Services.AddScoped<IPurchasingRepository, PurchasingRepository>();
 builder.Services.AddScoped<IPurchasingService, PurchasingService>();
 builder.Services.AddScoped<ISalesRepository, SalesRepository>();
 builder.Services.AddScoped<ISalesService, SalesService>();
+builder.Services.AddScoped<ISalesReturnRepository, SalesReturnRepository>();
+builder.Services.AddScoped<ISalesReturnService, SalesReturnService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key not configured. Set Jwt__Key or a user secret.");
@@ -131,3 +134,4 @@ app.MapGet("/api/health", () => new { status = "healthy", timestamp = DateTime.U
 app.Run();
 
 public partial class Program;
+

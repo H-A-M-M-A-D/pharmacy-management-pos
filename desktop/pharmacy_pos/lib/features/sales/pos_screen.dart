@@ -14,7 +14,7 @@ class PosScreen extends StatefulWidget {
 
 class _PosScreenState extends State<PosScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final TabController _tabs = TabController(length: 3, vsync: this);
   final _search = TextEditingController();
   final _customer = TextEditingController();
   final _phone = TextEditingController();
@@ -23,6 +23,8 @@ class _PosScreenState extends State<PosScreen>
   PagedSales? _history;
   PagedSales? _held;
   SaleDetails? _receipt;
+  PagedSalesReturns? _returns;
+  SalesReturnDetails? _returnReceipt;
   bool _loading = false;
   String? _error;
 
@@ -66,7 +68,9 @@ class _PosScreenState extends State<PosScreen>
   }
 
   Future<void> _loadHistory() async {
-    if (!can('sales.view') && !can('sales.hold')) return;
+    if (!can('sales.view') && !can('sales.hold') && !can('sales.returns.view')) {
+      return;
+    }
     setState(() => _loading = true);
     try {
       final history = can('sales.view')
@@ -75,10 +79,14 @@ class _PosScreenState extends State<PosScreen>
       final held = can('sales.hold')
           ? await widget.authState.listHeldSales()
           : null;
+      final returns = can('sales.returns.view')
+          ? await widget.authState.listSalesReturns()
+          : null;
       if (mounted) {
         setState(() {
           _history = history;
           _held = held;
+          _returns = returns;
         });
       }
     } on ApiException catch (error) {
@@ -221,6 +229,7 @@ class _PosScreenState extends State<PosScreen>
           tabs: const [
             Tab(text: 'POS'),
             Tab(text: 'Sales History'),
+            Tab(text: 'Sales Returns'),
           ],
         ),
         if (_error != null)
@@ -236,7 +245,7 @@ class _PosScreenState extends State<PosScreen>
               ? const Center(child: CircularProgressIndicator())
               : TabBarView(
                   controller: _tabs,
-                  children: [_pos(), _historyView()],
+                  children: [_pos(), _historyView(), _returnsView()],
                 ),
         ),
       ],
@@ -278,6 +287,120 @@ class _PosScreenState extends State<PosScreen>
     ],
   );
 
+  Future<void> _startReturn(SaleListItem sale) async {
+    setState(() => _loading = true);
+    ReturnableSale returnable;
+    try {
+      returnable = await widget.authState.returnableSale(sale.id);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+      return;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (!mounted) return;
+    final result = await showDialog<SalesReturnDetails>(
+      context: context,
+      builder: (_) => _SalesReturnDialog(
+        authState: widget.authState,
+        returnable: returnable,
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => _returnReceipt = result);
+      await _loadHistory();
+    }
+  }
+
+  Future<void> _showReturnReceipt(SalesReturnListItem item) async {
+    setState(() => _loading = true);
+    try {
+      final receipt = await widget.authState.salesReturnReceipt(item.id);
+      if (mounted) setState(() => _returnReceipt = receipt);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _returnsView() {
+    if (!can('sales.returns.view')) {
+      return const Center(child: Text('Not permitted'));
+    }
+    final returns = _returns?.items ?? const <SalesReturnListItem>[];
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Sales Returns', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          Expanded(
+            child: returns.isEmpty
+                ? const Center(child: Text('No returns found'))
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Return #')),
+                        DataColumn(label: Text('Original Invoice')),
+                        DataColumn(label: Text('Customer')),
+                        DataColumn(label: Text('Items')),
+                        DataColumn(label: Text('Refund')),
+                        DataColumn(label: Text('Processed By')),
+                        DataColumn(label: Text('Actions')),
+                      ],
+                      rows: returns
+                          .map(
+                            (item) => DataRow(
+                              cells: [
+                                DataCell(Text(item.returnNumber)),
+                                DataCell(Text(item.originalInvoiceNumber)),
+                                DataCell(Text(item.customerName ?? '-')),
+                                DataCell(Text('${item.itemCount}')),
+                                DataCell(Text(_money(item.refundAmount))),
+                                DataCell(Text(item.processedByName)),
+                                DataCell(
+                                  IconButton(
+                                    tooltip: 'Return receipt',
+                                    onPressed: () => _showReturnReceipt(item),
+                                    icon: const Icon(Icons.receipt_long),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+          ),
+          if (_returnReceipt != null) _returnReceiptPanel(_returnReceipt!),
+        ],
+      ),
+    );
+  }
+
+  Widget _returnReceiptPanel(SalesReturnDetails item) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'SALES RETURN ${item.returnNumber}',
+              key: const Key('return_receipt_preview'),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            Text('Original ${item.originalInvoiceNumber}  ${item.branchName}'),
+            Text('Refund ${_money(item.refundAmount)}  Reason ${item.reason}'),
+          ],
+        ),
+      ),
+    ),
+  );
   Widget _productsTable() {
     if (_products.isEmpty) {
       return const Center(child: Text('No products loaded'));
@@ -462,6 +585,7 @@ class _PosScreenState extends State<PosScreen>
         if (can('sales.hold')) _heldTable(),
         const SizedBox(height: 16),
         Expanded(child: _salesTable()),
+        if (_returnReceipt != null) _returnReceiptPanel(_returnReceipt!),
       ],
     ),
   );
@@ -495,13 +619,16 @@ class _PosScreenState extends State<PosScreen>
     if (sales.isEmpty) return const Center(child: Text('No sales found'));
     return SingleChildScrollView(
       child: DataTable(
+        columnSpacing: 8,
+        horizontalMargin: 8,
         columns: const [
           DataColumn(label: Text('Invoice')),
           DataColumn(label: Text('Cashier')),
           DataColumn(label: Text('Items')),
           DataColumn(label: Text('Total')),
-          DataColumn(label: Text('Payment')),
+          DataColumn(label: Text('Return')),
           DataColumn(label: Text('Actions')),
+          DataColumn(label: Text('Payment')),
         ],
         rows: sales
             .map(
@@ -511,7 +638,27 @@ class _PosScreenState extends State<PosScreen>
                   DataCell(Text(sale.cashierName)),
                   DataCell(Text('${sale.itemCount}')),
                   DataCell(Text(_money(sale.netTotal))),
-                  DataCell(Text(sale.paymentSummary)),
+                  DataCell(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Tooltip(
+                          message: _returnLabel(sale.returnState),
+                          child: const Icon(
+                            Icons.assignment_turned_in_outlined,
+                          ),
+                        ),
+                        if (can('sales.returns.create') &&
+                            sale.status == 'Posted' &&
+                            sale.returnState != 'FullyReturned')
+                          IconButton(
+                            tooltip: 'Return items',
+                            onPressed: () => _startReturn(sale),
+                            icon: const Icon(Icons.assignment_return_outlined),
+                          ),
+                      ],
+                    ),
+                  ),
                   DataCell(
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -530,6 +677,7 @@ class _PosScreenState extends State<PosScreen>
                       ],
                     ),
                   ),
+                  DataCell(Text(sale.paymentSummary)),
                 ],
               ),
             )
@@ -672,3 +820,278 @@ class _CartLine {
 String? _emptyToNull(String value) =>
     value.trim().isEmpty ? null : value.trim();
 String _money(double value) => 'PKR ${value.toStringAsFixed(2)}';
+
+class _SalesReturnDialog extends StatefulWidget {
+  const _SalesReturnDialog({required this.authState, required this.returnable});
+  final AuthState authState;
+  final ReturnableSale returnable;
+
+  @override
+  State<_SalesReturnDialog> createState() => _SalesReturnDialogState();
+}
+
+class _SalesReturnDialogState extends State<_SalesReturnDialog> {
+  final Map<String, TextEditingController> _quantities = {};
+  final Map<String, String> _dispositions = {};
+  final _notes = TextEditingController();
+  final _cash = TextEditingController();
+  String _reason = 'CustomerReturn';
+  String? _error;
+  bool _posting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final item in widget.returnable.items) {
+      for (final allocation in item.allocations.where(
+        (x) => x.remainingQuantity > 0,
+      )) {
+        _quantities[allocation.allocationId] = TextEditingController(
+          text: item.allocations.length == 1
+              ? '${allocation.remainingQuantity}'
+              : '0',
+        );
+        _dispositions[allocation.allocationId] = allocation.isBatchDisposed
+            ? 'NonResellable'
+            : 'Restockable';
+      }
+    }
+    _updateCash();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _quantities.values) {
+      controller.dispose();
+    }
+    _notes.dispose();
+    _cash.dispose();
+    super.dispose();
+  }
+
+  double get _refundTotal {
+    var total = 0.0;
+    for (final item in widget.returnable.items) {
+      for (final allocation in item.allocations) {
+        final qty =
+            int.tryParse(_quantities[allocation.allocationId]?.text ?? '') ?? 0;
+        if (qty <= 0) continue;
+        total += allocation.remainingQuantity == qty
+            ? allocation.refundRemaining
+            : allocation.refundRemaining * qty / allocation.remainingQuantity;
+      }
+    }
+    return double.parse(total.toStringAsFixed(2));
+  }
+
+  void _updateCash() => _cash.text = _refundTotal.toStringAsFixed(2);
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Sales Return / Refund'),
+    content: SizedBox(
+      width: 900,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Original Invoice ${widget.returnable.invoiceNumber}'),
+            Text(
+              'Customer ${widget.returnable.customerName ?? '-'}  Net ${_money(widget.returnable.netTotal)}',
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _reason,
+              decoration: const InputDecoration(labelText: 'Reason'),
+              items: const [
+                'CustomerReturn',
+                'WrongItem',
+                'Damaged',
+                'QualityIssue',
+                'Other',
+              ].map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(),
+              onChanged: (value) => setState(() => _reason = value ?? _reason),
+            ),
+            TextField(
+              controller: _notes,
+              decoration: const InputDecoration(labelText: 'Notes'),
+            ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('Product')),
+                  DataColumn(label: Text('Batch')),
+                  DataColumn(label: Text('Remaining')),
+                  DataColumn(label: Text('Return Qty')),
+                  DataColumn(label: Text('Disposition')),
+                  DataColumn(label: Text('Refund')),
+                ],
+                rows: [
+                  for (final item in widget.returnable.items)
+                    for (final allocation in item.allocations)
+                      DataRow(
+                        cells: [
+                          DataCell(Text(item.productName)),
+                          DataCell(
+                            Text(
+                              '${allocation.batchNumber}${allocation.isBatchExpired ? ' expired' : ''}',
+                            ),
+                          ),
+                          DataCell(Text('${allocation.remainingQuantity}')),
+                          DataCell(
+                            SizedBox(
+                              width: 80,
+                              child: TextField(
+                                key: Key(
+                                  'return_qty_${allocation.allocationId}',
+                                ),
+                                controller:
+                                    _quantities[allocation.allocationId],
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => setState(_updateCash),
+                              ),
+                            ),
+                          ),
+                          DataCell(
+                            DropdownButton<String>(
+                              value: _dispositions[allocation.allocationId],
+                              items: [
+                                if (!allocation.isBatchDisposed)
+                                  const DropdownMenuItem(
+                                    value: 'Restockable',
+                                    child: Text('Restockable'),
+                                  ),
+                                const DropdownMenuItem(
+                                  value: 'NonResellable',
+                                  child: Text('Non-Resellable'),
+                                ),
+                              ],
+                              onChanged: (value) => setState(
+                                () => _dispositions[allocation.allocationId] =
+                                    value ?? 'NonResellable',
+                              ),
+                            ),
+                          ),
+                          DataCell(Text(_money(allocation.refundRemaining))),
+                        ],
+                      ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('Refund Total ${_money(_refundTotal)}'),
+            TextField(
+              key: const Key('return_cash_refund'),
+              controller: _cash,
+              decoration: const InputDecoration(labelText: 'Cash refund'),
+            ),
+            if (_error != null)
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _posting ? null : () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+      FilledButton.icon(
+        key: const Key('post_return'),
+        onPressed: _posting ? null : _post,
+        icon: const Icon(Icons.assignment_return),
+        label: const Text('Post Return'),
+      ),
+    ],
+  );
+
+  Future<void> _post() async {
+    final allocations = <Map<String, dynamic>>[];
+    for (final entry in _quantities.entries) {
+      final qty = int.tryParse(entry.value.text) ?? 0;
+      if (qty <= 0) continue;
+      allocations.add({
+        'originalAllocationId': entry.key,
+        'quantity': qty,
+        'disposition': _dispositions[entry.key] == 'Restockable' ? 1 : 2,
+      });
+    }
+    if (allocations.isEmpty) {
+      setState(() => _error = 'Select at least one return quantity.');
+      return;
+    }
+    final cash = double.tryParse(_cash.text) ?? 0;
+    if ((cash - _refundTotal).abs() > 0.009) {
+      setState(
+        () => _error = 'Refund payment total must equal return refund amount.',
+      );
+      return;
+    }
+    if (_reason == 'Other' && _notes.text.trim().isEmpty) {
+      setState(() => _error = 'Notes are required for Other.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm return'),
+        content: const Text(
+          'Posting this return will refund the customer and update inventory. It cannot be edited afterward.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Post'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _posting = true);
+    try {
+      final result = await widget.authState.postSalesReturn(
+        widget.returnable.saleId,
+        {
+          'reason': _reasonIndex(_reason),
+          'notes': _emptyToNull(_notes.text),
+          'allocations': allocations,
+          'refundPayments': [
+            {'method': 1, 'amount': cash},
+          ],
+        },
+      );
+      if (mounted) Navigator.pop(context, result);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _posting = false);
+    }
+  }
+}
+
+int _reasonIndex(String reason) => switch (reason) {
+  'CustomerReturn' => 1,
+  'WrongItem' => 2,
+  'Damaged' => 3,
+  'QualityIssue' => 4,
+  _ => 5,
+};
+
+String _returnLabel(String state) => switch (state) {
+  'PartiallyReturned' => 'Partially Returned',
+  'FullyReturned' => 'Fully Returned',
+  _ => 'No Returns',
+};
+
+
+

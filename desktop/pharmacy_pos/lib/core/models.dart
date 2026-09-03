@@ -970,6 +970,7 @@ class SaleListItem {
     required this.amountPaid,
     required this.changeGiven,
     required this.paymentSummary,
+    required this.returnState,
     this.invoiceNumber,
     this.holdNumber,
     this.postedAtUtc,
@@ -977,7 +978,7 @@ class SaleListItem {
     this.customerPhone,
   });
 
-  final String id, status, branchName, cashierName, paymentSummary;
+  final String id, status, branchName, cashierName, paymentSummary, returnState;
   final String? invoiceNumber, holdNumber, customerName, customerPhone;
   final DateTime createdAt;
   final DateTime? postedAtUtc;
@@ -989,7 +990,9 @@ class SaleListItem {
     invoiceNumber: json['invoiceNumber'] as String?,
     holdNumber: json['holdNumber'] as String?,
     status: json['status'] as String? ?? 'Posted',
-    createdAt: DateTime.parse((json['createdAt'] ?? json['postedAtUtc']) as String).toLocal(),
+    createdAt: DateTime.parse(
+      (json['createdAt'] ?? json['postedAtUtc']) as String,
+    ).toLocal(),
     postedAtUtc: json['postedAtUtc'] == null
         ? null
         : DateTime.parse(json['postedAtUtc'] as String).toLocal(),
@@ -1002,6 +1005,7 @@ class SaleListItem {
     amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
     changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
     paymentSummary: json['paymentSummary'] as String? ?? '',
+    returnState: _enumName(json['returnState'] ?? 'NotReturned'),
   );
 }
 
@@ -1019,6 +1023,8 @@ class PagedSales {
 
 class SaleAllocation {
   const SaleAllocation({
+    this.id = '',
+    this.productBatchId = '',
     required this.batchNumber,
     required this.expiryDate,
     required this.quantity,
@@ -1026,11 +1032,13 @@ class SaleAllocation {
     required this.unitSalePriceSnapshot,
     required this.netAmount,
   });
-  final String batchNumber;
+  final String id, productBatchId, batchNumber;
   final DateTime expiryDate;
   final int quantity;
   final double unitRetailPriceSnapshot, unitSalePriceSnapshot, netAmount;
   factory SaleAllocation.fromJson(Map<String, dynamic> json) => SaleAllocation(
+    id: json['id'] as String? ?? '',
+    productBatchId: json['productBatchId'] as String? ?? '',
     batchNumber: json['batchNumber'] as String? ?? '',
     expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
     quantity: json['quantity'] as int? ?? 0,
@@ -1129,7 +1137,9 @@ class SaleDetails {
     invoiceNumber: json['invoiceNumber'] as String?,
     holdNumber: json['holdNumber'] as String?,
     status: json['status'] as String? ?? 'Posted',
-    createdAt: DateTime.parse((json['createdAt'] ?? json['postedAtUtc']) as String).toLocal(),
+    createdAt: DateTime.parse(
+      (json['createdAt'] ?? json['postedAtUtc']) as String,
+    ).toLocal(),
     postedAtUtc: json['postedAtUtc'] == null
         ? null
         : DateTime.parse(json['postedAtUtc'] as String).toLocal(),
@@ -1150,4 +1160,290 @@ class SaleDetails {
         .map((x) => SalePaymentDetail.fromJson(x as Map<String, dynamic>))
         .toList(),
   );
+}
+
+class ReturnableSale {
+  const ReturnableSale({
+    required this.saleId,
+    required this.invoiceNumber,
+    required this.postedAtUtc,
+    required this.branchName,
+    required this.cashierName,
+    required this.netTotal,
+    required this.returnState,
+    required this.items,
+    required this.originalPayments,
+    this.customerName,
+    this.customerPhone,
+  });
+  final String saleId, invoiceNumber, branchName, cashierName, returnState;
+  final DateTime postedAtUtc;
+  final String? customerName, customerPhone;
+  final double netTotal;
+  final List<ReturnableSaleItem> items;
+  final List<SalePaymentDetail> originalPayments;
+  factory ReturnableSale.fromJson(Map<String, dynamic> json) => ReturnableSale(
+    saleId: json['saleId'] as String? ?? '',
+    invoiceNumber: json['invoiceNumber'] as String? ?? '',
+    postedAtUtc: DateTime.parse(json['postedAtUtc'] as String).toLocal(),
+    branchName: json['branchName'] as String? ?? '',
+    cashierName: json['cashierName'] as String? ?? '',
+    customerName: json['customerName'] as String?,
+    customerPhone: json['customerPhone'] as String?,
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    returnState: _enumName(json['returnState']),
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => ReturnableSaleItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    originalPayments: (json['originalPayments'] as List<dynamic>? ?? [])
+        .map((x) => SalePaymentDetail.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class ReturnableSaleItem {
+  const ReturnableSaleItem({
+    required this.saleItemId,
+    required this.productName,
+    required this.sku,
+    required this.soldQuantity,
+    required this.alreadyReturnedQuantity,
+    required this.remainingQuantity,
+    required this.originalNetAmount,
+    required this.remainingRefundAmount,
+    required this.allocations,
+  });
+  final String saleItemId, productName, sku;
+  final int soldQuantity, alreadyReturnedQuantity, remainingQuantity;
+  final double originalNetAmount, remainingRefundAmount;
+  final List<ReturnableAllocation> allocations;
+  factory ReturnableSaleItem.fromJson(Map<String, dynamic> json) =>
+      ReturnableSaleItem(
+        saleItemId: json['saleItemId'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        soldQuantity: json['soldQuantity'] as int? ?? 0,
+        alreadyReturnedQuantity: json['alreadyReturnedQuantity'] as int? ?? 0,
+        remainingQuantity: json['remainingQuantity'] as int? ?? 0,
+        originalNetAmount: (json['originalNetAmount'] as num?)?.toDouble() ?? 0,
+        remainingRefundAmount:
+            (json['remainingRefundAmount'] as num?)?.toDouble() ?? 0,
+        allocations: (json['allocations'] as List<dynamic>? ?? [])
+            .map(
+              (x) => ReturnableAllocation.fromJson(x as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+}
+
+class ReturnableAllocation {
+  const ReturnableAllocation({
+    required this.allocationId,
+    required this.productBatchId,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.originalQuantity,
+    required this.alreadyReturnedQuantity,
+    required this.remainingQuantity,
+    required this.unitSalePriceSnapshot,
+    required this.refundRemaining,
+    required this.isBatchDisposed,
+    required this.isBatchExpired,
+  });
+  final String allocationId, productBatchId, batchNumber;
+  final DateTime expiryDate;
+  final int originalQuantity, alreadyReturnedQuantity, remainingQuantity;
+  final double unitSalePriceSnapshot, refundRemaining;
+  final bool isBatchDisposed, isBatchExpired;
+  factory ReturnableAllocation.fromJson(Map<String, dynamic> json) =>
+      ReturnableAllocation(
+        allocationId: json['allocationId'] as String? ?? '',
+        productBatchId: json['productBatchId'] as String? ?? '',
+        batchNumber: json['batchNumber'] as String? ?? '',
+        expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+        originalQuantity: json['originalQuantity'] as int? ?? 0,
+        alreadyReturnedQuantity: json['alreadyReturnedQuantity'] as int? ?? 0,
+        remainingQuantity: json['remainingQuantity'] as int? ?? 0,
+        unitSalePriceSnapshot:
+            (json['unitSalePriceSnapshot'] as num?)?.toDouble() ?? 0,
+        refundRemaining: (json['refundRemaining'] as num?)?.toDouble() ?? 0,
+        isBatchDisposed: json['isBatchDisposed'] as bool? ?? false,
+        isBatchExpired: json['isBatchExpired'] as bool? ?? false,
+      );
+}
+
+class SalesReturnListItem {
+  const SalesReturnListItem({
+    required this.id,
+    required this.returnNumber,
+    required this.originalInvoiceNumber,
+    required this.returnDateUtc,
+    required this.branchName,
+    required this.processedByName,
+    required this.itemCount,
+    required this.refundAmount,
+    required this.status,
+    required this.reason,
+    this.customerName,
+  });
+  final String id,
+      returnNumber,
+      originalInvoiceNumber,
+      branchName,
+      processedByName,
+      status,
+      reason;
+  final DateTime returnDateUtc;
+  final String? customerName;
+  final int itemCount;
+  final double refundAmount;
+  factory SalesReturnListItem.fromJson(Map<String, dynamic> json) =>
+      SalesReturnListItem(
+        id: json['id'] as String? ?? '',
+        returnNumber: json['returnNumber'] as String? ?? '',
+        originalInvoiceNumber: json['originalInvoiceNumber'] as String? ?? '',
+        returnDateUtc: DateTime.parse(
+          json['returnDateUtc'] as String,
+        ).toLocal(),
+        branchName: json['branchName'] as String? ?? '',
+        processedByName: json['processedByName'] as String? ?? '',
+        customerName: json['customerName'] as String?,
+        itemCount: json['itemCount'] as int? ?? 0,
+        refundAmount: (json['refundAmount'] as num?)?.toDouble() ?? 0,
+        status: _enumName(json['status']),
+        reason: _enumName(json['reason']),
+      );
+}
+
+class PagedSalesReturns {
+  const PagedSalesReturns({required this.items, required this.totalCount});
+  final List<SalesReturnListItem> items;
+  final int totalCount;
+  factory PagedSalesReturns.fromJson(Map<String, dynamic> json) =>
+      PagedSalesReturns(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => SalesReturnListItem.fromJson(x as Map<String, dynamic>))
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
+class SalesReturnDetails {
+  const SalesReturnDetails({
+    required this.id,
+    required this.returnNumber,
+    required this.originalInvoiceNumber,
+    required this.returnDateUtc,
+    required this.branchName,
+    required this.processedByName,
+    required this.reason,
+    required this.refundAmount,
+    required this.items,
+    required this.refundPayments,
+    this.customerName,
+    this.notes,
+  });
+  final String id,
+      returnNumber,
+      originalInvoiceNumber,
+      branchName,
+      processedByName,
+      reason;
+  final DateTime returnDateUtc;
+  final String? customerName, notes;
+  final double refundAmount;
+  final List<SalesReturnItemDetail> items;
+  final List<SalesRefundPaymentDetail> refundPayments;
+  factory SalesReturnDetails.fromJson(
+    Map<String, dynamic> json,
+  ) => SalesReturnDetails(
+    id: json['id'] as String? ?? '',
+    returnNumber: json['returnNumber'] as String? ?? '',
+    originalInvoiceNumber: json['originalInvoiceNumber'] as String? ?? '',
+    returnDateUtc: DateTime.parse(json['returnDateUtc'] as String).toLocal(),
+    branchName: json['branchName'] as String? ?? '',
+    processedByName: json['processedByName'] as String? ?? '',
+    reason: _enumName(json['reason']),
+    notes: json['notes'] as String?,
+    customerName: json['customerName'] as String?,
+    refundAmount: (json['refundAmount'] as num?)?.toDouble() ?? 0,
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SalesReturnItemDetail.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    refundPayments: (json['refundPayments'] as List<dynamic>? ?? [])
+        .map(
+          (x) => SalesRefundPaymentDetail.fromJson(x as Map<String, dynamic>),
+        )
+        .toList(),
+  );
+}
+
+class SalesReturnItemDetail {
+  const SalesReturnItemDetail({
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.refundAmount,
+    required this.allocations,
+  });
+  final String productName, sku;
+  final int quantity;
+  final double refundAmount;
+  final List<SalesReturnAllocationDetail> allocations;
+  factory SalesReturnItemDetail.fromJson(Map<String, dynamic> json) =>
+      SalesReturnItemDetail(
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        quantity: json['quantity'] as int? ?? 0,
+        refundAmount: (json['refundAmount'] as num?)?.toDouble() ?? 0,
+        allocations: (json['allocations'] as List<dynamic>? ?? [])
+            .map(
+              (x) => SalesReturnAllocationDetail.fromJson(
+                x as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+      );
+}
+
+class SalesReturnAllocationDetail {
+  const SalesReturnAllocationDetail({
+    required this.batchNumber,
+    required this.quantity,
+    required this.disposition,
+    required this.refundAmount,
+  });
+  final String batchNumber, disposition;
+  final int quantity;
+  final double refundAmount;
+  factory SalesReturnAllocationDetail.fromJson(Map<String, dynamic> json) =>
+      SalesReturnAllocationDetail(
+        batchNumber: json['batchNumber'] as String? ?? '',
+        quantity: json['quantity'] as int? ?? 0,
+        disposition: _enumName(json['disposition']),
+        refundAmount: (json['refundAmount'] as num?)?.toDouble() ?? 0,
+      );
+}
+
+class SalesRefundPaymentDetail {
+  const SalesRefundPaymentDetail({
+    required this.method,
+    required this.amount,
+    this.referenceNumber,
+  });
+  final String method;
+  final double amount;
+  final String? referenceNumber;
+  factory SalesRefundPaymentDetail.fromJson(Map<String, dynamic> json) =>
+      SalesRefundPaymentDetail(
+        method: _enumName(json['method']),
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        referenceNumber: json['referenceNumber'] as String?,
+      );
+}
+
+String _enumName(dynamic value) {
+  if (value == null) return '';
+  if (value is String) return value;
+  return value.toString();
 }

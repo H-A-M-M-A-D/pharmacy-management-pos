@@ -163,6 +163,16 @@ abstract interface class PharmacyApi {
   Future<SaleDetails> saleDetails(String token, String id);
   Future<SaleDetails> saleReceipt(String token, String id);
   Future<SaleDetails> reprintSaleReceipt(String token, String id);
+  Future<ReturnableSale> returnableSale(String token, String saleId);
+  Future<SalesReturnDetails> postSalesReturn(
+    String token,
+    String saleId,
+    Map<String, dynamic> values,
+  );
+  Future<PagedSalesReturns> listSalesReturns(String token, {String? search});
+  Future<SalesReturnDetails> salesReturnDetails(String token, String id);
+  Future<SalesReturnDetails> salesReturnReceipt(String token, String id);
+  Future<SalesReturnDetails> reprintSalesReturnReceipt(String token, String id);
   void close();
 }
 
@@ -812,6 +822,69 @@ class ApiClient implements PharmacyApi {
       SaleDetails.fromJson(
         (await _request('POST', '/api/sales/$id/reprint', token: token))!,
       );
+  @override
+  Future<ReturnableSale> returnableSale(String token, String saleId) async =>
+      ReturnableSale.fromJson(
+        (await _request('GET', '/api/sales/$saleId/returnable', token: token))!,
+      );
+
+  @override
+  Future<SalesReturnDetails> postSalesReturn(
+    String token,
+    String saleId,
+    Map<String, dynamic> values,
+  ) async => SalesReturnDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/sales/$saleId/returns',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<PagedSalesReturns> listSalesReturns(
+    String token, {
+    String? search,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedSalesReturns.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/sales-returns', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<SalesReturnDetails> salesReturnDetails(
+    String token,
+    String id,
+  ) async => SalesReturnDetails.fromJson(
+    (await _request('GET', '/api/sales-returns/$id', token: token))!,
+  );
+
+  @override
+  Future<SalesReturnDetails> salesReturnReceipt(
+    String token,
+    String id,
+  ) async => SalesReturnDetails.fromJson(
+    (await _request('GET', '/api/sales-returns/$id/receipt', token: token))!,
+  );
+
+  @override
+  Future<SalesReturnDetails> reprintSalesReturnReceipt(
+    String token,
+    String id,
+  ) async => SalesReturnDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/sales-returns/$id/reprint-audit',
+      token: token,
+    ))!,
+  );
   Future<void> _void(String method, String path, String token) async {
     await _request(method, path, token: token, expectBody: false);
   }

@@ -36,6 +36,10 @@ public class PharmacyDbContext : DbContext
     public DbSet<SaleItem> SaleItems { get; set; } = null!;
     public DbSet<SaleItemBatchAllocation> SaleItemBatchAllocations { get; set; } = null!;
     public DbSet<SalePayment> SalePayments { get; set; } = null!;
+    public DbSet<SalesReturn> SalesReturns { get; set; } = null!;
+    public DbSet<SalesReturnItem> SalesReturnItems { get; set; } = null!;
+    public DbSet<SalesReturnAllocation> SalesReturnAllocations { get; set; } = null!;
+    public DbSet<SalesRefundPayment> SalesRefundPayments { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -105,6 +109,37 @@ public class PharmacyDbContext : DbContext
             if (entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Sale batch allocation history is permanent and cannot be updated or deleted.");
+            }
+        }
+        foreach (var entry in ChangeTracker.Entries<SalesReturn>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Posted sales returns are permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SalesReturnItem>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Sales return item history is permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SalesReturnAllocation>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Sales return allocation history is permanent and cannot be updated or deleted.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SalesRefundPayment>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Sales refund payment history is permanent and cannot be updated or deleted.");
             }
         }
     }
@@ -182,7 +217,7 @@ public class PharmacyDbContext : DbContext
             movementDeltas.TryGetValue(key, out var movementDelta);
             batchDeltas.TryGetValue(key, out var batchDelta);
             inventoryDeltas.TryGetValue(key, out var inventoryDelta);
-            if (movementDelta == 0 || batchDelta != movementDelta || inventoryDelta != movementDelta)
+            if (batchDelta != movementDelta || inventoryDelta != movementDelta)
             {
                 throw new InvalidOperationException(
                     "ProductBatch and Inventory balances must change atomically with matching StockMovement records.");
@@ -219,6 +254,10 @@ public class PharmacyDbContext : DbContext
         ConfigureSaleItem(modelBuilder);
         ConfigureSaleItemBatchAllocation(modelBuilder);
         ConfigureSalePayment(modelBuilder);
+        ConfigureSalesReturn(modelBuilder);
+        ConfigureSalesReturnItem(modelBuilder);
+        ConfigureSalesReturnAllocation(modelBuilder);
+        ConfigureSalesRefundPayment(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -775,6 +814,97 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
     }
 
+
+    private void ConfigureSalesReturn(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesReturn>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ReturnNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.GrossReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.RefundAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.ReturnNumber).IsUnique();
+        entity.HasIndex(e => e.OriginalSaleId);
+        entity.HasIndex(e => new { e.BranchId, e.PostedAtUtc });
+        entity.HasIndex(e => new { e.ProcessedByUserId, e.PostedAtUtc });
+        entity.HasIndex(e => new { e.Status, e.ReturnDateUtc });
+        entity.HasIndex(e => e.Reason);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesReturns_Status", "\"Status\" IN (1)");
+            table.HasCheckConstraint("CK_SalesReturns_Reason", "\"Reason\" IN (1, 2, 3, 4, 5)");
+            table.HasCheckConstraint("CK_SalesReturns_Posted", "\"Status\" = 1 AND \"PostedAtUtc\" IS NOT NULL");
+            table.HasCheckConstraint("CK_SalesReturns_Money_NonNegative", "\"GrossReturnAmount\" >= 0 AND \"DiscountReturnAmount\" >= 0 AND \"TaxReturnAmount\" >= 0 AND \"RefundAmount\" >= 0");
+        });
+        entity.HasOne(e => e.OriginalSale).WithMany().HasForeignKey(e => e.OriginalSaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ProcessedByUser).WithMany().HasForeignKey(e => e.ProcessedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesReturnItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesReturnItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.GrossReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.RefundAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SalesReturnId);
+        entity.HasIndex(e => e.OriginalSaleItemId);
+        entity.HasIndex(e => e.ProductId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesReturnItems_Quantity_Positive", "\"Quantity\" > 0");
+            table.HasCheckConstraint("CK_SalesReturnItems_Money_NonNegative", "\"GrossReturnAmount\" >= 0 AND \"DiscountReturnAmount\" >= 0 AND \"TaxReturnAmount\" >= 0 AND \"RefundAmount\" >= 0");
+        });
+        entity.HasOne(e => e.SalesReturn).WithMany(r => r.Items).HasForeignKey(e => e.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.OriginalSaleItem).WithMany().HasForeignKey(e => e.OriginalSaleItemId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesReturnAllocation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesReturnAllocation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ExpiryDateSnapshot).HasColumnType("date").IsRequired();
+        entity.Property(e => e.UnitRetailPriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.UnitSalePriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.UnitCostPriceSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.GrossReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.TaxReturnAmount).HasPrecision(18, 2);
+        entity.Property(e => e.RefundAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SalesReturnItemId);
+        entity.HasIndex(e => e.OriginalSaleItemBatchAllocationId);
+        entity.HasIndex(e => e.ProductBatchId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesReturnAllocations_Quantity_Positive", "\"Quantity\" > 0");
+            table.HasCheckConstraint("CK_SalesReturnAllocations_Disposition", "\"Disposition\" IN (1, 2)");
+            table.HasCheckConstraint("CK_SalesReturnAllocations_Money_NonNegative", "\"UnitRetailPriceSnapshot\" >= 0 AND \"UnitSalePriceSnapshot\" >= 0 AND \"UnitCostPriceSnapshot\" >= 0 AND \"GrossReturnAmount\" >= 0 AND \"DiscountReturnAmount\" >= 0 AND \"TaxReturnAmount\" >= 0 AND \"RefundAmount\" >= 0");
+        });
+        entity.HasOne(e => e.SalesReturnItem).WithMany(i => i.Allocations).HasForeignKey(e => e.SalesReturnItemId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.OriginalSaleItemBatchAllocation).WithMany().HasForeignKey(e => e.OriginalSaleItemBatchAllocationId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesRefundPayment(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesRefundPayment>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.HasIndex(e => e.SalesReturnId);
+        entity.HasIndex(e => new { e.Method, e.CreatedAt });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesRefundPayments_Method", "\"Method\" IN (1, 2, 3, 4, 5, 6)");
+            table.HasCheckConstraint("CK_SalesRefundPayments_Amount_Positive", "\"Amount\" > 0");
+        });
+        entity.HasOne(e => e.SalesReturn).WithMany(r => r.RefundPayments).HasForeignKey(e => e.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+    }
     private void ConfigureSalePayment(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<SalePayment>();

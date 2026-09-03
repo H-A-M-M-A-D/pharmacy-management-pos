@@ -80,6 +80,12 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var saleIds = rows.Select(x => x.Id).ToArray();
+        var returnedBySale = await context.SalesReturnAllocations.AsNoTracking()
+            .Where(x => saleIds.Contains(x.SalesReturnItem!.SalesReturn!.OriginalSaleId) && x.SalesReturnItem.SalesReturn.Status == SalesReturnStatus.Posted)
+            .GroupBy(x => x.SalesReturnItem!.SalesReturn!.OriginalSaleId)
+            .Select(x => new { SaleId = x.Key, Quantity = x.Sum(a => a.Quantity) })
+            .ToDictionaryAsync(x => x.SaleId, x => x.Quantity, cancellationToken);
         var items = rows.Select(x => new SaleListItemDto(
                 x.Id,
                 x.InvoiceNumber,
@@ -96,7 +102,8 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
                 x.NetTotal,
                 x.AmountPaid,
                 x.ChangeGiven,
-                string.Join(", ", x.Payments.Select(p => $"{p.Method}:{p.AmountApplied}"))))
+                string.Join(", ", x.Payments.Select(p => $"{p.Method}:{p.AmountApplied}")),
+                ReturnState(x.Items.Sum(i => i.RequestedQuantity), returnedBySale.GetValueOrDefault(x.Id))))
             .ToList();
         return new(items, query.Page, query.PageSize, total);
     }
@@ -117,6 +124,9 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
         var payments = sale.Payments.OrderBy(x => x.CreatedAt).Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
         return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, sale.Branch!.Name, sale.Branch.Address, sale.Branch.PhoneNumber, sale.CashierUserId, sale.CashierUser!.FullName, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.ChangeGiven, sale.Notes, items, payments);
     }
+
+    private static SalesReturnState ReturnState(int soldQuantity, int returnedQuantity) =>
+        returnedQuantity <= 0 ? SalesReturnState.NotReturned : returnedQuantity >= soldQuantity ? SalesReturnState.FullyReturned : SalesReturnState.PartiallyReturned;
 
     public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {

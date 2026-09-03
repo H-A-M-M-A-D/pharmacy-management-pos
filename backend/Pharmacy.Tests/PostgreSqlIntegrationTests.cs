@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            7L,
+            8L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -32,11 +32,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260901215409_CompleteBatchAndInventoryManagement',
                     '20260902051500_CompleteSupplierManagement',
                     '20260902055022_CompletePurchasingAndGoodsReceiving',
-                    '20260902114037_CompletePosAndSales');
+                    '20260902114037_CompletePosAndSales',
+                    '20260902222101_CompleteSalesReturnsAndRefunds');
                 """));
 
         Assert.Equal(
-            22L,
+            26L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -63,7 +64,11 @@ public sealed class PostgreSqlIntegrationTests
                   ('StockMovements', 'CreatedAt'),
                   ('Sales', 'PostedAtUtc'),
                   ('Sales', 'NetTotal'),
-                  ('SaleItemBatchAllocations', 'ExpiryDateSnapshot'));
+                  ('SaleItemBatchAllocations', 'ExpiryDateSnapshot'),
+                  ('SalesReturns', 'ReturnDateUtc'),
+                  ('SalesReturns', 'RefundAmount'),
+                  ('SalesReturnAllocations', 'ExpiryDateSnapshot'),
+                  ('SalesRefundPayments', 'Amount'));
             """, connection))
         await using (var reader = await command.ExecuteReaderAsync())
         {
@@ -86,6 +91,10 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("timestamp with time zone", types["Sales.PostedAtUtc"]);
         Assert.Equal("numeric", types["Sales.NetTotal"]);
         Assert.Equal("date", types["SaleItemBatchAllocations.ExpiryDateSnapshot"]);
+        Assert.Equal("timestamp with time zone", types["SalesReturns.ReturnDateUtc"]);
+        Assert.Equal("numeric", types["SalesReturns.RefundAmount"]);
+        Assert.Equal("date", types["SalesReturnAllocations.ExpiryDateSnapshot"]);
+        Assert.Equal("numeric", types["SalesRefundPayments.Amount"]);
     }
 
     [PostgreSqlFact]
@@ -599,6 +608,128 @@ public sealed class PostgreSqlIntegrationTests
                 """, ("id", Guid.NewGuid()), ("sale", saleId)));
 
         await InsertMovementAsync(connection, transaction, branchId, productId, batchId, 3, -1);
+        await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase8_sales_return_constraints_indexes_and_permissions_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions"
+            WHERE "Code" IN ('sales.returns.view','sales.returns.create','sales.returns.refund','sales.returns.reprint');
+            """));
+
+        Assert.Equal(10L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname IN (
+                'IX_SalesReturns_ReturnNumber',
+                'IX_SalesReturns_OriginalSaleId',
+                'IX_SalesReturns_BranchId_PostedAtUtc',
+                'IX_SalesReturns_ProcessedByUserId_PostedAtUtc',
+                'IX_SalesReturns_Status_ReturnDateUtc',
+                'IX_SalesReturnItems_SalesReturnId',
+                'IX_SalesReturnItems_OriginalSaleItemId',
+                'IX_SalesReturnAllocations_OriginalSaleItemBatchAllocationId',
+                'IX_SalesRefundPayments_SalesReturnId',
+                'IX_SalesRefundPayments_Method_CreatedAt');
+            """));
+
+        Assert.Equal(10L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND constraint_name IN (
+                'CK_SalesReturns_Status',
+                'CK_SalesReturns_Reason',
+                'CK_SalesReturns_Posted',
+                'CK_SalesReturns_Money_NonNegative',
+                'CK_SalesReturnItems_Quantity_Positive',
+                'CK_SalesReturnItems_Money_NonNegative',
+                'CK_SalesReturnAllocations_Quantity_Positive',
+                'CK_SalesReturnAllocations_Disposition',
+                'CK_SalesRefundPayments_Method',
+                'CK_SalesRefundPayments_Amount_Positive');
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase8_sales_return_database_constraints_and_fks_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var saleId = Guid.NewGuid();
+        var saleItemId = Guid.NewGuid();
+        var allocationId = Guid.NewGuid();
+        var returnId = Guid.NewGuid();
+        var returnItemId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\" = 'Manager';");
+        var userId = Guid.NewGuid();
+
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(connection, transaction, branchId, productId, Unique("batch"), batchId);
+        await InsertUserAsync(connection, transaction, branchId, roleId, Unique("manager"), Unique("MANAGER"), null, null, userId);
+        await InsertPostedSaleAsync(connection, transaction, saleId, branchId, userId, Unique("INV-PG-RET"), 120);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SaleItems" ("Id","SaleId","ProductId","RequestedQuantity","DiscountPercent","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@sale,@product,2,0,120,0,0,120,now(),now());
+            """, ("id", saleItemId), ("sale", saleId), ("product", productId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SaleItemBatchAllocations" ("Id","SaleItemId","ProductBatchId","Quantity","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossAmount","DiscountAmount","TaxAmount","NetAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@item,@batch,2,60,60,40,current_date + 365,120,0,0,120,now(),now());
+            """, ("id", allocationId), ("item", saleItemId), ("batch", batchId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,60,0,0,60,1,now(),now(),now());
+            """, ("id", returnId), ("sale", saleId), ("branch", branchId), ("user", userId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SalesReturnItems" ("Id","SalesReturnId","OriginalSaleItemId","ProductId","Quantity","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@return,@item,@product,1,60,0,0,60,now(),now());
+            """, ("id", returnItemId), ("return", returnId), ("item", saleItemId), ("product", productId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SalesReturnAllocations" ("Id","SalesReturnItemId","OriginalSaleItemBatchAllocationId","ProductBatchId","Quantity","Disposition","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
+            VALUES (@id,@item,@allocation,@batch,1,1,60,60,40,current_date + 365,60,0,0,60,now(),now());
+            """, ("id", Guid.NewGuid()), ("item", returnItemId), ("allocation", allocationId), ("batch", batchId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "SalesRefundPayments" ("Id","SalesReturnId","Method","Amount","CreatedAt","UpdatedAt")
+            VALUES (@id,@return,1,60,now(),now());
+            """, ("id", Guid.NewGuid()), ("return", returnId));
+
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_return_number", PostgresErrorCodes.UniqueViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
+                VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,1,0,0,1,1,now(),now(),now());
+                """, ("id", Guid.NewGuid()), ("sale", saleId), ("branch", branchId), ("user", userId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "zero_return_quantity", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalesReturnAllocations" ("Id","SalesReturnItemId","OriginalSaleItemBatchAllocationId","ProductBatchId","Quantity","Disposition","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@item,@allocation,@batch,0,1,60,60,40,current_date + 365,0,0,0,0,now(),now());
+                """, ("id", Guid.NewGuid()), ("item", returnItemId), ("allocation", allocationId), ("batch", batchId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "invalid_disposition", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalesReturnAllocations" ("Id","SalesReturnItemId","OriginalSaleItemBatchAllocationId","ProductBatchId","Quantity","Disposition","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@item,@allocation,@batch,1,9,60,60,40,current_date + 365,60,0,0,60,now(),now());
+                """, ("id", Guid.NewGuid()), ("item", returnItemId), ("allocation", allocationId), ("batch", batchId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_refund_payment", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalesRefundPayments" ("Id","SalesReturnId","Method","Amount","CreatedAt","UpdatedAt")
+                VALUES (@id,@return,1,-1,now(),now());
+                """, ("id", Guid.NewGuid()), ("return", returnId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "invalid_original_allocation_fk", PostgresErrorCodes.ForeignKeyViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "SalesReturnAllocations" ("Id","SalesReturnItemId","OriginalSaleItemBatchAllocationId","ProductBatchId","Quantity","Disposition","UnitRetailPriceSnapshot","UnitSalePriceSnapshot","UnitCostPriceSnapshot","ExpiryDateSnapshot","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
+                VALUES (@id,@item,@allocation,@batch,1,1,60,60,40,current_date + 365,60,0,0,60,now(),now());
+                """, ("id", Guid.NewGuid()), ("item", returnItemId), ("allocation", Guid.NewGuid()), ("batch", batchId)));
+
         await transaction.RollbackAsync();
     }
     private static async Task<NpgsqlConnection> OpenConnectionAsync()

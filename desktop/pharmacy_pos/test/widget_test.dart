@@ -519,6 +519,64 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('line_discount')), findsOneWidget);
   });
+
+  testWidgets('sales return workflow posts original allocation refund', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'sales.view',
+        'sales.returns.view',
+        'sales.returns.create',
+        'sales.returns.refund',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sales History'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Return items'), findsOneWidget);
+    await tester.tap(find.byTooltip('Return items'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sales Return / Refund'), findsOneWidget);
+    expect(find.text('B-001'), findsOneWidget);
+    expect(find.text('Refund Total PKR 12.00'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('post_return')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Post'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('return_receipt_preview')), findsOneWidget);
+    expect(find.textContaining('RET-2026-000001'), findsOneWidget);
+  });
+
+  testWidgets('sales return history follows returns view permission', (
+    tester,
+  ) async {
+    final denied = TestFixture(permissions: {'sales.view'});
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sales Returns'));
+    await tester.pumpAndSettle();
+    expect(find.text('Not permitted'), findsOneWidget);
+
+    final allowed = TestFixture(
+      permissions: {'sales.view', 'sales.returns.view'},
+    );
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sales Returns'));
+    await tester.pumpAndSettle();
+    expect(find.text('RET-2026-000001'), findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -802,6 +860,7 @@ class FakeApi implements PharmacyApi {
             amountPaid: 12,
             changeGiven: 0,
             paymentSummary: 'Cash:12',
+            returnState: 'NotReturned',
           ),
         ],
         totalCount: 1,
@@ -1252,6 +1311,129 @@ class FakeApi implements PharmacyApi {
     String? email,
     String? phoneNumber,
   }) async => user;
+  ReturnableSale get returnableSaleData => ReturnableSale(
+    saleId: 'sale-1',
+    invoiceNumber: 'INV-2026-000001',
+    postedAtUtc: DateTime(2026, 9, 3, 10),
+    branchName: user.branch.name,
+    cashierName: user.fullName,
+    customerName: 'Walk-in',
+    netTotal: 12,
+    returnState: 'NotReturned',
+    originalPayments: const [
+      SalePaymentDetail(method: 'Cash', amountApplied: 12),
+    ],
+    items: [
+      ReturnableSaleItem(
+        saleItemId: 'item-1',
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        soldQuantity: 1,
+        alreadyReturnedQuantity: 0,
+        remainingQuantity: 1,
+        originalNetAmount: 12,
+        remainingRefundAmount: 12,
+        allocations: [
+          ReturnableAllocation(
+            allocationId: 'allocation-1',
+            productBatchId: 'batch-1',
+            batchNumber: 'B-001',
+            expiryDate: DateTime(2027, 9, 3),
+            originalQuantity: 1,
+            alreadyReturnedQuantity: 0,
+            remainingQuantity: 1,
+            unitSalePriceSnapshot: 12,
+            refundRemaining: 12,
+            isBatchDisposed: false,
+            isBatchExpired: false,
+          ),
+        ],
+      ),
+    ],
+  );
+
+  SalesReturnDetails get salesReturn => SalesReturnDetails(
+    id: 'return-1',
+    returnNumber: 'RET-2026-000001',
+    originalInvoiceNumber: 'INV-2026-000001',
+    returnDateUtc: DateTime(2026, 9, 3, 11),
+    branchName: user.branch.name,
+    processedByName: user.fullName,
+    reason: 'CustomerReturn',
+    refundAmount: 12,
+    customerName: 'Walk-in',
+    items: const [
+      SalesReturnItemDetail(
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        quantity: 1,
+        refundAmount: 12,
+        allocations: [
+          SalesReturnAllocationDetail(
+            batchNumber: 'B-001',
+            quantity: 1,
+            disposition: 'Restockable',
+            refundAmount: 12,
+          ),
+        ],
+      ),
+    ],
+    refundPayments: const [
+      SalesRefundPaymentDetail(method: 'Cash', amount: 12),
+    ],
+  );
+
+  @override
+  Future<ReturnableSale> returnableSale(String token, String saleId) async =>
+      returnableSaleData;
+
+  @override
+  Future<SalesReturnDetails> postSalesReturn(
+    String token,
+    String saleId,
+    Map<String, dynamic> values,
+  ) async => salesReturn;
+
+  @override
+  Future<PagedSalesReturns> listSalesReturns(
+    String token, {
+    String? search,
+  }) async => PagedSalesReturns(
+    items: [
+      SalesReturnListItem(
+        id: 'return-1',
+        returnNumber: 'RET-2026-000001',
+        originalInvoiceNumber: 'INV-2026-000001',
+        returnDateUtc: DateTime(2026, 9, 3, 11),
+        branchName: user.branch.name,
+        processedByName: user.fullName,
+        customerName: 'Walk-in',
+        itemCount: 1,
+        refundAmount: 12,
+        status: 'Posted',
+        reason: 'CustomerReturn',
+      ),
+    ],
+    totalCount: 1,
+  );
+
+  @override
+  Future<SalesReturnDetails> salesReturnDetails(
+    String token,
+    String id,
+  ) async => salesReturn;
+
+  @override
+  Future<SalesReturnDetails> salesReturnReceipt(
+    String token,
+    String id,
+  ) async => salesReturn;
+
+  @override
+  Future<SalesReturnDetails> reprintSalesReturnReceipt(
+    String token,
+    String id,
+  ) async => salesReturn;
 
   @override
   void close() {}

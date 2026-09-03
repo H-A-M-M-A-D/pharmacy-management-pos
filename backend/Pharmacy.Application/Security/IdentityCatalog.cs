@@ -54,6 +54,10 @@ public static class PermissionCatalog
     public const string SalesHold = "sales.hold";
     public const string SalesDiscount = "sales.discount";
     public const string SalesReprint = "sales.reprint";
+    public const string SalesReturnsView = "sales.returns.view";
+    public const string SalesReturnsCreate = "sales.returns.create";
+    public const string SalesReturnsRefund = "sales.returns.refund";
+    public const string SalesReturnsReprint = "sales.returns.reprint";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -70,7 +74,8 @@ public static class PermissionCatalog
         PurchasesView, PurchasesCreate, PurchasesUpdateDraft, PurchasesCancel,
         PurchasesReceive, PurchaseOrdersView, PurchaseOrdersCreate,
         PurchaseOrdersUpdate, PurchaseOrdersCancel,
-        SalesView, SalesCreate, SalesHold, SalesDiscount, SalesReprint
+        SalesView, SalesCreate, SalesHold, SalesDiscount, SalesReprint,
+        SalesReturnsView, SalesReturnsCreate, SalesReturnsRefund, SalesReturnsReprint
     ];
 }
 

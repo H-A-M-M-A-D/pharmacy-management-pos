@@ -262,6 +262,20 @@ class AuthState extends ChangeNotifier {
       _api.saleReceipt(_requiredToken, id);
   Future<SaleDetails> reprintSaleReceipt(String id) =>
       _api.reprintSaleReceipt(_requiredToken, id);
+  Future<ReturnableSale> returnableSale(String saleId) =>
+      _api.returnableSale(_requiredToken, saleId);
+  Future<SalesReturnDetails> postSalesReturn(
+    String saleId,
+    Map<String, dynamic> values,
+  ) => _api.postSalesReturn(_requiredToken, saleId, values);
+  Future<PagedSalesReturns> listSalesReturns({String? search}) =>
+      _api.listSalesReturns(_requiredToken, search: search);
+  Future<SalesReturnDetails> salesReturnDetails(String id) =>
+      _api.salesReturnDetails(_requiredToken, id);
+  Future<SalesReturnDetails> salesReturnReceipt(String id) =>
+      _api.salesReturnReceipt(_requiredToken, id);
+  Future<SalesReturnDetails> reprintSalesReturnReceipt(String id) =>
+      _api.reprintSalesReturnReceipt(_requiredToken, id);
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;

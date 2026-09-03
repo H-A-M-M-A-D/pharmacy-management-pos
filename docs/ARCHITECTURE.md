@@ -1,4 +1,4 @@
-# Phase 1 Architecture
+# Architecture
 
 ## Backend Layers
 
@@ -11,7 +11,7 @@ Application -> Domain
 Domain -> no project
 ```
 
-Application owns auth, Product Master, inventory, supplier-management, purchasing, POS/sales use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
+Application owns auth, Product Master, inventory, supplier-management, purchasing, POS/sales, sales-return/refund use cases, and FEFO contracts/use-case orchestration. Infrastructure owns EF Core repositories, PostgreSQL transactions, PostgreSQL configuration, PBKDF2 hashing, and JWT creation. API owns HTTP endpoints, authentication validation, dependency injection, and permission-policy integration.
 
 ## Authentication and Authorization
 
@@ -21,7 +21,7 @@ Application owns auth, Product Master, inventory, supplier-management, purchasin
 - Token creation requires a positive configured expiration and includes user, role, branch, and distinct permission claims.
 - Login queries only active users and loads role, role-permission, permission, and branch relationships.
 - `HasPermissionAttribute` creates policies that require a specific `permission` claim. No authorization logic depends only on role-name checks.
-- Initial owner setup is rejected once any user exists. Full user and permission administration is outside Phase 1.
+- Initial owner setup is rejected once any user exists. Setup-owner remains limited to empty databases; user and permission administration is implemented through later phase user-management foundations.
 
 Phase 2 adds global case-insensitive username normalization, optional normalized-email uniqueness, configurable five-attempt/15-minute lockout defaults, forced first-login password changes, and token-version validation against the database. Username is immutable for the MVP. User changes are permission-oriented; `users.manage_owner` is additionally required for Owner targets, and backend logic prevents removal or deactivation of the last active Owner.
 
@@ -78,7 +78,17 @@ Sale posting is the inventory and receipt boundary. The service validates branch
 
 Posting updates `ProductBatch.QuantityAvailable` and `Inventory.QuantityInStock`, records matching negative `Sale` stock movements, stores sale items/payments, and writes audit entries in one unit of work. Held sales store the cart and customer snapshot only; they do not reserve inventory. A held sale is revalidated against current stock when posted.
 
-Posted sales are immutable through `PharmacyDbContext`: existing posted sale rows cannot be changed or deleted, and sale payment/allocation history cannot be edited or deleted. Held sales can be updated or cancelled. Sales returns, customer credit sales, tax rules, shift/cash-drawer controls, and accounting journal integration remain later phases.
+Posted sales are immutable through `PharmacyDbContext`: existing posted sale rows cannot be changed or deleted, and sale payment/allocation history cannot be edited or deleted. Held sales can be updated or cancelled. Customer credit sales, tax rules, shift/cash-drawer controls, and accounting journal integration remain later phases.
+
+## Sales Returns and Refunds
+
+Phase 8 sales-return operations are exposed through `ISalesReturnService`. A return must reference a posted original sale and must select quantities from persisted `SaleItemBatchAllocation` rows. The service never invokes FEFO for returns because the source batch is already known from the original sale.
+
+Posting runs in a serializable PostgreSQL transaction. It verifies branch access, original-sale state, allocation ownership, remaining returnable quantity, return reason, refund permission, refund payment total, and batch disposition. Partial returns are cumulative; over-return attempts are rejected against the original allocation quantity and prior posted returns.
+
+Restockable returns create a positive `SaleReturn` stock movement and increase the original `ProductBatch.QuantityAvailable` and `Inventory.QuantityInStock` projections. Non-resellable returns create a positive `SaleReturn` movement plus a negative `Damaged` movement, or `Expired` when the original batch is expired, leaving sellable projections unchanged. Disposed batches cannot be restocked.
+
+Refund amounts are derived from the original allocation snapshots for sale price, discount, tax, and cost. The final partial return receives any rounding residual so cumulative refund cannot exceed the original sale economics. Posted `SalesReturn`, `SalesReturnItem`, `SalesReturnAllocation`, and `SalesRefundPayment` rows are immutable through `PharmacyDbContext`. Return numbers use a PostgreSQL sequence plus a unique index.
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -105,7 +115,7 @@ Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Z
 
 ## Entity and Table Truth
 
-There are 22 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
+There are 26 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
 
 Global/catalog and organization data:
 
@@ -137,6 +147,10 @@ Branch-scoped operational data:
 | SaleItem | SaleItems | Sale line linked to product |
 | SaleItemBatchAllocation | SaleItemBatchAllocations | Posted FEFO batch allocation and price snapshot |
 | SalePayment | SalePayments | Posted sale payment line |
+| SalesReturn | SalesReturns | Branch-scoped posted return/refund document |
+| SalesReturnItem | SalesReturnItems | Return line linked to original sale item |
+| SalesReturnAllocation | SalesReturnAllocations | Return quantity linked to original sale batch allocation |
+| SalesRefundPayment | SalesRefundPayments | Refund payment line |
 
 Audit data:
 
@@ -160,19 +174,20 @@ Audit data:
 - Supplier ledger sign rules are enforced by `CK_SupplierLedgerEntries_AmountSign`.
 - Purchase order status, ordered/received quantity range, receipt status, receipt totals, receipt item quantity, price, discount, tax, net amount, and manufacturing-before-expiry rules have PostgreSQL checks.
 - Sales status, posted invoice requirement, paid posted sale totals, non-negative sale money, sale item quantity/discount/money, sale allocation quantity/money, and sale payment method/cash tender rules have PostgreSQL checks.
-- Purchase order numbers, GRN numbers, supplier invoice numbers, sale invoice numbers, and held sale numbers have unique indexes scoped to their business rules.
-- FEFO, branch, active-state, audit, stock-ledger, supplier, supplier-ledger, purchase-order, goods-receipt, POS search, sales history, sale payment, and receipt query paths have supporting indexes.
+- Sales-return status, posted return requirement, reason, non-negative totals, return-item quantity/money, return-allocation quantity/disposition/money, and refund-payment method/amount rules have PostgreSQL checks.
+- Purchase order numbers, GRN numbers, supplier invoice numbers, sale invoice numbers, held sale numbers, and sales-return numbers have unique indexes scoped to their business rules.
+- FEFO, branch, active-state, audit, stock-ledger, supplier, supplier-ledger, purchase-order, goods-receipt, POS search, sales history, sale payment, sales-return, refund-payment, and receipt query paths have supporting indexes.
 - Foreign keys and delete behaviors are defined in `PharmacyDbContext` and generated into the migration.
 - Audit old/new value columns are configured as PostgreSQL `jsonb`.
 
-These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, supplier ledger sign checks, purchase/receipt uniqueness, purchase quantity checks, receipt item checks, purchasing permission seeds, sales permission seeds, sale/receipt uniqueness, sale payment checks, and sale allocation checks.
+These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, supplier ledger sign checks, purchase/receipt uniqueness, purchase quantity checks, receipt item checks, purchasing permission seeds, sales permission seeds, sale/receipt uniqueness, sale payment checks, sale allocation checks, sales-return uniqueness, sales-return checks, refund payment checks, return allocation checks, sales-return permission seeds, and return-number sequence existence.
 
 ## Dates, Time, Money, and Quantity
 
 - Base entity timestamps, login/count timestamps, and health timestamps are UTC `DateTime` values mapped to PostgreSQL timestamps with time zone.
 - Manufacturing and expiry are date-only business values mapped to PostgreSQL `date`.
 - Product and batch money use `decimal(18,2)`.
-- Supplier opening balance, credit limit, supplier ledger amounts, purchase prices, and purchase receipt totals use `decimal(18,2)`.
+- Supplier opening balance, credit limit, supplier ledger amounts, purchase prices, purchase receipt totals, sale totals, sales-return totals, and refund payments use `decimal(18,2)`.
 - Maximum discount percentage, purchase discount percentage, and purchase tax percentage use `decimal(5,2)`.
 - Stock quantity, reorder levels, and pack sizes use integers.
 - Unit is a product label and pack size is retained, so future box/strip/tablet/bottle/piece modeling is not blocked. Unit conversion is not implemented.
@@ -187,21 +202,25 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260902051500_CompleteSupplierManagement`
 - Migration: `20260902055022_CompletePurchasingAndGoodsReceiving`
 - Migration: `20260902114037_CompletePosAndSales`
+- Migration: `20260902222101_CompleteSalesReturnsAndRefunds`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1 through Phase 7 migrations recorded with product version `10.0.11`
-- Real schema: 22 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
+- EF history: Phase 1 through Phase 8 migrations recorded with product version `10.0.11`
+- Real schema: 26 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, and supplier screens, and purchasing screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. Purchasing UI includes purchase-order list/create/submit/cancel, goods receiving, direct purchase posting, and purchase history. POS UI includes product/barcode search, cart, discount-aware line editing, held-sale action, checkout payment dialog, sales history, and receipt preview/reprint actions. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, and supplier screens, and purchasing screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. Purchasing UI includes purchase-order list/create/submit/cancel, goods receiving, direct purchase posting, and purchase history. POS UI includes product/barcode search, cart, discount-aware line editing, held-sale action, checkout payment dialog, sales history, original-allocation return/refund dialog, sales-return history, and receipt preview/reprint actions. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
-## Phase 1 Limitations
+## Current Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No sales returns, customer credit billing, purchase returns, transfers, reports, unit conversion, accounting general ledger, supplier payment allocation, shift/cash drawer closing, or background expiry processing.
+- No exchange/store-credit return flow, receipt-less return flow, customer credit billing, purchase returns, transfers, reports, unit conversion, accounting general ledger, supplier payment allocation, shift/cash drawer closing, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.
+
+
+

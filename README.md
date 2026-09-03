@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management system with completed Phase 7 POS and Sales foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Customer credit billing, sales returns, accounting general ledger, and reporting workflows have not started.
+Pharmacy management system with completed Phase 8 Sales Returns and Refunds foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Customer credit billing, accounting general ledger, purchase returns, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -15,10 +15,10 @@ Pharmacy management system with completed Phase 7 POS and Sales foundations for 
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
 - Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
-- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, POS checkout, sales posting, held sales, split payments, receipt preview/reprint, and sales history
+- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, POS checkout, sales posting, held sales, split payments, receipt preview/reprint, sales history, original-allocation sales returns, refunds, and return receipt history
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 
-Sales returns, customer credit billing, accounting general ledger, purchase return, and reporting modules are not implemented.
+Customer credit billing, accounting general ledger, purchase return, exchange/store-credit returns, and reporting modules are not implemented.
 
 ## Dependency Graph
 
@@ -57,7 +57,7 @@ backend/Pharmacy.Infrastructure/Migrations/20260902055022_CompletePurchasingAndG
 backend/Pharmacy.Infrastructure/Migrations/20260902114037_CompletePosAndSales.cs
 ```
 
-All seven migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 22 application tables plus `__EFMigrationsHistory`; Phase 7 adds sales, sale items, sale batch allocations, sale payments, sales permission seeds, receipt/history indexes, and PostgreSQL check constraints. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All eight migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 26 application tables plus `__EFMigrationsHistory`; Phase 8 adds sales returns, return items, return allocation reversals, refund payments, sales-return permission seeds, a PostgreSQL return-number sequence, receipt/history indexes, and PostgreSQL check constraints. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Product Master Policy
 
@@ -126,6 +126,17 @@ All seven migrations are applied to local `pharmacy_dev` and `pharmacy_test` thr
 - Split payments are supported for cash, card, bank transfer, Easypaisa, JazzCash, and other. Cash requires tendered amount and records change. Non-cash payments may include a reference number.
 - Product-level discounts require `sales.discount` and cannot exceed `Product.MaximumDiscountPercent`. Tax is intentionally fixed at zero until a real tax model is introduced.
 - Invoice numbers are generated in a serializable transaction and protected by a unique index. The current MVP does not include an automatic retry loop if a rare serial collision still reaches the database.
+
+## Sales Returns and Refunds Policy
+
+- Returns must reference a posted original sale and its persisted `SaleItemBatchAllocation` rows. Returns do not run FEFO and do not pick replacement batches.
+- Partial and full returns are supported cumulatively. The backend rejects over-return attempts against the original allocation quantity.
+- Restockable returns create a positive `SaleReturn` movement and increase the original batch and inventory projections.
+- Non-resellable returns create a positive `SaleReturn` movement plus a negative `Damaged` or `Expired` movement for the same original batch, leaving sellable projections unchanged.
+- Disposed batches cannot be returned as restockable. Expired batches can only be processed as non-resellable.
+- Refund amounts are calculated from original sale price, discount, tax, and cost snapshots. Final partial returns receive any rounding residual so cumulative refund does not exceed the original allocation economics.
+- Refund payment totals must equal the backend-calculated refund. Cash, card, bank transfer, Easypaisa, JazzCash, and other methods are supported.
+- Posted sales returns, return items, return allocations, and refund payments are immutable through DbContext validation. Return numbers use a PostgreSQL sequence and a unique index.
 ## FEFO and Expiry
 
 `FefoAllocationService` filters by branch and product, excludes disposed, expired, and empty batches, orders deterministically by expiry/creation/batch/id, and allocates across batches. Expiry and manufacturing dates use `DateOnly` and PostgreSQL `date`. A batch expiring on the sale date is considered sellable for that entire date in the current fixed MVP policy.
@@ -134,7 +145,7 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 
 ## Precision
 
-- Money: `decimal(18,2)`
+- Money, sales totals, return totals, and refund payments: `decimal(18,2)`
 - Supplier opening balance, credit limit, ledger amounts, purchase prices, and purchase receipt totals: `decimal(18,2)`
 - Maximum discount, purchase discount percentage, and purchase tax percentage: `decimal(5,2)`
 - Quantities and pack sizes: integer base-unit counts
@@ -157,3 +168,4 @@ flutter test
 ```
 
 Architecture details and the exact mapped table inventory are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
