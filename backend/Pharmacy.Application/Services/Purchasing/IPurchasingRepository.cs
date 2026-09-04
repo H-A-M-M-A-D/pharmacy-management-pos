@@ -16,11 +16,14 @@ public interface IPurchasingRepository
     Task<Pharmacy.Domain.Entities.Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default);
     Task<PurchaseOrder?> GetPurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default);
     Task<GoodsReceipt?> GetGoodsReceiptAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ProductBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
     Task<bool> SupplierInvoiceExistsAsync(Guid supplierId, string normalizedInvoiceNumber, CancellationToken cancellationToken = default);
     Task<string> NextPurchaseOrderNumberAsync(DateOnly orderDate, CancellationToken cancellationToken = default);
     Task<string> NextGrnNumberAsync(DateOnly receiptDate, CancellationToken cancellationToken = default);
+    Task<string> NextPurchaseReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default);
     Task AddPurchaseOrderAsync(PurchaseOrder order, CancellationToken cancellationToken = default);
     Task AddGoodsReceiptAsync(GoodsReceipt receipt, CancellationToken cancellationToken = default);
+    Task AddPurchaseReturnAsync(PurchaseReturn purchaseReturn, CancellationToken cancellationToken = default);
     Task AddBatchAsync(ProductBatch batch, CancellationToken cancellationToken = default);
     Task AddInventoryAsync(Pharmacy.Domain.Entities.Inventory inventory, CancellationToken cancellationToken = default);
     Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default);
@@ -30,6 +33,10 @@ public interface IPurchasingRepository
     Task<PurchaseOrderDetailsDto?> GetPurchaseOrderDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task<PagedResult<PurchaseHistoryItemDto>> ListPurchasesAsync(PurchaseHistoryQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task<GoodsReceiptDetailsDto?> GetGoodsReceiptDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
+    Task<ReturnableGoodsReceiptDto?> GetReturnableGoodsReceiptAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default);
+    Task<Dictionary<Guid, (int PaidQuantity, int BonusQuantity, decimal Gross, decimal Discount, decimal Tax, decimal Net)>> GetPurchaseReturnTotalsAsync(Guid goodsReceiptId, CancellationToken cancellationToken = default);
+    Task<PagedResult<PurchaseReturnListItemDto>> ListPurchaseReturnsAsync(PurchaseReturnListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
+    Task<PurchaseReturnDetailsDto?> GetPurchaseReturnDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task<PurchasingOptionsDto> GetOptionsAsync(string? productSearch, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

@@ -149,6 +149,22 @@ abstract interface class PharmacyApi {
     String token,
     Map<String, dynamic> values,
   );
+  Future<ReturnablePurchase> returnablePurchase(String token, String receiptId);
+  Future<PurchaseReturnDetails> postPurchaseReturn(
+    String token,
+    String receiptId,
+    Map<String, dynamic> values,
+  );
+  Future<PagedPurchaseReturns> listPurchaseReturns(
+    String token, {
+    String? search,
+  });
+  Future<PurchaseReturnDetails> purchaseReturnDetails(String token, String id);
+  Future<PurchaseReturnDetails> purchaseReturnNote(String token, String id);
+  Future<PurchaseReturnDetails> reprintPurchaseReturnNote(
+    String token,
+    String id,
+  );
   Future<List<PosProduct>> searchPosProducts(String token, {String? query});
   Future<SaleDetails> holdSale(String token, Map<String, dynamic> values);
   Future<SaleDetails> postSale(String token, Map<String, dynamic> values);
@@ -725,6 +741,76 @@ class ApiClient implements PharmacyApi {
       '/api/purchases/direct',
       token: token,
       body: values,
+    ))!,
+  );
+
+  @override
+  Future<ReturnablePurchase> returnablePurchase(
+    String token,
+    String receiptId,
+  ) async => ReturnablePurchase.fromJson(
+    (await _request(
+      'GET',
+      '/api/goods-receipts/$receiptId/returnable',
+      token: token,
+    ))!,
+  );
+
+  @override
+  Future<PurchaseReturnDetails> postPurchaseReturn(
+    String token,
+    String receiptId,
+    Map<String, dynamic> values,
+  ) async => PurchaseReturnDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/goods-receipts/$receiptId/purchase-returns',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<PagedPurchaseReturns> listPurchaseReturns(
+    String token, {
+    String? search,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    return PagedPurchaseReturns.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/purchase-returns', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PurchaseReturnDetails> purchaseReturnDetails(
+    String token,
+    String id,
+  ) async => PurchaseReturnDetails.fromJson(
+    (await _request('GET', '/api/purchase-returns/$id', token: token))!,
+  );
+
+  @override
+  Future<PurchaseReturnDetails> purchaseReturnNote(
+    String token,
+    String id,
+  ) async => PurchaseReturnDetails.fromJson(
+    (await _request('GET', '/api/purchase-returns/$id/note', token: token))!,
+  );
+
+  @override
+  Future<PurchaseReturnDetails> reprintPurchaseReturnNote(
+    String token,
+    String id,
+  ) async => PurchaseReturnDetails.fromJson(
+    (await _request(
+      'POST',
+      '/api/purchase-returns/$id/reprint-audit',
+      token: token,
     ))!,
   );
 

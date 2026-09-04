@@ -241,6 +241,20 @@ class AuthState extends ChangeNotifier {
       _api.postGoodsReceipt(_requiredToken, values);
   Future<PurchaseDetails> postDirectPurchase(Map<String, dynamic> values) =>
       _api.postDirectPurchase(_requiredToken, values);
+  Future<ReturnablePurchase> returnablePurchase(String receiptId) =>
+      _api.returnablePurchase(_requiredToken, receiptId);
+  Future<PurchaseReturnDetails> postPurchaseReturn(
+    String receiptId,
+    Map<String, dynamic> values,
+  ) => _api.postPurchaseReturn(_requiredToken, receiptId, values);
+  Future<PagedPurchaseReturns> listPurchaseReturns({String? search}) =>
+      _api.listPurchaseReturns(_requiredToken, search: search);
+  Future<PurchaseReturnDetails> purchaseReturnDetails(String id) =>
+      _api.purchaseReturnDetails(_requiredToken, id);
+  Future<PurchaseReturnDetails> purchaseReturnNote(String id) =>
+      _api.purchaseReturnNote(_requiredToken, id);
+  Future<PurchaseReturnDetails> reprintPurchaseReturnNote(String id) =>
+      _api.reprintPurchaseReturnNote(_requiredToken, id);
 
   Future<List<PosProduct>> searchPosProducts({String? query}) =>
       _api.searchPosProducts(_requiredToken, query: query);

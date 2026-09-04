@@ -15,4 +15,9 @@ public interface IPurchasingService
     Task<GoodsReceiptDetailsDto> GetGoodsReceiptAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default);
     Task<GoodsReceiptDetailsDto> PostGoodsReceiptAsync(Guid actorId, GoodsReceiptRequest request, CancellationToken cancellationToken = default);
     Task<PurchasingOptionsDto> GetOptionsAsync(Guid actorId, string? productSearch, CancellationToken cancellationToken = default);
+    Task<ReturnableGoodsReceiptDto> GetReturnableGoodsReceiptAsync(Guid actorId, Guid goodsReceiptId, CancellationToken cancellationToken = default);
+    Task<PurchaseReturnDetailsDto> PostPurchaseReturnAsync(Guid actorId, Guid goodsReceiptId, PostPurchaseReturnRequest request, CancellationToken cancellationToken = default);
+    Task<PagedResult<PurchaseReturnListItemDto>> ListPurchaseReturnsAsync(Guid actorId, PurchaseReturnListQuery query, CancellationToken cancellationToken = default);
+    Task<PurchaseReturnDetailsDto> GetPurchaseReturnAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default);
+    Task<PurchaseReturnDetailsDto> ReprintPurchaseReturnAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default);
 }

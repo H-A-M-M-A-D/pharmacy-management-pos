@@ -282,6 +282,154 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
             ?? throw new ResourceNotFoundException("Purchase was not found.");
     }
 
+
+    public async Task<ReturnableGoodsReceiptDto> GetReturnableGoodsReceiptAsync(Guid actorId, Guid goodsReceiptId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.PurchaseReturnsView, cancellationToken);
+        return await repository.GetReturnableGoodsReceiptAsync(goodsReceiptId, actor.BranchId, CanSelectBranch(actor), BusinessDate(), cancellationToken)
+            ?? throw new ResourceNotFoundException("Purchase was not found.");
+    }
+
+    public async Task<PurchaseReturnDetailsDto> PostPurchaseReturnAsync(Guid actorId, Guid goodsReceiptId, PostPurchaseReturnRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.PurchaseReturnsCreate, cancellationToken);
+        ValidatePurchaseReturn(request);
+        PurchaseReturn? posted = null;
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var receipt = await repository.GetGoodsReceiptAsync(goodsReceiptId, ct) ?? throw new ResourceNotFoundException("Purchase was not found.");
+            EnsureBranchAccess(actor, receipt.BranchId);
+            if (receipt.Status != GoodsReceiptStatus.Posted) throw new RequestValidationException("Only posted goods receipts can be returned to supplier.");
+            if (request.Items.Any(x => receipt.Items.All(i => i.Id != x.OriginalGoodsReceiptItemId)))
+                throw new RequestValidationException("This item does not belong to the selected Goods Receipt.");
+
+            var existing = await repository.GetPurchaseReturnTotalsAsync(receipt.Id, ct);
+            var now = UtcNow();
+            posted = new PurchaseReturn
+            {
+                OriginalGoodsReceiptId = receipt.Id,
+                SupplierId = receipt.SupplierId,
+                BranchId = receipt.BranchId,
+                ProcessedByUserId = actorId,
+                ReturnNumber = await repository.NextPurchaseReturnNumberAsync(now, ct),
+                ReturnDateUtc = now,
+                PostedAtUtc = now,
+                Status = PurchaseReturnStatus.Posted,
+                Reason = request.Reason,
+                Notes = Clean(request.Notes)
+            };
+            await repository.AddPurchaseReturnAsync(posted, ct);
+
+            foreach (var line in request.Items)
+            {
+                var original = receipt.Items.First(x => x.Id == line.OriginalGoodsReceiptItemId);
+                var prior = existing.TryGetValue(original.Id, out var totals) ? totals : default;
+                var paidRemaining = original.PurchasedQuantity - prior.PaidQuantity;
+                var bonusRemaining = original.BonusQuantity - prior.BonusQuantity;
+                if (line.PaidReturnQuantity > paidRemaining) throw new ResourceConflictException($"Only {paidRemaining} paid units remain returnable.");
+                if (line.BonusReturnQuantity > bonusRemaining) throw new ResourceConflictException($"Only {bonusRemaining} bonus units remain returnable.");
+                if (!original.ProductBatchId.HasValue) throw new RequestValidationException("Original receipt item is not linked to a batch.");
+                var batch = await repository.GetBatchAsync(original.ProductBatchId.Value, ct) ?? throw new ResourceNotFoundException("Original batch was not found.");
+                var physical = line.PaidReturnQuantity + line.BonusReturnQuantity;
+                if (batch.BranchId != receipt.BranchId || batch.ProductId != original.ProductId) throw new RequestValidationException("Original batch does not match the receipt item.");
+                if (batch.QuantityAvailable < physical) throw new ResourceConflictException($"Only {batch.QuantityAvailable} units are physically available in this batch.");
+                var inventory = await InventoryFor(batch, original.Product!, ct);
+                if (inventory.QuantityInStock < physical) throw new ResourceConflictException($"Only {inventory.QuantityInStock} units are physically available in inventory.");
+
+                var credit = CalculateReturnCredit(original, prior, line.PaidReturnQuantity);
+                if (prior.Net + credit.Net > original.NetLineAmount) throw new ResourceConflictException("This Purchase Return would exceed the original supplier credit.");
+
+                batch.QuantityAvailable -= physical;
+                batch.UpdatedAt = now;
+                inventory.QuantityInStock -= physical;
+                inventory.UpdatedAt = now;
+                posted.GrossReturnAmount += credit.Gross;
+                posted.DiscountAdjustment += credit.Discount;
+                posted.TaxAdjustment += credit.Tax;
+                posted.NetSupplierCredit += credit.Net;
+                posted.Items.Add(new PurchaseReturnItem
+                {
+                    OriginalGoodsReceiptItemId = original.Id,
+                    ProductId = original.ProductId,
+                    ProductBatchId = batch.Id,
+                    BatchNumber = original.BatchNumber,
+                    ExpiryDate = original.ExpiryDate,
+                    PaidReturnQuantity = line.PaidReturnQuantity,
+                    BonusReturnQuantity = line.BonusReturnQuantity,
+                    PurchasePriceSnapshot = original.PurchasePrice,
+                    GrossReturnAmount = credit.Gross,
+                    DiscountAdjustment = credit.Discount,
+                    TaxAdjustment = credit.Tax,
+                    NetSupplierCredit = credit.Net
+                });
+                await repository.AddMovementAsync(new StockMovement
+                {
+                    MovementType = StockMovementType.PurchaseReturn,
+                    BranchId = receipt.BranchId,
+                    ProductId = original.ProductId,
+                    ProductBatchId = batch.Id,
+                    Quantity = -physical,
+                    ReferenceType = "PurchaseReturn",
+                    ReferenceId = posted.Id,
+                    Notes = posted.ReturnNumber,
+                    PerformedByUserId = actorId
+                }, ct);
+            }
+
+            posted.GrossReturnAmount = Money(posted.GrossReturnAmount);
+            posted.DiscountAdjustment = Money(posted.DiscountAdjustment);
+            posted.TaxAdjustment = Money(posted.TaxAdjustment);
+            posted.NetSupplierCredit = Money(posted.NetSupplierCredit);
+            if (posted.NetSupplierCredit > 0)
+            {
+                await repository.AddSupplierLedgerEntryAsync(new SupplierLedgerEntry
+                {
+                    SupplierId = receipt.SupplierId,
+                    BranchId = receipt.BranchId,
+                    EntryType = SupplierLedgerEntryType.PurchaseReturn,
+                    Amount = -posted.NetSupplierCredit,
+                    EntryDate = DateOnly.FromDateTime(now),
+                    ReferenceNumber = posted.ReturnNumber,
+                    ReferenceType = "PurchaseReturn",
+                    ReferenceId = posted.Id,
+                    Notes = posted.Notes,
+                    CreatedByUserId = actorId
+                }, ct);
+            }
+
+            await Audit(actorId, "PurchaseReturnPosted", "PurchaseReturn", posted.Id, null,
+                new { posted.ReturnNumber, receipt.GrnNumber, posted.SupplierId, posted.BranchId, posted.NetSupplierCredit, PhysicalQuantity = posted.Items.Sum(x => x.PaidReturnQuantity + x.BonusReturnQuantity) }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetPurchaseReturnDetailsAsync(posted!.Id, actor.BranchId, CanSelectBranch(actor), cancellationToken)
+            ?? throw new ResourceNotFoundException("Purchase return was not found.");
+    }
+
+    public async Task<PagedResult<PurchaseReturnListItemDto>> ListPurchaseReturnsAsync(Guid actorId, PurchaseReturnListQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.PurchaseReturnsView, cancellationToken);
+        ValidatePage(query.Page, query.PageSize);
+        var scope = Scope(actor, query.BranchId);
+        return await repository.ListPurchaseReturnsAsync(query with { BranchId = scope.BranchId }, actor.BranchId, scope.CanSelectBranch, cancellationToken);
+    }
+
+    public async Task<PurchaseReturnDetailsDto> GetPurchaseReturnAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.PurchaseReturnsView, cancellationToken);
+        return await repository.GetPurchaseReturnDetailsAsync(id, actor.BranchId, CanSelectBranch(actor), cancellationToken)
+            ?? throw new ResourceNotFoundException("Purchase return was not found.");
+    }
+
+    public async Task<PurchaseReturnDetailsDto> ReprintPurchaseReturnAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.PurchaseReturnsReprint, cancellationToken);
+        var details = await repository.GetPurchaseReturnDetailsAsync(id, actor.BranchId, CanSelectBranch(actor), cancellationToken)
+            ?? throw new ResourceNotFoundException("Purchase return was not found.");
+        await Audit(actorId, "PurchaseReturnNoteReprinted", "PurchaseReturn", id, null, new { details.ReturnNumber }, cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return details;
+    }
+
     public async Task<PurchasingOptionsDto> GetOptionsAsync(Guid actorId, string? productSearch, CancellationToken cancellationToken = default)
     {
         var actor = await Require(actorId, PermissionCatalog.PurchasesView, cancellationToken);
@@ -433,6 +581,35 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
         }
     }
 
+
+    private static (decimal Gross, decimal Discount, decimal Tax, decimal Net) CalculateReturnCredit(GoodsReceiptItem original, (int PaidQuantity, int BonusQuantity, decimal Gross, decimal Discount, decimal Tax, decimal Net) prior, int paidReturnQuantity)
+    {
+        if (paidReturnQuantity == 0) return (0, 0, 0, 0);
+        var finalPaidReturn = prior.PaidQuantity + paidReturnQuantity == original.PurchasedQuantity;
+        if (finalPaidReturn)
+        {
+            return (Money(original.PurchasedQuantity * original.PurchasePrice - prior.Gross), Money(original.DiscountAmount - prior.Discount), Money(original.TaxAmount - prior.Tax), Money(original.NetLineAmount - prior.Net));
+        }
+        return (Money(original.PurchasedQuantity == 0 ? 0 : original.PurchasedQuantity * original.PurchasePrice * paidReturnQuantity / original.PurchasedQuantity),
+            Money(original.PurchasedQuantity == 0 ? 0 : original.DiscountAmount * paidReturnQuantity / original.PurchasedQuantity),
+            Money(original.PurchasedQuantity == 0 ? 0 : original.TaxAmount * paidReturnQuantity / original.PurchasedQuantity),
+            Money(original.PurchasedQuantity == 0 ? 0 : original.NetLineAmount * paidReturnQuantity / original.PurchasedQuantity));
+    }
+
+    private static void ValidatePurchaseReturn(PostPurchaseReturnRequest request)
+    {
+        if (!Enum.IsDefined(request.Reason)) throw new RequestValidationException("Purchase return reason is invalid.");
+        if (request.Reason == PurchaseReturnReason.Other && string.IsNullOrWhiteSpace(request.Notes)) throw new RequestValidationException("Notes are required for Other purchase returns.");
+        if (request.Items.Count == 0) throw new RequestValidationException("At least one purchase return item is required.");
+        var seen = new HashSet<Guid>();
+        foreach (var item in request.Items)
+        {
+            if (item.OriginalGoodsReceiptItemId == Guid.Empty) throw new RequestValidationException("Original receipt item is required.");
+            if (!seen.Add(item.OriginalGoodsReceiptItemId)) throw new RequestValidationException("Each original receipt item can appear only once per purchase return.");
+            if (item.PaidReturnQuantity < 0 || item.BonusReturnQuantity < 0) throw new RequestValidationException("Return quantities cannot be negative.");
+            if (item.PaidReturnQuantity + item.BonusReturnQuantity <= 0) throw new RequestValidationException("At least one paid or bonus unit must be returned.");
+        }
+    }
     private DateOnly BusinessDate() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(UtcNow(), TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time")));
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

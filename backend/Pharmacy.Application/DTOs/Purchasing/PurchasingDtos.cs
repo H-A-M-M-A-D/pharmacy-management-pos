@@ -45,7 +45,7 @@ public sealed record PurchaseHistoryItemDto(
     Guid Id, string GrnNumber, string? SupplierInvoiceNumber, DateOnly ReceiptDate,
     Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
     decimal Subtotal, decimal DiscountTotal, decimal TaxTotal, decimal NetTotal,
-    GoodsReceiptStatus Status, string? ReceivedBy);
+    GoodsReceiptStatus Status, string? ReceivedBy, PurchaseReturnState ReturnState = PurchaseReturnState.NoReturns);
 
 public sealed record GoodsReceiptItemDto(
     Guid Id, Guid ProductId, string ProductName, string SKU, Guid? PurchaseOrderItemId,
@@ -68,3 +68,53 @@ public sealed record PurchasingOptionsDto(
 
 public sealed record PurchasingLookupDto(Guid Id, string Name);
 public sealed record PurchasingProductLookupDto(Guid Id, string Name, string SKU, string? GenericName, string? Manufacturer, decimal PurchasePrice, decimal RetailPrice);
+
+public enum PurchaseReturnState
+{
+    NoReturns = 0,
+    PartiallyReturned = 1,
+    FullyReturned = 2
+}
+
+public sealed record ReturnableGoodsReceiptDto(
+    Guid Id, string GrnNumber, string? SupplierInvoiceNumber, DateOnly ReceiptDate,
+    Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
+    decimal NetTotal, PurchaseReturnState ReturnState, IReadOnlyList<ReturnableGoodsReceiptItemDto> Items);
+
+public sealed record ReturnableGoodsReceiptItemDto(
+    Guid Id, Guid ProductId, string ProductName, string SKU, Guid ProductBatchId,
+    string BatchNumber, DateOnly ExpiryDate, bool IsBatchExpired, bool IsBatchDisposed,
+    int PurchasedQuantity, int PaidReturnedQuantity, int PaidRemainingQuantity,
+    int BonusQuantity, int BonusReturnedQuantity, int BonusRemainingQuantity,
+    int CurrentPhysicalStock, decimal PurchasePrice, decimal GrossRemainingCredit,
+    decimal DiscountRemainingCredit, decimal TaxRemainingCredit, decimal NetRemainingSupplierCredit,
+    int MaxPhysicalReturnQuantity);
+
+public sealed record PostPurchaseReturnRequest(
+    PurchaseReturnReason Reason, string? Notes, IReadOnlyList<PurchaseReturnItemRequest> Items);
+
+public sealed record PurchaseReturnItemRequest(Guid OriginalGoodsReceiptItemId, int PaidReturnQuantity, int BonusReturnQuantity);
+
+public sealed record PurchaseReturnListQuery(
+    int Page = 1, int PageSize = 25, string? Search = null, Guid? BranchId = null,
+    Guid? SupplierId = null, PurchaseReturnReason? Reason = null, DateOnly? DateFrom = null, DateOnly? DateTo = null);
+
+public sealed record PurchaseReturnListItemDto(
+    Guid Id, string ReturnNumber, string OriginalGrnNumber, string? SupplierInvoiceNumber,
+    DateTime ReturnDateUtc, Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
+    int PaidQuantity, int BonusQuantity, int TotalQuantity, decimal NetSupplierCredit,
+    PurchaseReturnStatus Status, PurchaseReturnReason Reason, string ProcessedByName);
+
+public sealed record PurchaseReturnDetailsDto(
+    Guid Id, string ReturnNumber, Guid OriginalGoodsReceiptId, string OriginalGrnNumber,
+    string? SupplierInvoiceNumber, Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
+    Guid ProcessedByUserId, string ProcessedByName, DateTime ReturnDateUtc,
+    PurchaseReturnReason Reason, string? Notes, decimal GrossReturnAmount,
+    decimal DiscountAdjustment, decimal TaxAdjustment, decimal NetSupplierCredit,
+    PurchaseReturnStatus Status, IReadOnlyList<PurchaseReturnItemDto> Items);
+
+public sealed record PurchaseReturnItemDto(
+    Guid Id, Guid OriginalGoodsReceiptItemId, Guid ProductId, string ProductName, string SKU,
+    Guid ProductBatchId, string BatchNumber, DateOnly ExpiryDate, int PaidReturnQuantity,
+    int BonusReturnQuantity, int TotalQuantity, decimal PurchasePriceSnapshot,
+    decimal GrossReturnAmount, decimal DiscountAdjustment, decimal TaxAdjustment, decimal NetSupplierCredit);

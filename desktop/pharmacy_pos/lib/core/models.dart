@@ -843,9 +843,10 @@ class PurchaseHistoryItem {
     required this.branchName,
     required this.netTotal,
     required this.status,
+    this.returnState = 'NoReturns',
     this.supplierInvoiceNumber,
   });
-  final String id, grnNumber, supplierName, branchName, status;
+  final String id, grnNumber, supplierName, branchName, status, returnState;
   final String? supplierInvoiceNumber;
   final DateTime receiptDate;
   final double netTotal;
@@ -859,6 +860,7 @@ class PurchaseHistoryItem {
         branchName: json['branchName'] as String? ?? '',
         netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
         status: json['status'] as String? ?? '',
+        returnState: _enumName(json['returnState'] ?? 'NoReturns'),
       );
 }
 
@@ -908,6 +910,286 @@ class PagedPurchases {
         .toList(),
     totalCount: json['totalCount'] as int? ?? 0,
   );
+}
+
+class ReturnablePurchase {
+  const ReturnablePurchase({
+    required this.id,
+    required this.grnNumber,
+    required this.receiptDate,
+    required this.supplierId,
+    required this.supplierName,
+    required this.branchId,
+    required this.branchName,
+    required this.netTotal,
+    required this.returnState,
+    required this.items,
+    this.supplierInvoiceNumber,
+  });
+  final String id,
+      grnNumber,
+      supplierId,
+      supplierName,
+      branchId,
+      branchName,
+      returnState;
+  final String? supplierInvoiceNumber;
+  final DateTime receiptDate;
+  final double netTotal;
+  final List<ReturnablePurchaseItem> items;
+  factory ReturnablePurchase.fromJson(Map<String, dynamic> json) =>
+      ReturnablePurchase(
+        id: json['id'] as String? ?? '',
+        grnNumber: json['grnNumber'] as String? ?? '',
+        supplierInvoiceNumber: json['supplierInvoiceNumber'] as String?,
+        receiptDate: _date(json['receiptDate']) ?? DateTime.now(),
+        supplierId: json['supplierId'] as String? ?? '',
+        supplierName: json['supplierName'] as String? ?? '',
+        branchId: json['branchId'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+        returnState: _enumName(json['returnState'] ?? 'NoReturns'),
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map(
+              (x) => ReturnablePurchaseItem.fromJson(x as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+}
+
+class ReturnablePurchaseItem {
+  const ReturnablePurchaseItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.productBatchId,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.purchasedQuantity,
+    required this.bonusQuantity,
+    required this.paidQuantityReturned,
+    required this.bonusQuantityReturned,
+    required this.paidQuantityRemaining,
+    required this.bonusQuantityRemaining,
+    required this.currentBatchAvailable,
+    required this.maxPhysicalReturnQuantity,
+    required this.purchasePrice,
+    required this.grossRemainingCredit,
+    required this.discountRemaining,
+    required this.taxRemaining,
+    required this.netRemainingSupplierCredit,
+    required this.isBatchExpired,
+    required this.isBatchDisposed,
+  });
+  final String id, productId, productName, sku, productBatchId, batchNumber;
+  final DateTime expiryDate;
+  final int purchasedQuantity,
+      bonusQuantity,
+      paidQuantityReturned,
+      bonusQuantityReturned,
+      paidQuantityRemaining,
+      bonusQuantityRemaining,
+      currentBatchAvailable,
+      maxPhysicalReturnQuantity;
+  final double purchasePrice,
+      grossRemainingCredit,
+      discountRemaining,
+      taxRemaining,
+      netRemainingSupplierCredit;
+  final bool isBatchExpired, isBatchDisposed;
+  factory ReturnablePurchaseItem.fromJson(Map<String, dynamic> json) =>
+      ReturnablePurchaseItem(
+        id: json['id'] as String? ?? '',
+        productId: json['productId'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        productBatchId: json['productBatchId'] as String? ?? '',
+        batchNumber: json['batchNumber'] as String? ?? '',
+        expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+        purchasedQuantity: json['purchasedQuantity'] as int? ?? 0,
+        bonusQuantity: json['bonusQuantity'] as int? ?? 0,
+        paidQuantityReturned: json['paidQuantityReturned'] as int? ?? 0,
+        bonusQuantityReturned: json['bonusQuantityReturned'] as int? ?? 0,
+        paidQuantityRemaining: json['paidQuantityRemaining'] as int? ?? 0,
+        bonusQuantityRemaining: json['bonusQuantityRemaining'] as int? ?? 0,
+        currentBatchAvailable: json['currentBatchAvailable'] as int? ?? 0,
+        maxPhysicalReturnQuantity:
+            json['maxPhysicalReturnQuantity'] as int? ?? 0,
+        purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
+        grossRemainingCredit:
+            (json['grossRemainingCredit'] as num?)?.toDouble() ?? 0,
+        discountRemaining: (json['discountRemaining'] as num?)?.toDouble() ?? 0,
+        taxRemaining: (json['taxRemaining'] as num?)?.toDouble() ?? 0,
+        netRemainingSupplierCredit:
+            (json['netRemainingSupplierCredit'] as num?)?.toDouble() ?? 0,
+        isBatchExpired: json['isBatchExpired'] as bool? ?? false,
+        isBatchDisposed: json['isBatchDisposed'] as bool? ?? false,
+      );
+}
+
+class PurchaseReturnListItem {
+  const PurchaseReturnListItem({
+    required this.id,
+    required this.returnNumber,
+    required this.originalGrnNumber,
+    required this.returnDateUtc,
+    required this.supplierName,
+    required this.branchName,
+    required this.paidQuantity,
+    required this.bonusQuantity,
+    required this.totalPhysicalQuantity,
+    required this.netSupplierCredit,
+    required this.status,
+    required this.reason,
+    required this.processedByName,
+    this.supplierInvoiceNumber,
+  });
+  final String id,
+      returnNumber,
+      originalGrnNumber,
+      supplierName,
+      branchName,
+      status,
+      reason,
+      processedByName;
+  final String? supplierInvoiceNumber;
+  final DateTime returnDateUtc;
+  final int paidQuantity, bonusQuantity, totalPhysicalQuantity;
+  final double netSupplierCredit;
+  factory PurchaseReturnListItem.fromJson(Map<String, dynamic> json) =>
+      PurchaseReturnListItem(
+        id: json['id'] as String? ?? '',
+        returnNumber: json['returnNumber'] as String? ?? '',
+        originalGrnNumber: json['originalGrnNumber'] as String? ?? '',
+        supplierInvoiceNumber: json['supplierInvoiceNumber'] as String?,
+        returnDateUtc: DateTime.parse(
+          json['returnDateUtc'] as String,
+        ).toLocal(),
+        supplierName: json['supplierName'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        paidQuantity: json['paidQuantity'] as int? ?? 0,
+        bonusQuantity: json['bonusQuantity'] as int? ?? 0,
+        totalPhysicalQuantity: json['totalPhysicalQuantity'] as int? ?? 0,
+        netSupplierCredit: (json['netSupplierCredit'] as num?)?.toDouble() ?? 0,
+        status: _enumName(json['status']),
+        reason: _enumName(json['reason']),
+        processedByName: json['processedByName'] as String? ?? '',
+      );
+}
+
+class PagedPurchaseReturns {
+  const PagedPurchaseReturns({required this.items, required this.totalCount});
+  final List<PurchaseReturnListItem> items;
+  final int totalCount;
+  factory PagedPurchaseReturns.fromJson(Map<String, dynamic> json) =>
+      PagedPurchaseReturns(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map(
+              (x) => PurchaseReturnListItem.fromJson(x as Map<String, dynamic>),
+            )
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
+class PurchaseReturnDetails {
+  const PurchaseReturnDetails({
+    required this.id,
+    required this.returnNumber,
+    required this.originalGoodsReceiptId,
+    required this.originalGrnNumber,
+    required this.supplierName,
+    required this.branchName,
+    required this.processedByName,
+    required this.returnDateUtc,
+    required this.reason,
+    required this.grossReturnAmount,
+    required this.discountAdjustment,
+    required this.taxAdjustment,
+    required this.netSupplierCredit,
+    required this.status,
+    required this.items,
+    this.supplierInvoiceNumber,
+    this.notes,
+  });
+  final String id,
+      returnNumber,
+      originalGoodsReceiptId,
+      originalGrnNumber,
+      supplierName,
+      branchName,
+      processedByName,
+      reason,
+      status;
+  final String? supplierInvoiceNumber, notes;
+  final DateTime returnDateUtc;
+  final double grossReturnAmount,
+      discountAdjustment,
+      taxAdjustment,
+      netSupplierCredit;
+  final List<PurchaseReturnItemDetail> items;
+  factory PurchaseReturnDetails.fromJson(
+    Map<String, dynamic> json,
+  ) => PurchaseReturnDetails(
+    id: json['id'] as String? ?? '',
+    returnNumber: json['returnNumber'] as String? ?? '',
+    originalGoodsReceiptId: json['originalGoodsReceiptId'] as String? ?? '',
+    originalGrnNumber: json['originalGrnNumber'] as String? ?? '',
+    supplierInvoiceNumber: json['supplierInvoiceNumber'] as String?,
+    supplierName: json['supplierName'] as String? ?? '',
+    branchName: json['branchName'] as String? ?? '',
+    processedByName: json['processedByName'] as String? ?? '',
+    returnDateUtc: DateTime.parse(json['returnDateUtc'] as String).toLocal(),
+    reason: _enumName(json['reason']),
+    notes: json['notes'] as String?,
+    grossReturnAmount: (json['grossReturnAmount'] as num?)?.toDouble() ?? 0,
+    discountAdjustment: (json['discountAdjustment'] as num?)?.toDouble() ?? 0,
+    taxAdjustment: (json['taxAdjustment'] as num?)?.toDouble() ?? 0,
+    netSupplierCredit: (json['netSupplierCredit'] as num?)?.toDouble() ?? 0,
+    status: _enumName(json['status']),
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map(
+          (x) => PurchaseReturnItemDetail.fromJson(x as Map<String, dynamic>),
+        )
+        .toList(),
+  );
+}
+
+class PurchaseReturnItemDetail {
+  const PurchaseReturnItemDetail({
+    required this.id,
+    required this.originalGoodsReceiptItemId,
+    required this.productName,
+    required this.sku,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.paidReturnQuantity,
+    required this.bonusReturnQuantity,
+    required this.totalPhysicalQuantity,
+    required this.purchasePriceSnapshot,
+    required this.netSupplierCredit,
+  });
+  final String id, originalGoodsReceiptItemId, productName, sku, batchNumber;
+  final DateTime expiryDate;
+  final int paidReturnQuantity, bonusReturnQuantity, totalPhysicalQuantity;
+  final double purchasePriceSnapshot, netSupplierCredit;
+  factory PurchaseReturnItemDetail.fromJson(Map<String, dynamic> json) =>
+      PurchaseReturnItemDetail(
+        id: json['id'] as String? ?? '',
+        originalGoodsReceiptItemId:
+            json['originalGoodsReceiptItemId'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        batchNumber: json['batchNumber'] as String? ?? '',
+        expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+        paidReturnQuantity: json['paidReturnQuantity'] as int? ?? 0,
+        bonusReturnQuantity: json['bonusReturnQuantity'] as int? ?? 0,
+        totalPhysicalQuantity: json['totalPhysicalQuantity'] as int? ?? 0,
+        purchasePriceSnapshot:
+            (json['purchasePriceSnapshot'] as num?)?.toDouble() ?? 0,
+        netSupplierCredit: (json['netSupplierCredit'] as num?)?.toDouble() ?? 0,
+      );
 }
 
 List<InventoryLookup> _lookups(dynamic json) => (json as List<dynamic>? ?? [])

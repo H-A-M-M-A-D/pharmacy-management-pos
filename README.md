@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management system with completed Phase 8 Sales Returns and Refunds foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Customer credit billing, accounting general ledger, purchase returns, and reporting workflows have not started.
+Pharmacy management system with completed Phase 9 Purchase Returns foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Customer credit billing, accounting general ledger, supplier cash-refund settlement, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -15,10 +15,10 @@ Pharmacy management system with completed Phase 8 Sales Returns and Refunds foun
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
 - Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
 - Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
-- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, POS checkout, sales posting, held sales, split payments, receipt preview/reprint, sales history, original-allocation sales returns, refunds, and return receipt history
+- Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, immutable original-GRN purchase returns, supplier credit ledger entries, POS checkout, sales posting, held sales, split payments, receipt preview/reprint, sales history, original-allocation sales returns, refunds, and return receipt history
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 
-Customer credit billing, accounting general ledger, purchase return, exchange/store-credit returns, and reporting modules are not implemented.
+Customer credit billing, accounting general ledger, supplier cash-refund settlement, exchange/store-credit returns, and reporting modules are not implemented.
 
 ## Dependency Graph
 
@@ -55,9 +55,11 @@ backend/Pharmacy.Infrastructure/Migrations/20260901215409_CompleteBatchAndInvent
 backend/Pharmacy.Infrastructure/Migrations/20260902051500_CompleteSupplierManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902055022_CompletePurchasingAndGoodsReceiving.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902114037_CompletePosAndSales.cs
+backend/Pharmacy.Infrastructure/Migrations/20260902222101_CompleteSalesReturnsAndRefunds.cs
+backend/Pharmacy.Infrastructure/Migrations/20260903231207_CompletePurchaseReturns.cs
 ```
 
-All eight migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 26 application tables plus `__EFMigrationsHistory`; Phase 8 adds sales returns, return items, return allocation reversals, refund payments, sales-return permission seeds, a PostgreSQL return-number sequence, receipt/history indexes, and PostgreSQL check constraints. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All nine migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 28 application tables plus `__EFMigrationsHistory`; Phase 9 adds purchase returns, purchase return items, purchase-return permission seeds, a PostgreSQL purchase-return-number sequence, supplier-credit/return lookup indexes, and PostgreSQL check constraints. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Product Master Policy
 
@@ -112,7 +114,17 @@ All eight migrations are applied to local `pharmacy_dev` and `pharmacy_test` thr
 - Paid quantity updates purchase-order received quantity and supplier payable. Bonus quantity increases stock without increasing payable.
 - Posting creates or reuses a compatible product batch, increments batch and inventory projections, records a positive `Purchase` stock movement, and creates a positive supplier ledger purchase entry when net total is above zero.
 - Supplier invoice number is optional, but when present it is unique per supplier by normalized value. Multiple receipts without invoice numbers are allowed.
-- Posted goods receipts and receipt items are immutable through the DbContext. Purchase returns and invoice settlement remain future phases.
+- Posted goods receipts and receipt items are immutable through the DbContext. Supplier payment allocation and accounting settlement remain future phases.
+
+## Purchase Returns Policy
+
+- Purchase returns must reference a posted original goods receipt and its receipt items. Operators cannot return arbitrary products or batches.
+- Paid and bonus quantities are tracked separately. Paid returns reduce supplier payable through a negative `PurchaseReturn` supplier ledger entry; bonus-only returns remove physical stock without creating supplier credit.
+- Return posting removes stock from the original `ProductBatch` and matching `Inventory` projection, and records a negative `PurchaseReturn` stock movement for the same branch/product/batch.
+- Partial returns are cumulative. The backend rejects over-return of paid quantity, over-return of bonus quantity, and attempts that exceed current physical stock.
+- Return credit is calculated from the original receipt economics, including discount/tax adjustments. The final paid return receives residual rounding so cumulative supplier credit does not exceed the original receipt item net amount.
+- Inactive suppliers/products and expired batches remain returnable when they belong to the historical original receipt. Disposed batches are still subject to current physical-stock checks.
+- Posted purchase returns and return items are immutable through DbContext validation. Return numbers use a PostgreSQL sequence and unique index.
 
 
 ## POS and Sales Policy
@@ -145,7 +157,7 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 
 ## Precision
 
-- Money, sales totals, return totals, and refund payments: `decimal(18,2)`
+- Money, sales totals, purchase-return totals, return totals, supplier credits, and refund payments: `decimal(18,2)`
 - Supplier opening balance, credit limit, ledger amounts, purchase prices, and purchase receipt totals: `decimal(18,2)`
 - Maximum discount, purchase discount percentage, and purchase tax percentage: `decimal(5,2)`
 - Quantities and pack sizes: integer base-unit counts

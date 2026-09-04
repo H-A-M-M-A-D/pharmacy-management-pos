@@ -32,7 +32,8 @@ class _AppShellState extends State<AppShell> {
     final canViewSuppliers = widget.authState.can('suppliers.view');
     final canViewPurchasing =
         widget.authState.can('purchases.view') ||
-        widget.authState.can('purchase_orders.view');
+        widget.authState.can('purchase_orders.view') ||
+        widget.authState.can('purchase_returns.view');
     final canViewSales =
         widget.authState.can('sales.view') ||
         widget.authState.can('sales.create');

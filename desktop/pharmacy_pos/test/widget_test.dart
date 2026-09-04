@@ -457,6 +457,96 @@ void main() {
     );
   });
 
+  testWidgets('purchase return action follows purchase return permission', (
+    tester,
+  ) async {
+    final denied = TestFixture(permissions: {'purchases.view'});
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Purchase History'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Return to supplier'), findsNothing);
+
+    final allowed = TestFixture(
+      permissions: {'purchases.view', 'purchase_returns.create'},
+    );
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Purchase History'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Return to supplier'), findsOneWidget);
+  });
+
+  testWidgets('purchase return workflow posts paid and bonus quantities', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'purchases.view',
+        'purchase_returns.view',
+        'purchase_returns.create',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Purchase History'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Return to supplier'));
+    await tester.pumpAndSettle();
+    expect(find.text('Return to supplier'), findsOneWidget);
+    expect(find.text('B-100'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('return_paid_grn-item-1')),
+      '3',
+    );
+    await tester.enterText(
+      find.byKey(const Key('return_bonus_grn-item-1')),
+      '2',
+    );
+    await tester.tap(find.byKey(const Key('post_purchase_return')));
+    await tester.pumpAndSettle();
+
+    final postedItems = fixture.api.lastPurchaseReturnBody!['items'] as List;
+    expect(postedItems.single['originalGoodsReceiptItemId'], 'grn-item-1');
+    expect(postedItems.single['paidReturnQuantity'], 3);
+    expect(postedItems.single['bonusReturnQuantity'], 2);
+    expect(
+      find.byKey(const Key('purchase_return_note_preview')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('PR-2026-000001'), findsWidgets);
+  });
+
+  testWidgets('purchase returns tab renders history and note', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'purchases.view', 'purchase_returns.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Purchase Returns'));
+    await tester.pumpAndSettle();
+    expect(find.text('PR-2026-000001'), findsOneWidget);
+    await tester.tap(find.byTooltip('View return note'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('purchase_return_note_preview')),
+      findsOneWidget,
+    );
+    expect(find.text('PURCHASE RETURN'), findsOneWidget);
+  });
+
   testWidgets('sales navigation follows sales permissions', (tester) async {
     final denied = TestFixture();
     await tester.pumpWidget(denied.app);
@@ -648,6 +738,7 @@ class FakeApi implements PharmacyApi {
   final bool adjustmentError;
   final bool supplierError;
   final bool purchaseError;
+  Map<String, dynamic>? lastPurchaseReturnBody;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -1198,6 +1289,78 @@ class FakeApi implements PharmacyApi {
     ],
   );
 
+  ReturnablePurchase get returnablePurchaseData => ReturnablePurchase(
+    id: 'grn-1',
+    grnNumber: 'GRN-2026-000001',
+    supplierInvoiceNumber: 'INV-001',
+    receiptDate: DateTime(2026, 9, 2),
+    supplierId: 'supplier-1',
+    supplierName: 'ABC Pharma',
+    branchId: user.branch.id,
+    branchName: user.branch.name,
+    netTotal: 5000,
+    returnState: 'NoReturns',
+    items: [
+      ReturnablePurchaseItem(
+        id: 'grn-item-1',
+        productId: 'product-1',
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        productBatchId: 'batch-1',
+        batchNumber: 'B-100',
+        expiryDate: DateTime(2027, 9, 2),
+        purchasedQuantity: 100,
+        bonusQuantity: 10,
+        paidQuantityReturned: 0,
+        bonusQuantityReturned: 0,
+        paidQuantityRemaining: 100,
+        bonusQuantityRemaining: 10,
+        currentBatchAvailable: 110,
+        maxPhysicalReturnQuantity: 110,
+        purchasePrice: 50,
+        grossRemainingCredit: 5000,
+        discountRemaining: 0,
+        taxRemaining: 0,
+        netRemainingSupplierCredit: 5000,
+        isBatchExpired: false,
+        isBatchDisposed: false,
+      ),
+    ],
+  );
+
+  PurchaseReturnDetails get purchaseReturn => PurchaseReturnDetails(
+    id: 'purchase-return-1',
+    returnNumber: 'PR-2026-000001',
+    originalGoodsReceiptId: 'grn-1',
+    originalGrnNumber: 'GRN-2026-000001',
+    supplierInvoiceNumber: 'INV-001',
+    supplierName: 'ABC Pharma',
+    branchName: user.branch.name,
+    processedByName: user.fullName,
+    returnDateUtc: DateTime(2026, 9, 4, 10),
+    reason: 'Damaged',
+    grossReturnAmount: 150,
+    discountAdjustment: 0,
+    taxAdjustment: 0,
+    netSupplierCredit: 150,
+    status: 'Posted',
+    items: [
+      PurchaseReturnItemDetail(
+        id: 'purchase-return-item-1',
+        originalGoodsReceiptItemId: 'grn-item-1',
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        batchNumber: 'B-100',
+        expiryDate: DateTime(2027, 9, 2),
+        paidReturnQuantity: 3,
+        bonusReturnQuantity: 2,
+        totalPhysicalQuantity: 5,
+        purchasePriceSnapshot: 50,
+        netSupplierCredit: 150,
+      ),
+    ],
+  );
+
   @override
   Future<PagedPurchaseOrders> listPurchaseOrders(
     String token, {
@@ -1303,6 +1466,66 @@ class FakeApi implements PharmacyApi {
     }
     return purchase;
   }
+
+  @override
+  Future<ReturnablePurchase> returnablePurchase(
+    String token,
+    String receiptId,
+  ) async => returnablePurchaseData;
+
+  @override
+  Future<PurchaseReturnDetails> postPurchaseReturn(
+    String token,
+    String receiptId,
+    Map<String, dynamic> values,
+  ) async {
+    lastPurchaseReturnBody = values;
+    return purchaseReturn;
+  }
+
+  @override
+  Future<PagedPurchaseReturns> listPurchaseReturns(
+    String token, {
+    String? search,
+  }) async => PagedPurchaseReturns(
+    items: [
+      PurchaseReturnListItem(
+        id: 'purchase-return-1',
+        returnNumber: 'PR-2026-000001',
+        originalGrnNumber: 'GRN-2026-000001',
+        supplierInvoiceNumber: 'INV-001',
+        returnDateUtc: DateTime(2026, 9, 4, 10),
+        supplierName: 'ABC Pharma',
+        branchName: user.branch.name,
+        paidQuantity: 3,
+        bonusQuantity: 2,
+        totalPhysicalQuantity: 5,
+        netSupplierCredit: 150,
+        status: 'Posted',
+        reason: 'Damaged',
+        processedByName: user.fullName,
+      ),
+    ],
+    totalCount: 1,
+  );
+
+  @override
+  Future<PurchaseReturnDetails> purchaseReturnDetails(
+    String token,
+    String id,
+  ) async => purchaseReturn;
+
+  @override
+  Future<PurchaseReturnDetails> purchaseReturnNote(
+    String token,
+    String id,
+  ) async => purchaseReturn;
+
+  @override
+  Future<PurchaseReturnDetails> reprintPurchaseReturnNote(
+    String token,
+    String id,
+  ) async => purchaseReturn;
 
   @override
   Future<CurrentUser> updateProfile(
