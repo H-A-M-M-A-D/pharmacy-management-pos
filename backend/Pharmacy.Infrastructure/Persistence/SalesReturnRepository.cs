@@ -49,6 +49,9 @@ public sealed class SalesReturnRepository(PharmacyDbContext context) : ISalesRet
             .ToDictionaryAsync(x => x.AllocationId, x => x.Refund, cancellationToken);
     }
 
+    public async Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) =>
+        await context.CustomerLedgerEntries.Where(x => x.CustomerId == customerId && x.BranchId == branchId).SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
     public async Task<string> NextReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default)
     {
         var next = await context.Database
@@ -58,12 +61,13 @@ public sealed class SalesReturnRepository(PharmacyDbContext context) : ISalesRet
     }
 
     public async Task AddSalesReturnAsync(SalesReturn salesReturn, CancellationToken cancellationToken = default) => await context.SalesReturns.AddAsync(salesReturn, cancellationToken);
+    public async Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) => await context.CustomerLedgerEntries.AddAsync(entry, cancellationToken);
     public async Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) => await context.StockMovements.AddAsync(movement, cancellationToken);
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
     public async Task<ReturnableSaleDto?> GetReturnableSaleAsync(Guid saleId, Guid? actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default)
     {
-        var sale = await context.Sales.AsNoTracking().Include(x => x.Branch).Include(x => x.CashierUser).Include(x => x.Payments)
+        var sale = await context.Sales.AsNoTracking().Include(x => x.Branch).Include(x => x.CashierUser).Include(x => x.Customer).Include(x => x.Payments)
             .Include(x => x.Items).ThenInclude(x => x.Product)
             .Include(x => x.Items).ThenInclude(x => x.Allocations).ThenInclude(x => x.ProductBatch)
             .Where(x => x.Id == saleId && x.Status == SaleStatus.Posted && (canSelectBranch || x.BranchId == actorBranchId))
@@ -88,7 +92,7 @@ public sealed class SalesReturnRepository(PharmacyDbContext context) : ISalesRet
         var remainingTotal = items.Sum(x => x.RemainingQuantity);
         var state = remainingTotal == sold ? SalesReturnState.NotReturned : remainingTotal == 0 ? SalesReturnState.FullyReturned : SalesReturnState.PartiallyReturned;
         return new ReturnableSaleDto(sale.Id, sale.InvoiceNumber, sale.PostedAtUtc.Value, sale.BranchId, sale.Branch!.Name, sale.CashierUser!.FullName,
-            sale.CustomerName, sale.CustomerPhone, sale.NetTotal, state, items, sale.Payments.OrderBy(x => x.CreatedAt).Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList());
+            sale.CustomerName, sale.CustomerPhone, sale.NetTotal, sale.CustomerId, sale.Customer?.CustomerCode, sale.AmountPaid, sale.CreditAmount, state, items, sale.Payments.OrderBy(x => x.CreatedAt).Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList());
     }
 
     public async Task<PagedResult<SalesReturnListItemDto>> ListReturnsAsync(SalesReturnsQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
@@ -125,7 +129,7 @@ public sealed class SalesReturnRepository(PharmacyDbContext context) : ISalesRet
         var items = x.Items.OrderBy(i => i.CreatedAt).Select(item => new SalesReturnItemDto(item.Id, item.OriginalSaleItemId, item.ProductId, item.Product!.Name, item.Product.SKU, item.Quantity, item.GrossReturnAmount, item.DiscountReturnAmount, item.TaxReturnAmount, item.RefundAmount,
             item.Allocations.OrderBy(a => a.CreatedAt).Select(a => new SalesReturnAllocationDto(a.Id, a.OriginalSaleItemBatchAllocationId, a.ProductBatchId, a.ProductBatch!.BatchNumber, a.ExpiryDateSnapshot, a.Quantity, a.Disposition, a.UnitSalePriceSnapshot, a.GrossReturnAmount, a.DiscountReturnAmount, a.TaxReturnAmount, a.RefundAmount)).ToList())).ToList();
         var payments = x.RefundPayments.OrderBy(p => p.CreatedAt).Select(p => new SalesRefundPaymentDto(p.Id, p.Method, p.Amount, p.ReferenceNumber)).ToList();
-        return new SalesReturnDetailsDto(x.Id, x.ReturnNumber, x.OriginalSaleId, x.OriginalSale!.InvoiceNumber!, x.BranchId, x.Branch!.Name, x.Branch.Address, x.Branch.PhoneNumber, x.ProcessedByUserId, x.ProcessedByUser!.FullName, x.ReturnDateUtc, x.Reason, x.Notes, x.GrossReturnAmount, x.DiscountReturnAmount, x.TaxReturnAmount, x.RefundAmount, x.Status, x.OriginalSale.CustomerName, x.OriginalSale.CustomerPhone, items, payments);
+        return new SalesReturnDetailsDto(x.Id, x.ReturnNumber, x.OriginalSaleId, x.OriginalSale!.InvoiceNumber!, x.BranchId, x.Branch!.Name, x.Branch.Address, x.Branch.PhoneNumber, x.ProcessedByUserId, x.ProcessedByUser!.FullName, x.ReturnDateUtc, x.Reason, x.Notes, x.GrossReturnAmount, x.DiscountReturnAmount, x.TaxReturnAmount, x.RefundAmount, x.CustomerCreditReductionAmount, x.CashRefundAmount, x.Status, x.OriginalSale.CustomerName, x.OriginalSale.CustomerPhone, items, payments);
     }
 
     public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)

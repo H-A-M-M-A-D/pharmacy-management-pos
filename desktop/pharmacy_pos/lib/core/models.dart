@@ -681,6 +681,183 @@ class PagedSupplierLedger {
       );
 }
 
+class CustomerListItem {
+  const CustomerListItem({
+    required this.id,
+    required this.customerCode,
+    required this.name,
+    required this.creditLimit,
+    required this.outstandingBalance,
+    required this.advanceBalance,
+    required this.isActive,
+    this.phoneNumber,
+    this.email,
+    this.city,
+    this.businessName,
+  });
+  final String id, customerCode, name;
+  final String? phoneNumber, email, city, businessName;
+  final double creditLimit, outstandingBalance, advanceBalance;
+  final bool isActive;
+  factory CustomerListItem.fromJson(Map<String, dynamic> json) =>
+      CustomerListItem(
+        id: json['id'] as String,
+        customerCode: json['customerCode'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        phoneNumber: json['phoneNumber'] as String?,
+        email: json['email'] as String?,
+        city: json['city'] as String?,
+        businessName: json['businessName'] as String?,
+        creditLimit: (json['creditLimit'] as num?)?.toDouble() ?? 0,
+        outstandingBalance:
+            (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
+        advanceBalance: (json['advanceBalance'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? false,
+      );
+}
+
+class CustomerDetails {
+  const CustomerDetails({
+    required this.id,
+    required this.customerCode,
+    required this.name,
+    required this.openingBalance,
+    required this.creditLimit,
+    required this.isActive,
+    required this.outstandingBalance,
+    required this.advanceBalance,
+    required this.totalPayments,
+    required this.createdAt,
+    required this.updatedAt,
+    this.phoneNumber,
+    this.alternatePhone,
+    this.email,
+    this.address,
+    this.city,
+    this.businessName,
+    this.ntn,
+    this.lastPaymentAtUtc,
+  });
+  final String id, customerCode, name;
+  final String? phoneNumber,
+      alternatePhone,
+      email,
+      address,
+      city,
+      businessName,
+      ntn;
+  final double openingBalance,
+      creditLimit,
+      outstandingBalance,
+      advanceBalance,
+      totalPayments;
+  final bool isActive;
+  final DateTime createdAt, updatedAt;
+  final DateTime? lastPaymentAtUtc;
+
+  factory CustomerDetails.fromJson(Map<String, dynamic> json) =>
+      CustomerDetails(
+        id: json['id'] as String,
+        customerCode: json['customerCode'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        phoneNumber: json['phoneNumber'] as String?,
+        alternatePhone: json['alternatePhone'] as String?,
+        email: json['email'] as String?,
+        address: json['address'] as String?,
+        city: json['city'] as String?,
+        businessName: json['businessName'] as String?,
+        ntn: json['ntn'] as String?,
+        openingBalance: (json['openingBalance'] as num?)?.toDouble() ?? 0,
+        creditLimit: (json['creditLimit'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? false,
+        outstandingBalance:
+            (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
+        advanceBalance: (json['advanceBalance'] as num?)?.toDouble() ?? 0,
+        totalPayments: (json['totalPayments'] as num?)?.toDouble() ?? 0,
+        lastPaymentAtUtc: _date(json['lastPaymentAtUtc']),
+        createdAt: _date(json['createdAt']) ?? DateTime.now(),
+        updatedAt: _date(json['updatedAt']) ?? DateTime.now(),
+      );
+}
+
+class CustomerLookup {
+  const CustomerLookup({
+    required this.id,
+    required this.customerCode,
+    required this.name,
+    required this.creditLimit,
+    required this.outstandingBalance,
+    required this.availableCredit,
+    required this.isActive,
+    this.phoneNumber,
+  });
+  final String id, customerCode, name;
+  final String? phoneNumber;
+  final double creditLimit, outstandingBalance, availableCredit;
+  final bool isActive;
+  factory CustomerLookup.fromJson(Map<String, dynamic> json) => CustomerLookup(
+    id: json['id'] as String,
+    customerCode: json['customerCode'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    phoneNumber: json['phoneNumber'] as String?,
+    creditLimit: (json['creditLimit'] as num?)?.toDouble() ?? 0,
+    outstandingBalance: (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
+    availableCredit: (json['availableCredit'] as num?)?.toDouble() ?? 0,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class PagedCustomers {
+  const PagedCustomers({required this.items, required this.totalCount});
+  final List<CustomerListItem> items;
+  final int totalCount;
+  factory PagedCustomers.fromJson(Map<String, dynamic> json) => PagedCustomers(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => CustomerListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class CustomerLedgerItem {
+  const CustomerLedgerItem({
+    required this.entryDate,
+    required this.entryType,
+    required this.amount,
+    required this.runningBalance,
+    required this.branchName,
+    this.userName,
+    this.notes,
+  });
+  final DateTime entryDate;
+  final String entryType, branchName;
+  final double amount, runningBalance;
+  final String? userName, notes;
+  factory CustomerLedgerItem.fromJson(Map<String, dynamic> json) =>
+      CustomerLedgerItem(
+        entryDate: _date(json['entryDate']) ?? DateTime.now(),
+        entryType: json['entryType'] as String? ?? '',
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        runningBalance: (json['runningBalance'] as num?)?.toDouble() ?? 0,
+        branchName: json['branchName'] as String? ?? '',
+        userName: json['userName'] as String?,
+        notes: json['notes'] as String?,
+      );
+}
+
+class PagedCustomerLedger {
+  const PagedCustomerLedger({required this.items, required this.totalCount});
+  final List<CustomerLedgerItem> items;
+  final int totalCount;
+  factory PagedCustomerLedger.fromJson(Map<String, dynamic> json) =>
+      PagedCustomerLedger(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => CustomerLedgerItem.fromJson(x as Map<String, dynamic>))
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
 class PurchaseOrderItem {
   const PurchaseOrderItem({
     required this.id,
@@ -1250,6 +1427,7 @@ class SaleListItem {
     required this.itemCount,
     required this.netTotal,
     required this.amountPaid,
+    required this.creditAmount,
     required this.changeGiven,
     required this.paymentSummary,
     required this.returnState,
@@ -1265,7 +1443,7 @@ class SaleListItem {
   final DateTime createdAt;
   final DateTime? postedAtUtc;
   final int itemCount;
-  final double netTotal, amountPaid, changeGiven;
+  final double netTotal, amountPaid, creditAmount, changeGiven;
 
   factory SaleListItem.fromJson(Map<String, dynamic> json) => SaleListItem(
     id: json['id'] as String? ?? '',
@@ -1285,6 +1463,7 @@ class SaleListItem {
     itemCount: json['itemCount'] as int? ?? 0,
     netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
     amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
+    creditAmount: (json['creditAmount'] as num?)?.toDouble() ?? 0,
     changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
     paymentSummary: json['paymentSummary'] as String? ?? '',
     returnState: _enumName(json['returnState'] ?? 'NotReturned'),
@@ -1393,6 +1572,7 @@ class SaleDetails {
     required this.taxTotal,
     required this.netTotal,
     required this.amountPaid,
+    required this.creditAmount,
     required this.changeGiven,
     required this.items,
     required this.payments,
@@ -1401,9 +1581,12 @@ class SaleDetails {
     this.postedAtUtc,
     this.customerName,
     this.customerPhone,
+    this.customerId,
+    this.customerCode,
   });
   final String id, status, branchName, cashierName;
   final String? invoiceNumber, holdNumber, customerName, customerPhone;
+  final String? customerId, customerCode;
   final DateTime createdAt;
   final DateTime? postedAtUtc;
   final double subtotal,
@@ -1411,6 +1594,7 @@ class SaleDetails {
       taxTotal,
       netTotal,
       amountPaid,
+      creditAmount,
       changeGiven;
   final List<SaleItemDetail> items;
   final List<SalePaymentDetail> payments;
@@ -1429,11 +1613,14 @@ class SaleDetails {
     cashierName: json['cashierName'] as String? ?? '',
     customerName: json['customerName'] as String?,
     customerPhone: json['customerPhone'] as String?,
+    customerId: json['customerId'] as String?,
+    customerCode: json['customerCode'] as String?,
     subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
     discountTotal: (json['discountTotal'] as num?)?.toDouble() ?? 0,
     taxTotal: (json['taxTotal'] as num?)?.toDouble() ?? 0,
     netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
     amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
+    creditAmount: (json['creditAmount'] as num?)?.toDouble() ?? 0,
     changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
     items: (json['items'] as List<dynamic>? ?? [])
         .map((x) => SaleItemDetail.fromJson(x as Map<String, dynamic>))
@@ -1452,16 +1639,20 @@ class ReturnableSale {
     required this.branchName,
     required this.cashierName,
     required this.netTotal,
+    required this.amountPaid,
+    required this.creditAmount,
     required this.returnState,
     required this.items,
     required this.originalPayments,
     this.customerName,
     this.customerPhone,
+    this.customerId,
+    this.customerCode,
   });
   final String saleId, invoiceNumber, branchName, cashierName, returnState;
   final DateTime postedAtUtc;
-  final String? customerName, customerPhone;
-  final double netTotal;
+  final String? customerName, customerPhone, customerId, customerCode;
+  final double netTotal, amountPaid, creditAmount;
   final List<ReturnableSaleItem> items;
   final List<SalePaymentDetail> originalPayments;
   factory ReturnableSale.fromJson(Map<String, dynamic> json) => ReturnableSale(
@@ -1472,7 +1663,11 @@ class ReturnableSale {
     cashierName: json['cashierName'] as String? ?? '',
     customerName: json['customerName'] as String?,
     customerPhone: json['customerPhone'] as String?,
+    customerId: json['customerId'] as String?,
+    customerCode: json['customerCode'] as String?,
     netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0,
+    creditAmount: (json['creditAmount'] as num?)?.toDouble() ?? 0,
     returnState: _enumName(json['returnState']),
     items: (json['items'] as List<dynamic>? ?? [])
         .map((x) => ReturnableSaleItem.fromJson(x as Map<String, dynamic>))
@@ -1620,6 +1815,8 @@ class SalesReturnDetails {
     required this.processedByName,
     required this.reason,
     required this.refundAmount,
+    required this.customerCreditReductionAmount,
+    required this.cashRefundAmount,
     required this.items,
     required this.refundPayments,
     this.customerName,
@@ -1633,7 +1830,7 @@ class SalesReturnDetails {
       reason;
   final DateTime returnDateUtc;
   final String? customerName, notes;
-  final double refundAmount;
+  final double refundAmount, customerCreditReductionAmount, cashRefundAmount;
   final List<SalesReturnItemDetail> items;
   final List<SalesRefundPaymentDetail> refundPayments;
   factory SalesReturnDetails.fromJson(
@@ -1649,6 +1846,9 @@ class SalesReturnDetails {
     notes: json['notes'] as String?,
     customerName: json['customerName'] as String?,
     refundAmount: (json['refundAmount'] as num?)?.toDouble() ?? 0,
+    customerCreditReductionAmount:
+        (json['customerCreditReductionAmount'] as num?)?.toDouble() ?? 0,
+    cashRefundAmount: (json['cashRefundAmount'] as num?)?.toDouble() ?? 0,
     items: (json['items'] as List<dynamic>? ?? [])
         .map((x) => SalesReturnItemDetail.fromJson(x as Map<String, dynamic>))
         .toList(),

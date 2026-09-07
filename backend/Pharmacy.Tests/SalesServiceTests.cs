@@ -21,6 +21,7 @@ public sealed class SalesServiceTests
 
         var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
             f.Branch.Id,
+            null,
             "Walk-in",
             null,
             null,
@@ -54,12 +55,14 @@ public sealed class SalesServiceTests
             null,
             null,
             null,
+            null,
             [new(f.Product.Id, 4)],
             [new(SalePaymentMethod.Cash, 48, 48)]));
 
         Assert.Equal("good", sale.Items.Single().Allocations.Single().BatchNumber);
         await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
             f.Branch.Id,
+            null,
             null,
             null,
             null,
@@ -83,7 +86,7 @@ public sealed class SalesServiceTests
         await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostHeldSaleAsync(
             f.Actor.Id,
             held.Id,
-            new([new(SalePaymentMethod.Cash, 60, 60)])));
+            new(null, [new(SalePaymentMethod.Cash, 60, 60)])));
     }
 
     [Fact]
@@ -93,13 +96,13 @@ public sealed class SalesServiceTests
         noDiscount.Product.MaximumDiscountPercent = 10;
         noDiscount.AddBatch("A", 2, noDiscount.Today.AddDays(5), 8, 12);
         await Assert.ThrowsAsync<ForbiddenOperationException>(() => noDiscount.Service.PostSaleAsync(noDiscount.Actor.Id, new(
-            noDiscount.Branch.Id, null, null, null, [new(noDiscount.Product.Id, 1, 5)], [new(SalePaymentMethod.Cash, 11.40m, 11.40m)])));
+            noDiscount.Branch.Id, null, null, null, null, [new(noDiscount.Product.Id, 1, 5)], [new(SalePaymentMethod.Cash, 11.40m, 11.40m)])));
 
         var tooHigh = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesDiscount);
         tooHigh.Product.MaximumDiscountPercent = 5;
         tooHigh.AddBatch("A", 2, tooHigh.Today.AddDays(5), 8, 12);
         await Assert.ThrowsAsync<RequestValidationException>(() => tooHigh.Service.PostSaleAsync(tooHigh.Actor.Id, new(
-            tooHigh.Branch.Id, null, null, null, [new(tooHigh.Product.Id, 1, 10)], [new(SalePaymentMethod.Cash, 10.80m, 10.80m)])));
+            tooHigh.Branch.Id, null, null, null, null, [new(tooHigh.Product.Id, 1, 10)], [new(SalePaymentMethod.Cash, 10.80m, 10.80m)])));
     }
 
     [Fact]
@@ -110,6 +113,7 @@ public sealed class SalesServiceTests
 
         var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
             f.Branch.Id,
+            null,
             null,
             null,
             null,
@@ -127,8 +131,90 @@ public sealed class SalesServiceTests
             null,
             null,
             null,
+            null,
             [new(invalid.Product.Id, 1)],
             [new(SalePaymentMethod.Cash, 10, 10)])));
+    }
+
+    [Fact]
+    public async Task Credit_sale_records_customer_ledger_and_allows_partial_payment()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit);
+        var customer = f.AddCustomer(creditLimit: 100);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id,
+            customer.Id,
+            null,
+            null,
+            null,
+            [new(f.Product.Id, 5)],
+            [new(SalePaymentMethod.Cash, 20, 20)]));
+
+        Assert.Equal(60, sale.NetTotal);
+        Assert.Equal(20, sale.AmountPaid);
+        Assert.Equal(40, sale.CreditAmount);
+        var ledger = Assert.Single(f.CustomerLedger);
+        Assert.Equal(CustomerLedgerEntryType.CreditSale, ledger.EntryType);
+        Assert.Equal(40, ledger.Amount);
+        Assert.Equal(sale.Id, ledger.ReferenceId);
+        Assert.Equal(customer.Id, sale.CustomerId);
+    }
+
+    [Fact]
+    public async Task Fully_credit_sale_requires_customer_and_credit_permission()
+    {
+        var missingCustomer = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit);
+        missingCustomer.AddBatch("A", 1, missingCustomer.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<RequestValidationException>(() => missingCustomer.Service.PostSaleAsync(missingCustomer.Actor.Id, new(
+            missingCustomer.Branch.Id,
+            null,
+            null,
+            null,
+            null,
+            [new(missingCustomer.Product.Id, 1)],
+            [])));
+
+        var missingPermission = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        var customer = missingPermission.AddCustomer(creditLimit: 100);
+        missingPermission.AddBatch("A", 1, missingPermission.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => missingPermission.Service.PostSaleAsync(missingPermission.Actor.Id, new(
+            missingPermission.Branch.Id,
+            customer.Id,
+            null,
+            null,
+            null,
+            [new(missingPermission.Product.Id, 1)],
+            [])));
+    }
+
+    [Fact]
+    public async Task Credit_sale_rejects_inactive_customer_and_credit_limit_overrun()
+    {
+        var inactive = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit);
+        var inactiveCustomer = inactive.AddCustomer(creditLimit: 100, active: false);
+        inactive.AddBatch("A", 1, inactive.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<RequestValidationException>(() => inactive.Service.PostSaleAsync(inactive.Actor.Id, new(
+            inactive.Branch.Id,
+            inactiveCustomer.Id,
+            null,
+            null,
+            null,
+            [new(inactive.Product.Id, 1)],
+            [])));
+
+        var overLimit = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit);
+        var customer = overLimit.AddCustomer(creditLimit: 10);
+        overLimit.AddBatch("A", 1, overLimit.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<ResourceConflictException>(() => overLimit.Service.PostSaleAsync(overLimit.Actor.Id, new(
+            overLimit.Branch.Id,
+            customer.Id,
+            null,
+            null,
+            null,
+            [new(overLimit.Product.Id, 1)],
+            [])));
     }
 
     [Fact]
@@ -137,6 +223,7 @@ public sealed class SalesServiceTests
         var f = new Fixture();
         await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
             f.Branch.Id,
+            null,
             null,
             null,
             null,
@@ -155,6 +242,8 @@ public sealed class SalesServiceTests
         public readonly List<ProductBatch> Batches = [];
         public readonly List<DomainInventory> Inventory = [];
         public readonly List<StockMovement> Movements = [];
+        public readonly List<Customer> Customers = [];
+        public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
         public SalesService Service { get; }
 
@@ -207,15 +296,32 @@ public sealed class SalesServiceTests
             return batch;
         }
 
+        public Customer AddCustomer(decimal creditLimit, bool active = true)
+        {
+            var customer = new Customer
+            {
+                CustomerCode = $"CUS-{Customers.Count + 1:000000}",
+                Name = $"Customer {Customers.Count + 1}",
+                NormalizedName = $"CUSTOMER {Customers.Count + 1}",
+                CreditLimit = creditLimit,
+                IsActive = active
+            };
+            Customers.Add(customer);
+            return customer;
+        }
+
         public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => Task.FromResult<User?>(Actor.Id == actorId ? Actor : null);
         public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Branch?>(Branch.Id == branchId ? Branch : null);
         public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<Product?>(Product.Id == productId ? Product : null);
+        public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => Task.FromResult<Customer?>(Customers.FirstOrDefault(x => x.Id == customerId));
+        public Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(CustomerLedger.Where(x => x.CustomerId == customerId && x.BranchId == branchId).Sum(x => x.Amount));
         public Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ProductBatch>>(Batches.OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToList());
         public Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) => Task.FromResult<DomainInventory?>(Inventory.FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId));
         public Task<Sale?> GetSaleAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Sale?>(Sales.FirstOrDefault(x => x.Id == id));
         public Task<string> NextInvoiceNumberAsync(DateTime postedAtUtc, CancellationToken cancellationToken = default) => Task.FromResult($"INV-{postedAtUtc.Year}-{Sales.Count(x => x.Status == SaleStatus.Posted) + 1:000000}");
         public Task<string> NextHoldNumberAsync(DateTime createdAtUtc, CancellationToken cancellationToken = default) => Task.FromResult($"HOLD-{createdAtUtc.Year}-{Sales.Count(x => x.Status == SaleStatus.Held) + 1:000000}");
         public Task AddSaleAsync(Sale sale, CancellationToken cancellationToken = default) { Sales.Add(sale); return Task.CompletedTask; }
+        public Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) { CustomerLedger.Add(entry); return Task.CompletedTask; }
         public Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) { Movements.Add(movement); return Task.CompletedTask; }
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<PosProductDto>>([]);
@@ -241,7 +347,8 @@ public sealed class SalesServiceTests
                 return new SaleItemDto(item.Id, item.ProductId, Product.Name, Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, false, allocations);
             }).ToList();
             var payments = sale.Payments.Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
-            return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, sale.CashierUserId, Actor.FullName, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.ChangeGiven, sale.Notes, items, payments);
+            var customer = Customers.FirstOrDefault(x => x.Id == sale.CustomerId);
+            return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, sale.CashierUserId, Actor.FullName, sale.CustomerId, customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments);
         }
     }
 }

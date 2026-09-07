@@ -122,7 +122,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         Sale? sale = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            sale = await BuildPostedSale(actor, branchId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments, ct);
+            sale = await BuildPostedSale(actor, branchId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments, ct);
             await repository.AddSaleAsync(sale, ct);
             await Audit(actorId, "SalePosted", "Sale", sale.Id, null, AuditValues(sale), ct);
             await repository.SaveChangesAsync(ct);
@@ -141,7 +141,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             EnsureBranchAccess(actor, held.BranchId);
             if (held.Status != SaleStatus.Held) throw new RequestValidationException("Only held sales can be posted.");
             var lines = held.Items.Select(x => new SaleLineRequest(x.ProductId, x.RequestedQuantity, x.DiscountPercent)).ToList();
-            var posted = await BuildPostedSale(actor, held.BranchId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments, ct);
+            var posted = await BuildPostedSale(actor, held.BranchId, request.CustomerId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments, ct);
             held.Status = SaleStatus.Cancelled;
             held.UpdatedAt = UtcNow();
             await repository.AddSaleAsync(posted, ct);
@@ -173,10 +173,10 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
                 await repository.SaveChangesAsync(ct);
             }, IsolationLevel.ReadCommitted, cancellationToken);
         }
-        return new ReceiptDto(sale.InvoiceNumber, sale.BranchName, sale.BranchAddress, sale.BranchPhone, sale.PostedAtUtc.Value, sale.CashierName, sale.CustomerName, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.ChangeGiven, sale.Items, sale.Payments);
+        return new ReceiptDto(sale.InvoiceNumber, sale.BranchName, sale.BranchAddress, sale.BranchPhone, sale.PostedAtUtc.Value, sale.CashierName, sale.CustomerName, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Items, sale.Payments);
     }
 
-    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, string? customerName, string? customerPhone, string? notes, IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
+    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, Guid? customerId, string? customerName, string? customerPhone, string? notes, IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
     {
         var branch = await RequireActiveBranch(branchId, ct);
         var now = UtcNow();
@@ -187,6 +187,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             InvoiceNumber = await repository.NextInvoiceNumberAsync(now, ct),
             Status = SaleStatus.Posted,
             PostedAtUtc = now,
+            CustomerId = customerId,
             CustomerName = Clean(customerName),
             CustomerPhone = Clean(customerPhone),
             Notes = Clean(notes)
@@ -255,15 +256,14 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         sale.DiscountTotal = Money(sale.DiscountTotal);
         sale.TaxTotal = 0;
         sale.NetTotal = Money(sale.NetTotal);
-        ApplyPayments(sale, payments);
+        await ApplyPayments(actor, sale, payments, ct);
         return sale;
     }
 
-    private static void ApplyPayments(Sale sale, IReadOnlyList<SalePaymentRequest> payments)
+    private async Task ApplyPayments(User actor, Sale sale, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
     {
-        if (payments.Count == 0) throw new RequestValidationException("At least one payment is required.");
         var applied = Money(payments.Sum(x => x.AmountApplied));
-        if (applied != sale.NetTotal) throw new RequestValidationException("Payment total must exactly equal sale net total.");
+        if (applied > sale.NetTotal) throw new RequestValidationException("Payment total cannot exceed sale net total.");
         foreach (var payment in payments)
         {
             if (!Enum.IsDefined(payment.Method)) throw new RequestValidationException("Payment method is invalid.");
@@ -273,6 +273,37 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             sale.Payments.Add(new SalePayment { Method = payment.Method, AmountApplied = Money(payment.AmountApplied), TenderedAmount = payment.TenderedAmount.HasValue ? Money(payment.TenderedAmount.Value) : null, ReferenceNumber = Clean(payment.ReferenceNumber) });
         }
         sale.AmountPaid = applied;
+        sale.CreditAmount = Money(sale.NetTotal - applied);
+        if (sale.CreditAmount > 0)
+        {
+            if (sale.CustomerId is null) throw new RequestValidationException("A customer is required for credit sales.");
+            if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesCredit) != true)
+                throw new ForbiddenOperationException("The current user is not permitted to post credit sales.");
+            var customer = await repository.GetCustomerAsync(sale.CustomerId.Value, ct);
+            if (customer is not { IsActive: true }) throw new RequestValidationException("Customer is invalid or inactive.");
+            sale.CustomerName = customer.Name;
+            sale.CustomerPhone = customer.PhoneNumber;
+            var balance = await repository.GetCustomerBalanceAsync(customer.Id, sale.BranchId, ct);
+            if (balance + sale.CreditAmount > customer.CreditLimit)
+                throw new ResourceConflictException("This sale would exceed the customer's credit limit.");
+            await repository.AddCustomerLedgerEntryAsync(new CustomerLedgerEntry
+            {
+                CustomerId = customer.Id,
+                BranchId = sale.BranchId,
+                EntryType = CustomerLedgerEntryType.CreditSale,
+                Amount = sale.CreditAmount,
+                EntryDate = BusinessDate(),
+                ReferenceType = "Sale",
+                ReferenceId = sale.Id,
+                ReferenceNumber = sale.InvoiceNumber,
+                Notes = "Credit sale",
+                CreatedByUserId = actor.Id
+            }, ct);
+        }
+        else if (payments.Count == 0)
+        {
+            throw new RequestValidationException("At least one payment is required unless the sale is posted fully on customer credit.");
+        }
         sale.ChangeGiven = Money(sale.Payments.Where(x => x.Method == SalePaymentMethod.Cash).Sum(x => (x.TenderedAmount ?? x.AmountApplied) - x.AmountApplied));
     }
 
@@ -312,7 +343,6 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
 
     private static void ValidatePaymentsShape(IReadOnlyList<SalePaymentRequest> payments)
     {
-        if (payments.Count == 0) throw new RequestValidationException("At least one payment is required.");
         foreach (var payment in payments)
         {
             if (payment.AmountApplied <= 0) throw new RequestValidationException("Payment amount must be greater than zero.");
@@ -345,7 +375,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static decimal Money(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
     private Task Audit(Guid actor, string action, string type, Guid id, object? old, object? current, CancellationToken ct) => repository.AddAuditAsync(new AuditLog { UserId = actor, Action = action, EntityType = type, EntityId = id, OldValues = old is null ? null : JsonSerializer.Serialize(old), NewValues = current is null ? null : JsonSerializer.Serialize(current) }, ct);
-    private static object AuditValues(Sale sale) => new { sale.InvoiceNumber, sale.HoldNumber, sale.BranchId, sale.CashierUserId, ItemCount = sale.Items.Count, sale.NetTotal, PaymentSummary = string.Join(", ", sale.Payments.Select(x => $"{x.Method}:{x.AmountApplied}")) };
+    private static object AuditValues(Sale sale) => new { sale.InvoiceNumber, sale.HoldNumber, sale.BranchId, sale.CashierUserId, sale.CustomerId, ItemCount = sale.Items.Count, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, PaymentSummary = string.Join(", ", sale.Payments.Select(x => $"{x.Method}:{x.AmountApplied}")) };
     private static void ValidatePage(int page, int pageSize)
     {
         if (page < 1 || pageSize is < 1 or > 100) throw new RequestValidationException("Page must be positive and page size must be between 1 and 100.");

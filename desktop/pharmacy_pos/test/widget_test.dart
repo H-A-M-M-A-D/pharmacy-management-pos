@@ -629,6 +629,7 @@ void main() {
     await tester.tap(find.text('Sales History'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Return items'), findsOneWidget);
+    await tester.ensureVisible(find.byTooltip('Return items'));
     await tester.tap(find.byTooltip('Return items'));
     await tester.pumpAndSettle();
     expect(find.text('Sales Return / Refund'), findsOneWidget);
@@ -834,6 +835,115 @@ class FakeApi implements PharmacyApi {
   @override
   Future<void> resetPassword(String token, String id, String password) async {}
 
+  CustomerListItem get customer => const CustomerListItem(
+    id: 'customer-1',
+    customerCode: 'CUS-000001',
+    name: 'Ali Customer',
+    phoneNumber: '03001234567',
+    email: 'ali@example.com',
+    city: 'Lahore',
+    businessName: null,
+    creditLimit: 5000,
+    outstandingBalance: 250,
+    advanceBalance: 0,
+    isActive: true,
+  );
+
+  CustomerDetails get customerDetailsData => CustomerDetails(
+    id: customer.id,
+    customerCode: customer.customerCode,
+    name: customer.name,
+    phoneNumber: customer.phoneNumber,
+    alternatePhone: null,
+    email: customer.email,
+    address: 'Main Road',
+    city: customer.city,
+    businessName: customer.businessName,
+    ntn: null,
+    openingBalance: 0,
+    creditLimit: customer.creditLimit,
+    isActive: customer.isActive,
+    outstandingBalance: customer.outstandingBalance,
+    advanceBalance: customer.advanceBalance,
+    totalPayments: 0,
+    createdAt: DateTime(2026, 9, 4),
+    updatedAt: DateTime(2026, 9, 4),
+  );
+
+  @override
+  Future<PagedCustomers> listCustomers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async => PagedCustomers(items: [customer], totalCount: 1);
+
+  @override
+  Future<List<CustomerLookup>> lookupCustomers(
+    String token, {
+    String? search,
+  }) async => [
+    CustomerLookup(
+      id: customer.id,
+      customerCode: customer.customerCode,
+      name: customer.name,
+      phoneNumber: customer.phoneNumber,
+      creditLimit: customer.creditLimit,
+      outstandingBalance: customer.outstandingBalance,
+      availableCredit: customer.creditLimit - customer.outstandingBalance,
+      isActive: customer.isActive,
+    ),
+  ];
+
+  @override
+  Future<CustomerDetails> customerDetails(String token, String id) async =>
+      customerDetailsData;
+
+  @override
+  Future<CustomerListItem> createCustomer(
+    String token,
+    Map<String, dynamic> values,
+  ) async => customer;
+
+  @override
+  Future<CustomerListItem> updateCustomer(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => customer;
+
+  @override
+  Future<void> setCustomerActive(String token, String id, bool active) async {}
+
+  @override
+  Future<PagedCustomerLedger> customerLedger(String token, String id) async =>
+      PagedCustomerLedger(
+        items: [
+          CustomerLedgerItem(
+            entryDate: DateTime(2026, 9, 4),
+            entryType: 'OpeningBalance',
+            amount: 250,
+            runningBalance: 250,
+            branchName: user.branch.name,
+            notes: 'Opening',
+          ),
+        ],
+        totalCount: 1,
+      );
+
+  @override
+  Future<void> recordCustomerPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<void> adjustCustomerBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {}
+
   PosProduct get posProduct => const PosProduct(
     productId: 'product-1',
     name: 'Panadol Extra',
@@ -860,6 +970,7 @@ class FakeApi implements PharmacyApi {
     taxTotal: 0,
     netTotal: 12,
     amountPaid: 12,
+    creditAmount: 0,
     changeGiven: 0,
     items: [
       SaleItemDetail(
@@ -909,6 +1020,7 @@ class FakeApi implements PharmacyApi {
     taxTotal: 0,
     netTotal: 0,
     amountPaid: 0,
+    creditAmount: 0,
     changeGiven: 0,
     items: const [],
     payments: const [],
@@ -949,6 +1061,7 @@ class FakeApi implements PharmacyApi {
             itemCount: 1,
             netTotal: 12,
             amountPaid: 12,
+            creditAmount: 0,
             changeGiven: 0,
             paymentSummary: 'Cash:12',
             returnState: 'NotReturned',
@@ -1541,7 +1654,11 @@ class FakeApi implements PharmacyApi {
     branchName: user.branch.name,
     cashierName: user.fullName,
     customerName: 'Walk-in',
+    customerId: null,
+    customerCode: null,
     netTotal: 12,
+    amountPaid: 12,
+    creditAmount: 0,
     returnState: 'NotReturned',
     originalPayments: const [
       SalePaymentDetail(method: 'Cash', amountApplied: 12),
@@ -1584,6 +1701,8 @@ class FakeApi implements PharmacyApi {
     processedByName: user.fullName,
     reason: 'CustomerReturn',
     refundAmount: 12,
+    customerCreditReductionAmount: 0,
+    cashRefundAmount: 12,
     customerName: 'Walk-in',
     items: const [
       SalesReturnItemDetail(

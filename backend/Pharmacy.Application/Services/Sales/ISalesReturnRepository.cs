@@ -14,8 +14,10 @@ public interface ISalesReturnRepository
     Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<Guid, int>> GetReturnedQuantitiesAsync(IEnumerable<Guid> allocationIds, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<Guid, decimal>> GetRefundedAmountsAsync(IEnumerable<Guid> allocationIds, CancellationToken cancellationToken = default);
+    Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default);
     Task<string> NextReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default);
     Task AddSalesReturnAsync(SalesReturn salesReturn, CancellationToken cancellationToken = default);
+    Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default);
     Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default);
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
     Task<PagedResult<SalesReturnListItemDto>> ListReturnsAsync(SalesReturnsQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);

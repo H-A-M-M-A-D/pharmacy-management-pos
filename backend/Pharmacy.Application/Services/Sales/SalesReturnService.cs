@@ -121,6 +121,29 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
                 }
             }
 
+            posted.CustomerCreditReductionAmount = 0;
+            if (sale.CustomerId.HasValue && posted.RefundAmount > 0)
+            {
+                var customerBalance = await repository.GetCustomerBalanceAsync(sale.CustomerId.Value, sale.BranchId, ct);
+                posted.CustomerCreditReductionAmount = Money(Math.Min(posted.RefundAmount, Math.Max(customerBalance, 0)));
+                if (posted.CustomerCreditReductionAmount > 0)
+                {
+                    await repository.AddCustomerLedgerEntryAsync(new CustomerLedgerEntry
+                    {
+                        CustomerId = sale.CustomerId.Value,
+                        BranchId = sale.BranchId,
+                        EntryType = CustomerLedgerEntryType.SalesReturn,
+                        Amount = -posted.CustomerCreditReductionAmount,
+                        EntryDate = businessDate,
+                        ReferenceType = "SalesReturn",
+                        ReferenceId = posted.Id,
+                        ReferenceNumber = posted.ReturnNumber,
+                        Notes = "Sales return credit reduction",
+                        CreatedByUserId = actor.Id
+                    }, ct);
+                }
+            }
+            posted.CashRefundAmount = Money(posted.RefundAmount - posted.CustomerCreditReductionAmount);
             ApplyRefundPayments(posted, request.RefundPayments);
             await repository.AddSalesReturnAsync(posted, ct);
             await repository.AddAuditAsync(new AuditLog
@@ -173,7 +196,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
                 await repository.SaveChangesAsync(ct);
             }, IsolationLevel.ReadCommitted, cancellationToken);
         }
-        return new SalesReturnReceiptDto(detail.ReturnNumber, detail.OriginalInvoiceNumber, detail.BranchName, detail.BranchAddress, detail.BranchPhone, detail.ReturnDateUtc, detail.ProcessedByName, detail.CustomerName, detail.Reason, detail.RefundAmount, detail.Items, detail.RefundPayments);
+        return new SalesReturnReceiptDto(detail.ReturnNumber, detail.OriginalInvoiceNumber, detail.BranchName, detail.BranchAddress, detail.BranchPhone, detail.ReturnDateUtc, detail.ProcessedByName, detail.CustomerName, detail.Reason, detail.RefundAmount, detail.CustomerCreditReductionAmount, detail.CashRefundAmount, detail.Items, detail.RefundPayments);
     }
 
     private static StockMovement Movement(StockMovementType type, Guid returnId, Guid branchId, Guid productId, Guid batchId, int quantity, Guid actorId, string returnNumber) => new()
@@ -194,7 +217,6 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
         if (!Enum.IsDefined(request.Reason)) throw new RequestValidationException("Return reason is invalid.");
         if (request.Reason == SalesReturnReason.Other && string.IsNullOrWhiteSpace(request.Notes)) throw new RequestValidationException("Notes are required when return reason is Other.");
         if (request.Allocations.Count == 0) throw new RequestValidationException("At least one returned batch allocation is required.");
-        if (request.RefundPayments.Count == 0) throw new RequestValidationException("At least one refund payment is required.");
         foreach (var allocation in request.Allocations)
         {
             if (allocation.OriginalAllocationId == Guid.Empty) throw new RequestValidationException("Original allocation is required.");
@@ -210,7 +232,8 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
     private static void ApplyRefundPayments(SalesReturn salesReturn, IReadOnlyList<SalesRefundPaymentRequest> payments)
     {
         var total = Money(payments.Sum(x => x.Amount));
-        if (total != salesReturn.RefundAmount) throw new RequestValidationException("Refund payment total must exactly equal return refund amount.");
+        if (total != salesReturn.CashRefundAmount) throw new RequestValidationException("Refund payment total must exactly equal cash refund amount.");
+        if (salesReturn.CashRefundAmount > 0 && payments.Count == 0) throw new RequestValidationException("At least one refund payment is required when cash is refunded.");
         foreach (var payment in payments)
         {
             if (!Enum.IsDefined(payment.Method)) throw new RequestValidationException("Refund payment method is invalid.");

@@ -19,6 +19,8 @@ class _PosScreenState extends State<PosScreen>
   final _customer = TextEditingController();
   final _phone = TextEditingController();
   final List<_CartLine> _cart = [];
+  CustomerLookup? _selectedCustomer;
+  List<CustomerLookup> _customerMatches = [];
   List<PosProduct> _products = [];
   PagedSales? _history;
   PagedSales? _held;
@@ -68,7 +70,9 @@ class _PosScreenState extends State<PosScreen>
   }
 
   Future<void> _loadHistory() async {
-    if (!can('sales.view') && !can('sales.hold') && !can('sales.returns.view')) {
+    if (!can('sales.view') &&
+        !can('sales.hold') &&
+        !can('sales.returns.view')) {
       return;
     }
     setState(() => _loading = true);
@@ -82,11 +86,15 @@ class _PosScreenState extends State<PosScreen>
       final returns = can('sales.returns.view')
           ? await widget.authState.listSalesReturns()
           : null;
+      final customers = can('customers.view')
+          ? await widget.authState.lookupCustomers()
+          : const <CustomerLookup>[];
       if (mounted) {
         setState(() {
           _history = history;
           _held = held;
           _returns = returns;
+          _customerMatches = customers;
         });
       }
     } on ApiException catch (error) {
@@ -113,6 +121,7 @@ class _PosScreenState extends State<PosScreen>
     required List<Map<String, dynamic>> payments,
   }) => {
     'branchId': widget.authState.currentUser?.branch.id,
+    'customerId': _selectedCustomer?.id,
     'customerName': _emptyToNull(_customer.text),
     'customerPhone': _emptyToNull(_phone.text),
     'items': _cart
@@ -164,7 +173,11 @@ class _PosScreenState extends State<PosScreen>
     }
     final payments = await showDialog<List<Map<String, dynamic>>>(
       context: context,
-      builder: (_) => _PaymentDialog(total: _total),
+      builder: (_) => _PaymentDialog(
+        total: _total,
+        creditAllowed: can('sales.credit') && _selectedCustomer != null,
+        customerName: _selectedCustomer?.name,
+      ),
     );
     if (payments == null) return;
     setState(() => _loading = true);
@@ -178,6 +191,9 @@ class _PosScreenState extends State<PosScreen>
           _cart.clear();
           _products = [];
           _search.clear();
+          _selectedCustomer = null;
+          _customer.clear();
+          _phone.clear();
         });
       }
       await _loadHistory();
@@ -443,23 +459,7 @@ class _PosScreenState extends State<PosScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Cart', style: Theme.of(context).textTheme.titleLarge),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _customer,
-                decoration: const InputDecoration(labelText: 'Customer'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _phone,
-                decoration: const InputDecoration(labelText: 'Phone'),
-              ),
-            ),
-          ],
-        ),
+        _customerSelector(),
         const SizedBox(height: 12),
         Expanded(child: _cartTable()),
         const Divider(),
@@ -475,6 +475,11 @@ class _PosScreenState extends State<PosScreen>
             ),
           ],
         ),
+        if (_selectedCustomer != null)
+          Text(
+            'Customer credit available ${_money(_selectedCustomer!.availableCredit)}',
+            key: const Key('selected_customer_credit'),
+          ),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -578,6 +583,72 @@ class _PosScreenState extends State<PosScreen>
     );
   }
 
+  Widget _customerSelector() => Column(
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const Key('pos_customer_search'),
+              controller: _customer,
+              decoration: InputDecoration(
+                labelText: 'Customer',
+                suffixIcon: IconButton(
+                  tooltip: 'Search customers',
+                  onPressed: _searchCustomers,
+                  icon: const Icon(Icons.person_search_outlined),
+                ),
+              ),
+              onSubmitted: (_) => _searchCustomers(),
+              onChanged: (_) => setState(() => _selectedCustomer = null),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _phone,
+              decoration: const InputDecoration(labelText: 'Phone'),
+            ),
+          ),
+        ],
+      ),
+      if (_customerMatches.isNotEmpty && _selectedCustomer == null)
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: _customerMatches.take(5).map((customer) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ActionChip(
+                  key: Key('select_customer_${customer.customerCode}'),
+                  avatar: const Icon(Icons.person_outline, size: 18),
+                  label: Text('${customer.customerCode} ${customer.name}'),
+                  onPressed: () => setState(() {
+                    _selectedCustomer = customer;
+                    _customer.text = customer.name;
+                    _phone.text = customer.phoneNumber ?? '';
+                  }),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+    ],
+  );
+
+  Future<void> _searchCustomers() async {
+    if (!can('customers.view')) return;
+    try {
+      final customers = await widget.authState.lookupCustomers(
+        search: _customer.text,
+      );
+      if (mounted) setState(() => _customerMatches = customers);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    }
+  }
+
   Widget _historyView() => Padding(
     padding: const EdgeInsets.all(20),
     child: Column(
@@ -625,9 +696,10 @@ class _PosScreenState extends State<PosScreen>
           DataColumn(label: Text('Invoice')),
           DataColumn(label: Text('Cashier')),
           DataColumn(label: Text('Items')),
-          DataColumn(label: Text('Total')),
           DataColumn(label: Text('Return')),
           DataColumn(label: Text('Actions')),
+          DataColumn(label: Text('Total')),
+          DataColumn(label: Text('Credit')),
           DataColumn(label: Text('Payment')),
         ],
         rows: sales
@@ -637,7 +709,6 @@ class _PosScreenState extends State<PosScreen>
                   DataCell(Text(sale.invoiceNumber ?? sale.holdNumber ?? '-')),
                   DataCell(Text(sale.cashierName)),
                   DataCell(Text('${sale.itemCount}')),
-                  DataCell(Text(_money(sale.netTotal))),
                   DataCell(
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -677,6 +748,8 @@ class _PosScreenState extends State<PosScreen>
                       ],
                     ),
                   ),
+                  DataCell(Text(_money(sale.netTotal))),
+                  DataCell(Text(_money(sale.creditAmount))),
                   DataCell(Text(sale.paymentSummary)),
                 ],
               ),
@@ -703,6 +776,8 @@ class _PosScreenState extends State<PosScreen>
             Text(
               'Total ${_money(sale.netTotal)}  Paid ${_money(sale.amountPaid)}  Change ${_money(sale.changeGiven)}',
             ),
+            if (sale.creditAmount > 0)
+              Text('Credit ${_money(sale.creditAmount)}'),
           ],
         ),
       ),
@@ -711,8 +786,14 @@ class _PosScreenState extends State<PosScreen>
 }
 
 class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({required this.total});
+  const _PaymentDialog({
+    required this.total,
+    required this.creditAllowed,
+    this.customerName,
+  });
   final double total;
+  final bool creditAllowed;
+  final String? customerName;
 
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
@@ -724,11 +805,22 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   final _cardApplied = TextEditingController();
   String? _error;
 
+  double get _applied =>
+      (double.tryParse(_cashApplied.text) ?? 0) +
+      (double.tryParse(_cardApplied.text) ?? 0);
+  double get _creditAmount =>
+      (widget.total - _applied).clamp(0, widget.total).toDouble();
+
   @override
   void initState() {
     super.initState();
-    _cashApplied.text = widget.total.toStringAsFixed(2);
-    _cashTendered.text = widget.total.toStringAsFixed(2);
+    if (widget.creditAllowed) {
+      _cashApplied.text = '0.00';
+      _cashTendered.text = '0.00';
+    } else {
+      _cashApplied.text = widget.total.toStringAsFixed(2);
+      _cashTendered.text = widget.total.toStringAsFixed(2);
+    }
   }
 
   @override
@@ -740,10 +832,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('Due ${_money(widget.total)}'),
+          if (widget.creditAllowed)
+            Text('Credit customer ${widget.customerName ?? ''}'),
           TextField(
             key: const Key('cash_applied'),
             controller: _cashApplied,
             decoration: const InputDecoration(labelText: 'Cash applied'),
+            onChanged: (_) => setState(() {}),
           ),
           TextField(
             key: const Key('cash_tendered'),
@@ -754,7 +849,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             key: const Key('card_applied'),
             controller: _cardApplied,
             decoration: const InputDecoration(labelText: 'Card amount'),
+            onChanged: (_) => setState(() {}),
           ),
+          if (widget.creditAllowed)
+            Text('Credit amount ${_money(_creditAmount)}'),
           if (_error != null)
             Text(
               _error!,
@@ -781,7 +879,16 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     final tendered = double.tryParse(_cashTendered.text) ?? 0;
     final card = double.tryParse(_cardApplied.text) ?? 0;
     final applied = cash + card;
-    if ((applied - widget.total).abs() > 0.009) {
+    if (cash < 0 || tendered < 0 || card < 0) {
+      setState(() => _error = 'Payment amounts cannot be negative.');
+      return;
+    }
+    if (widget.creditAllowed) {
+      if (applied - widget.total > 0.009) {
+        setState(() => _error = 'Payment total cannot exceed sale total.');
+        return;
+      }
+    } else if ((applied - widget.total).abs() > 0.009) {
       setState(() => _error = 'Payment total must equal sale total.');
       return;
     }
@@ -884,7 +991,10 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
     return double.parse(total.toStringAsFixed(2));
   }
 
-  void _updateCash() => _cash.text = _refundTotal.toStringAsFixed(2);
+  bool get _hasCustomerCredit => widget.returnable.customerId != null;
+  double get _defaultCashRefund => _hasCustomerCredit ? 0 : _refundTotal;
+
+  void _updateCash() => _cash.text = _defaultCashRefund.toStringAsFixed(2);
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -983,6 +1093,10 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
             ),
             const SizedBox(height: 12),
             Text('Refund Total ${_money(_refundTotal)}'),
+            if (_hasCustomerCredit)
+              Text(
+                'Credit sales reduce the customer ledger first. Enter only the cash refund portion.',
+              ),
             TextField(
               key: const Key('return_cash_refund'),
               controller: _cash,
@@ -1027,10 +1141,17 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
       return;
     }
     final cash = double.tryParse(_cash.text) ?? 0;
-    if ((cash - _refundTotal).abs() > 0.009) {
-      setState(
-        () => _error = 'Refund payment total must equal return refund amount.',
-      );
+    if (cash < 0) {
+      setState(() => _error = 'Cash refund cannot be negative.');
+      return;
+    }
+    if (_hasCustomerCredit) {
+      if (cash - _refundTotal > 0.009) {
+        setState(() => _error = 'Cash refund cannot exceed return amount.');
+        return;
+      }
+    } else if ((cash - _refundTotal).abs() > 0.009) {
+      setState(() => _error = 'Cash refund must equal return amount.');
       return;
     }
     if (_reason == 'Other' && _notes.text.trim().isEmpty) {
@@ -1065,9 +1186,11 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
           'reason': _reasonIndex(_reason),
           'notes': _emptyToNull(_notes.text),
           'allocations': allocations,
-          'refundPayments': [
-            {'method': 1, 'amount': cash},
-          ],
+          'refundPayments': cash > 0
+              ? [
+                  {'method': 1, 'amount': cash},
+                ]
+              : <Map<String, dynamic>>[],
         },
       );
       if (mounted) Navigator.pop(context, result);
@@ -1092,6 +1215,3 @@ String _returnLabel(String state) => switch (state) {
   'FullyReturned' => 'Fully Returned',
   _ => 'No Returns',
 };
-
-
-

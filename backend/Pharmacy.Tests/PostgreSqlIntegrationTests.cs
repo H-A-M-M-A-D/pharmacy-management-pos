@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            9L,
+            10L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -34,11 +34,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260902055022_CompletePurchasingAndGoodsReceiving',
                     '20260902114037_CompletePosAndSales',
                     '20260902222101_CompleteSalesReturnsAndRefunds',
-                    '20260903231207_CompletePurchaseReturns');
+                    '20260903231207_CompletePurchaseReturns',
+                    '20260904125716_CompleteCustomerManagementAndCreditSales');
                 """));
 
         Assert.Equal(
-            28L,
+            31L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -73,7 +74,15 @@ public sealed class PostgreSqlIntegrationTests
                   ('PurchaseReturns', 'ReturnDateUtc'),
                   ('PurchaseReturns', 'NetSupplierCredit'),
                   ('PurchaseReturnItems', 'ExpiryDate'),
-                  ('PurchaseReturnItems', 'NetSupplierCredit'));
+                  ('PurchaseReturnItems', 'NetSupplierCredit'),
+                  ('Customers', 'CreditLimit'),
+                  ('CustomerLedgerEntries', 'EntryDate'),
+                  ('CustomerLedgerEntries', 'Amount'),
+                  ('CustomerPayments', 'PaymentDateUtc'),
+                  ('CustomerPayments', 'Amount'),
+                  ('Sales', 'CreditAmount'),
+                  ('SalesReturns', 'CustomerCreditReductionAmount'),
+                  ('SalesReturns', 'CashRefundAmount'));
             """, connection))
         await using (var reader = await command.ExecuteReaderAsync())
         {
@@ -104,6 +113,14 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("numeric", types["PurchaseReturns.NetSupplierCredit"]);
         Assert.Equal("date", types["PurchaseReturnItems.ExpiryDate"]);
         Assert.Equal("numeric", types["PurchaseReturnItems.NetSupplierCredit"]);
+        Assert.Equal("numeric", types["Customers.CreditLimit"]);
+        Assert.Equal("date", types["CustomerLedgerEntries.EntryDate"]);
+        Assert.Equal("numeric", types["CustomerLedgerEntries.Amount"]);
+        Assert.Equal("timestamp with time zone", types["CustomerPayments.PaymentDateUtc"]);
+        Assert.Equal("numeric", types["CustomerPayments.Amount"]);
+        Assert.Equal("numeric", types["Sales.CreditAmount"]);
+        Assert.Equal("numeric", types["SalesReturns.CustomerCreditReductionAmount"]);
+        Assert.Equal("numeric", types["SalesReturns.CashRefundAmount"]);
     }
 
     [PostgreSqlFact]
@@ -647,7 +664,7 @@ public sealed class PostgreSqlIntegrationTests
                 'IX_SalesRefundPayments_Method_CreatedAt');
             """));
 
-        Assert.Equal(10L, await ScalarAsync<long>(connection, null, """
+        Assert.Equal(11L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM information_schema.table_constraints
             WHERE table_schema = 'public'
               AND constraint_name IN (
@@ -655,6 +672,7 @@ public sealed class PostgreSqlIntegrationTests
                 'CK_SalesReturns_Reason',
                 'CK_SalesReturns_Posted',
                 'CK_SalesReturns_Money_NonNegative',
+                'CK_SalesReturns_Settlement',
                 'CK_SalesReturnItems_Quantity_Positive',
                 'CK_SalesReturnItems_Money_NonNegative',
                 'CK_SalesReturnAllocations_Quantity_Positive',
@@ -697,8 +715,8 @@ public sealed class PostgreSqlIntegrationTests
             VALUES (@id,@item,@batch,2,60,60,40,current_date + 365,120,0,0,120,now(),now());
             """, ("id", allocationId), ("item", saleItemId), ("batch", batchId));
         await ExecuteAsync(connection, transaction, """
-            INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
-            VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,60,0,0,60,1,now(),now(),now());
+            INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CustomerCreditReductionAmount","CashRefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,60,0,0,60,0,60,1,now(),now(),now());
             """, ("id", returnId), ("sale", saleId), ("branch", branchId), ("user", userId));
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "SalesReturnItems" ("Id","SalesReturnId","OriginalSaleItemId","ProductId","Quantity","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CreatedAt","UpdatedAt")
@@ -715,8 +733,8 @@ public sealed class PostgreSqlIntegrationTests
 
         await AssertDatabaseErrorAsync(connection, transaction, "duplicate_return_number", PostgresErrorCodes.UniqueViolation,
             () => ExecuteAsync(connection, transaction, """
-                INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
-                VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,1,0,0,1,1,now(),now(),now());
+                INSERT INTO "SalesReturns" ("Id","ReturnNumber","OriginalSaleId","BranchId","ProcessedByUserId","ReturnDateUtc","Reason","GrossReturnAmount","DiscountReturnAmount","TaxReturnAmount","RefundAmount","CustomerCreditReductionAmount","CashRefundAmount","Status","PostedAtUtc","CreatedAt","UpdatedAt")
+                VALUES (@id,'RET-PG-1',@sale,@branch,@user,now(),1,1,0,0,1,0,1,1,now(),now(),now());
                 """, ("id", Guid.NewGuid()), ("sale", saleId), ("branch", branchId), ("user", userId)));
         await AssertDatabaseErrorAsync(connection, transaction, "zero_return_quantity", PostgresErrorCodes.CheckViolation,
             () => ExecuteAsync(connection, transaction, """
@@ -847,6 +865,128 @@ public sealed class PostgreSqlIntegrationTests
 
         await transaction.RollbackAsync();
     }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase10_customer_credit_constraints_indexes_permissions_and_sequences_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(9L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions"
+            WHERE "Code" IN (
+                'customers.view','customers.create','customers.update','customers.activate',
+                'customers.deactivate','customers.ledger.view','customers.payment.create',
+                'customers.adjust_balance','sales.credit');
+            """));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'S'
+              AND c.relname IN ('CustomerCodeSequence','CustomerPaymentReceiptSequence');
+            """));
+        Assert.Equal(16L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname IN (
+                'IX_Customers_CustomerCode',
+                'IX_Customers_Name',
+                'IX_Customers_NormalizedName',
+                'IX_Customers_PhoneNumber',
+                'IX_Customers_Email',
+                'IX_Customers_City',
+                'IX_Customers_IsActive',
+                'IX_CustomerLedgerEntries_CustomerId_CreatedAt',
+                'IX_CustomerLedgerEntries_CustomerId_BranchId_CreatedAt',
+                'IX_CustomerLedgerEntries_BranchId_CreatedAt',
+                'IX_CustomerLedgerEntries_EntryType_CreatedAt',
+                'IX_CustomerLedgerEntries_ReferenceType_ReferenceId',
+                'IX_CustomerPayments_ReceiptNumber',
+                'IX_CustomerPayments_CustomerId_PaymentDateUtc',
+                'IX_CustomerPayments_BranchId_PaymentDateUtc',
+                'IX_Sales_CustomerId_PostedAtUtc');
+            """));
+        Assert.Equal(8L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND constraint_name IN (
+                'CK_Customers_CreditLimit_NonNegative',
+                'CK_CustomerLedgerEntries_AmountSign',
+                'CK_CustomerPayments_Method',
+                'CK_CustomerPayments_Amount_Positive',
+                'CK_Sales_CreditRequiresCustomer',
+                'CK_Sales_Posted_Settled',
+                'CK_SalesReturns_Settlement',
+                'FK_Sales_Customers_CustomerId');
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase10_customer_credit_database_constraints_and_fks_are_enforced()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\" = 'Owner';");
+
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+        await InsertUserAsync(connection, transaction, branchId, roleId, Unique("owner"), Unique("owner").ToUpperInvariant(), null, null, userId);
+        await InsertCustomerAsync(connection, transaction, customerId, "CUS-PG-1", "Customer One", "CUSTOMER ONE", 1000);
+
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_customer_code", PostgresErrorCodes.UniqueViolation,
+            () => InsertCustomerAsync(connection, transaction, Guid.NewGuid(), "CUS-PG-1", "Customer Two", "CUSTOMER TWO", 1000));
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_credit_limit", PostgresErrorCodes.CheckViolation,
+            () => InsertCustomerAsync(connection, transaction, Guid.NewGuid(), Unique("CUS"), "Customer Three", "CUSTOMER THREE", -1));
+
+        await InsertCustomerLedgerAsync(connection, transaction, customerId, branchId, 1, 50);
+        await InsertCustomerLedgerAsync(connection, transaction, customerId, branchId, 2, 100);
+        await InsertCustomerLedgerAsync(connection, transaction, customerId, branchId, 3, -40);
+        await AssertDatabaseErrorAsync(connection, transaction, "credit_sale_negative", PostgresErrorCodes.CheckViolation,
+            () => InsertCustomerLedgerAsync(connection, transaction, customerId, branchId, 2, -1));
+        await AssertDatabaseErrorAsync(connection, transaction, "payment_positive", PostgresErrorCodes.CheckViolation,
+            () => InsertCustomerLedgerAsync(connection, transaction, customerId, branchId, 3, 1));
+        await AssertDatabaseErrorAsync(connection, transaction, "ledger_unknown_customer", PostgresErrorCodes.ForeignKeyViolation,
+            () => InsertCustomerLedgerAsync(connection, transaction, Guid.NewGuid(), branchId, 2, 1));
+
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "CustomerPayments" ("Id","ReceiptNumber","CustomerId","BranchId","Amount","PaymentMethod","PaymentDateUtc","ReceivedByUserId","CreatedAt","UpdatedAt")
+            VALUES (@id,'CR-PG-1',@customer,@branch,40,1,now(),@user,now(),now());
+            """, ("id", Guid.NewGuid()), ("customer", customerId), ("branch", branchId), ("user", userId));
+        await AssertDatabaseErrorAsync(connection, transaction, "duplicate_receipt", PostgresErrorCodes.UniqueViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "CustomerPayments" ("Id","ReceiptNumber","CustomerId","BranchId","Amount","PaymentMethod","PaymentDateUtc","ReceivedByUserId","CreatedAt","UpdatedAt")
+                VALUES (@id,'CR-PG-1',@customer,@branch,40,1,now(),@user,now(),now());
+                """, ("id", Guid.NewGuid()), ("customer", customerId), ("branch", branchId), ("user", userId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "negative_customer_payment", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "CustomerPayments" ("Id","ReceiptNumber","CustomerId","BranchId","Amount","PaymentMethod","PaymentDateUtc","ReceivedByUserId","CreatedAt","UpdatedAt")
+                VALUES (@id,'CR-PG-2',@customer,@branch,-1,1,now(),@user,now(),now());
+                """, ("id", Guid.NewGuid()), ("customer", customerId), ("branch", branchId), ("user", userId)));
+
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Sales" ("Id","BranchId","InvoiceNumber","Status","PostedAtUtc","CashierUserId","CustomerId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","CreditAmount","ChangeGiven","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,'INV-CREDIT-PG-1',2,now(),@cashier,@customer,100,0,0,100,25,75,0,now(),now());
+            """, ("id", Guid.NewGuid()), ("branch", branchId), ("cashier", userId), ("customer", customerId));
+        await AssertDatabaseErrorAsync(connection, transaction, "credit_without_customer", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Sales" ("Id","BranchId","InvoiceNumber","Status","PostedAtUtc","CashierUserId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","CreditAmount","ChangeGiven","CreatedAt","UpdatedAt")
+                VALUES (@id,@branch,'INV-CREDIT-PG-2',2,now(),@cashier,100,0,0,100,25,75,0,now(),now());
+                """, ("id", Guid.NewGuid()), ("branch", branchId), ("cashier", userId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "unsettled_posted_sale", PostgresErrorCodes.CheckViolation,
+            () => ExecuteAsync(connection, transaction, """
+                INSERT INTO "Sales" ("Id","BranchId","InvoiceNumber","Status","PostedAtUtc","CashierUserId","CustomerId","Subtotal","DiscountTotal","TaxTotal","NetTotal","AmountPaid","CreditAmount","ChangeGiven","CreatedAt","UpdatedAt")
+                VALUES (@id,@branch,'INV-CREDIT-PG-3',2,now(),@cashier,@customer,100,0,0,100,25,70,0,now(),now());
+                """, ("id", Guid.NewGuid()), ("branch", branchId), ("cashier", userId), ("customer", customerId)));
+
+        await transaction.RollbackAsync();
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
@@ -973,6 +1113,31 @@ public sealed class PostgreSqlIntegrationTests
             INSERT INTO "SupplierLedgerEntries" ("Id","SupplierId","BranchId","EntryType","Amount","EntryDate","CreatedAt","UpdatedAt")
             VALUES (@id,@supplier,@branch,@type,@amount,current_date,now(),now());
             """, ("id", Guid.NewGuid()), ("supplier", supplierId), ("branch", branchId), ("type", entryType), ("amount", amount));
+
+    private static async Task InsertCustomerAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        string customerCode,
+        string name,
+        string normalizedName,
+        decimal creditLimit) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Customers" ("Id","CustomerCode","Name","NormalizedName","CreditLimit","OpeningBalance","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@code,@name,@normalized,@creditLimit,0,true,now(),now());
+            """, ("id", id), ("code", customerCode), ("name", name), ("normalized", normalizedName), ("creditLimit", creditLimit));
+
+    private static async Task InsertCustomerLedgerAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid customerId,
+        Guid branchId,
+        int entryType,
+        decimal amount) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "CustomerLedgerEntries" ("Id","CustomerId","BranchId","EntryType","Amount","EntryDate","CreatedAt","UpdatedAt")
+            VALUES (@id,@customer,@branch,@type,@amount,current_date,now(),now());
+            """, ("id", Guid.NewGuid()), ("customer", customerId), ("branch", branchId), ("type", entryType), ("amount", amount));
 
     private static async Task InsertPurchaseOrderAsync(
         NpgsqlConnection connection,

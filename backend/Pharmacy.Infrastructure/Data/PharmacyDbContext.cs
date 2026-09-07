@@ -42,11 +42,15 @@ public class PharmacyDbContext : DbContext
     public DbSet<SalesReturnItem> SalesReturnItems { get; set; } = null!;
     public DbSet<SalesReturnAllocation> SalesReturnAllocations { get; set; } = null!;
     public DbSet<SalesRefundPayment> SalesRefundPayments { get; set; } = null!;
+    public DbSet<Customer> Customers { get; set; } = null!;
+    public DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; set; } = null!;
+    public DbSet<CustomerPayment> CustomerPayments { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
+        ValidateCustomerFinancialEntries();
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -56,6 +60,7 @@ public class PharmacyDbContext : DbContext
     {
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
+        ValidateCustomerFinancialEntries();
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -178,6 +183,31 @@ public class PharmacyDbContext : DbContext
         }
     }
 
+    private void ValidateCustomerFinancialEntries()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<CustomerLedgerEntry>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Customer ledger history is permanent and cannot be updated or deleted.");
+            }
+
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Validate();
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<CustomerPayment>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified)
+            {
+                throw new InvalidOperationException("Customer payment history is permanent and cannot be updated or deleted.");
+            }
+        }
+    }
+
     private void ValidateStockMovements()
     {
         ChangeTracker.DetectChanges();
@@ -258,12 +288,15 @@ public class PharmacyDbContext : DbContext
         ConfigureProductCategory(modelBuilder);
         ConfigureManufacturer(modelBuilder);
         ConfigureSupplier(modelBuilder);
+        ConfigureCustomer(modelBuilder);
         ConfigureProduct(modelBuilder);
         ConfigureProductBatch(modelBuilder);
         ConfigureInventory(modelBuilder);
         ConfigureStockMovement(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureSupplierLedgerEntry(modelBuilder);
+        ConfigureCustomerLedgerEntry(modelBuilder);
+        ConfigureCustomerPayment(modelBuilder);
         ConfigurePurchaseOrder(modelBuilder);
         ConfigurePurchaseOrderItem(modelBuilder);
         ConfigureGoodsReceipt(modelBuilder);
@@ -651,6 +684,103 @@ public class PharmacyDbContext : DbContext
             .OnDelete(DeleteBehavior.SetNull);
     }
 
+    private void ConfigureCustomer(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<Customer>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.CustomerCode).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.PhoneNumber).HasMaxLength(30);
+        entity.Property(e => e.AlternatePhone).HasMaxLength(30);
+        entity.Property(e => e.Email).HasMaxLength(100);
+        entity.Property(e => e.Address).HasMaxLength(500);
+        entity.Property(e => e.City).HasMaxLength(100);
+        entity.Property(e => e.BusinessName).HasMaxLength(200);
+        entity.Property(e => e.NTN).HasMaxLength(50);
+        entity.Property(e => e.OpeningBalance).HasPrecision(18, 2);
+        entity.Property(e => e.CreditLimit).HasPrecision(18, 2);
+        entity.HasIndex(e => e.CustomerCode).IsUnique();
+        entity.HasIndex(e => e.Name);
+        entity.HasIndex(e => e.NormalizedName);
+        entity.HasIndex(e => e.PhoneNumber);
+        entity.HasIndex(e => e.Email);
+        entity.HasIndex(e => e.City);
+        entity.HasIndex(e => e.IsActive);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Customers_CreditLimit_NonNegative", "\"CreditLimit\" >= 0");
+        });
+    }
+
+    private void ConfigureCustomerLedgerEntry(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerLedgerEntry>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.EntryDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.PaymentMethod).HasMaxLength(50);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.ReferenceType).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => new { e.CustomerId, e.CreatedAt });
+        entity.HasIndex(e => new { e.CustomerId, e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.EntryType, e.CreatedAt });
+        entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId });
+        entity.ToTable(table => table.HasCheckConstraint(
+            "CK_CustomerLedgerEntries_AmountSign",
+            "\"Amount\" <> 0 AND ((\"EntryType\" = 1) OR (\"EntryType\" IN (2, 5) AND \"Amount\" > 0) OR (\"EntryType\" IN (3, 4, 6) AND \"Amount\" < 0))"));
+
+        entity.HasOne(e => e.Customer)
+            .WithMany(c => c.LedgerEntries)
+            .HasForeignKey(e => e.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch)
+            .WithMany()
+            .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(e => e.CreatedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private void ConfigureCustomerPayment(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerPayment>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ReceiptNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.ReceiptNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.PaymentDateUtc });
+        entity.HasIndex(e => new { e.BranchId, e.PaymentDateUtc });
+        entity.HasIndex(e => new { e.PaymentMethod, e.PaymentDateUtc });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_CustomerPayments_Method", "\"PaymentMethod\" IN (1, 2, 3, 4, 5, 6, 7)");
+            table.HasCheckConstraint("CK_CustomerPayments_Amount_Positive", "\"Amount\" > 0");
+        });
+
+        entity.HasOne(e => e.Customer)
+            .WithMany(c => c.Payments)
+            .HasForeignKey(e => e.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch)
+            .WithMany()
+            .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReceivedByUser)
+            .WithMany()
+            .HasForeignKey(e => e.ReceivedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
     private void ConfigurePurchaseOrder(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<PurchaseOrder>();
@@ -829,22 +959,26 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.TaxTotal).HasPrecision(18, 2);
         entity.Property(e => e.NetTotal).HasPrecision(18, 2);
         entity.Property(e => e.AmountPaid).HasPrecision(18, 2);
+        entity.Property(e => e.CreditAmount).HasPrecision(18, 2);
         entity.Property(e => e.ChangeGiven).HasPrecision(18, 2);
         entity.HasIndex(e => e.InvoiceNumber).IsUnique().HasFilter("\"InvoiceNumber\" IS NOT NULL");
         entity.HasIndex(e => e.HoldNumber).IsUnique().HasFilter("\"HoldNumber\" IS NOT NULL");
         entity.HasIndex(e => new { e.BranchId, e.PostedAtUtc });
         entity.HasIndex(e => new { e.CashierUserId, e.PostedAtUtc });
+        entity.HasIndex(e => new { e.CustomerId, e.PostedAtUtc });
         entity.HasIndex(e => new { e.Status, e.CreatedAt });
         entity.HasIndex(e => e.CustomerPhone);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Sales_Status", "\"Status\" IN (1, 2, 3)");
             table.HasCheckConstraint("CK_Sales_Posted_HasInvoice", "(\"Status\" <> 2) OR (\"InvoiceNumber\" IS NOT NULL AND \"PostedAtUtc\" IS NOT NULL)");
-            table.HasCheckConstraint("CK_Sales_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"TaxTotal\" >= 0 AND \"NetTotal\" >= 0 AND \"AmountPaid\" >= 0 AND \"ChangeGiven\" >= 0");
-            table.HasCheckConstraint("CK_Sales_Posted_Paid", "(\"Status\" <> 2) OR (\"AmountPaid\" = \"NetTotal\")");
+            table.HasCheckConstraint("CK_Sales_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"TaxTotal\" >= 0 AND \"NetTotal\" >= 0 AND \"AmountPaid\" >= 0 AND \"CreditAmount\" >= 0 AND \"ChangeGiven\" >= 0");
+            table.HasCheckConstraint("CK_Sales_Posted_Settled", "(\"Status\" <> 2) OR (\"AmountPaid\" + \"CreditAmount\" = \"NetTotal\")");
+            table.HasCheckConstraint("CK_Sales_CreditRequiresCustomer", "\"CreditAmount\" = 0 OR \"CustomerId\" IS NOT NULL");
         });
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany(c => c.Sales).HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureSaleItem(ModelBuilder modelBuilder)
@@ -902,6 +1036,8 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.DiscountReturnAmount).HasPrecision(18, 2);
         entity.Property(e => e.TaxReturnAmount).HasPrecision(18, 2);
         entity.Property(e => e.RefundAmount).HasPrecision(18, 2);
+        entity.Property(e => e.CustomerCreditReductionAmount).HasPrecision(18, 2);
+        entity.Property(e => e.CashRefundAmount).HasPrecision(18, 2);
         entity.HasIndex(e => e.ReturnNumber).IsUnique();
         entity.HasIndex(e => e.OriginalSaleId);
         entity.HasIndex(e => new { e.BranchId, e.PostedAtUtc });
@@ -913,7 +1049,8 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_SalesReturns_Status", "\"Status\" IN (1)");
             table.HasCheckConstraint("CK_SalesReturns_Reason", "\"Reason\" IN (1, 2, 3, 4, 5)");
             table.HasCheckConstraint("CK_SalesReturns_Posted", "\"Status\" = 1 AND \"PostedAtUtc\" IS NOT NULL");
-            table.HasCheckConstraint("CK_SalesReturns_Money_NonNegative", "\"GrossReturnAmount\" >= 0 AND \"DiscountReturnAmount\" >= 0 AND \"TaxReturnAmount\" >= 0 AND \"RefundAmount\" >= 0");
+            table.HasCheckConstraint("CK_SalesReturns_Money_NonNegative", "\"GrossReturnAmount\" >= 0 AND \"DiscountReturnAmount\" >= 0 AND \"TaxReturnAmount\" >= 0 AND \"RefundAmount\" >= 0 AND \"CustomerCreditReductionAmount\" >= 0 AND \"CashRefundAmount\" >= 0");
+            table.HasCheckConstraint("CK_SalesReturns_Settlement", "\"RefundAmount\" = \"CustomerCreditReductionAmount\" + \"CashRefundAmount\"");
         });
         entity.HasOne(e => e.OriginalSale).WithMany().HasForeignKey(e => e.OriginalSaleId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);

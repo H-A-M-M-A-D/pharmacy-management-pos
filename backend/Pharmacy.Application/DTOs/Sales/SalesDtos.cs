@@ -17,10 +17,10 @@ public sealed record HoldSaleRequest(
     IReadOnlyList<SaleLineRequest> Items);
 
 public sealed record PostSaleRequest(
-    Guid? BranchId, string? CustomerName, string? CustomerPhone, string? Notes,
+    Guid? BranchId, Guid? CustomerId, string? CustomerName, string? CustomerPhone, string? Notes,
     IReadOnlyList<SaleLineRequest> Items, IReadOnlyList<SalePaymentRequest> Payments);
 
-public sealed record PostHeldSaleRequest(IReadOnlyList<SalePaymentRequest> Payments);
+public sealed record PostHeldSaleRequest(Guid? CustomerId, IReadOnlyList<SalePaymentRequest> Payments);
 
 public sealed record SalesHistoryQuery(
     int Page = 1, int PageSize = 25, string? Search = null, Guid? BranchId = null,
@@ -33,7 +33,7 @@ public sealed record SaleListItemDto(
     Guid Id, string? InvoiceNumber, string? HoldNumber, SaleStatus Status, DateTime CreatedAt,
     DateTime? PostedAtUtc, Guid BranchId, string BranchName, string CashierName, string? CustomerName,
     string? CustomerPhone, int ItemCount, decimal NetTotal, decimal AmountPaid, decimal ChangeGiven,
-    string PaymentSummary, SalesReturnState ReturnState = SalesReturnState.NotReturned);
+    decimal CreditAmount, string PaymentSummary, SalesReturnState ReturnState = SalesReturnState.NotReturned);
 
 public sealed record SaleItemAllocationDto(
     Guid Id, Guid ProductBatchId, string BatchNumber, DateOnly ExpiryDate, int Quantity,
@@ -50,20 +50,22 @@ public sealed record SalePaymentDto(Guid Id, SalePaymentMethod Method, decimal A
 public sealed record SaleDetailsDto(
     Guid Id, string? InvoiceNumber, string? HoldNumber, SaleStatus Status, DateTime CreatedAt,
     DateTime? PostedAtUtc, Guid BranchId, string BranchName, string? BranchAddress,
-    string? BranchPhone, Guid CashierUserId, string CashierName, string? CustomerName,
-    string? CustomerPhone, decimal Subtotal, decimal DiscountTotal, decimal TaxTotal,
-    decimal NetTotal, decimal AmountPaid, decimal ChangeGiven, string? Notes,
+    string? BranchPhone, Guid CashierUserId, string CashierName, Guid? CustomerId,
+    string? CustomerCode, string? CustomerName, string? CustomerPhone, decimal Subtotal,
+    decimal DiscountTotal, decimal TaxTotal, decimal NetTotal, decimal AmountPaid,
+    decimal CreditAmount, decimal ChangeGiven, string? Notes,
     IReadOnlyList<SaleItemDto> Items, IReadOnlyList<SalePaymentDto> Payments);
 
 public sealed record ReceiptDto(
     string InvoiceNumber, string BranchName, string? BranchAddress, string? BranchPhone,
     DateTime PostedAtUtc, string CashierName, string? CustomerName, decimal Subtotal,
     decimal DiscountTotal, decimal TaxTotal, decimal NetTotal, decimal AmountPaid,
-    decimal ChangeGiven, IReadOnlyList<SaleItemDto> Items, IReadOnlyList<SalePaymentDto> Payments);
+    decimal CreditAmount, decimal ChangeGiven, IReadOnlyList<SaleItemDto> Items, IReadOnlyList<SalePaymentDto> Payments);
 
 public sealed record ReturnableSaleDto(
     Guid SaleId, string InvoiceNumber, DateTime PostedAtUtc, Guid BranchId, string BranchName,
     string CashierName, string? CustomerName, string? CustomerPhone, decimal NetTotal,
+    Guid? CustomerId, string? CustomerCode, decimal AmountPaid, decimal CreditAmount,
     SalesReturnState ReturnState, IReadOnlyList<ReturnableSaleItemDto> Items,
     IReadOnlyList<SalePaymentDto> OriginalPayments);
 
@@ -111,13 +113,15 @@ public sealed record SalesReturnDetailsDto(
     Guid ProcessedByUserId, string ProcessedByName, DateTime ReturnDateUtc,
     SalesReturnReason Reason, string? Notes, decimal GrossReturnAmount,
     decimal DiscountReturnAmount, decimal TaxReturnAmount, decimal RefundAmount,
+    decimal CustomerCreditReductionAmount, decimal CashRefundAmount,
     SalesReturnStatus Status, string? CustomerName, string? CustomerPhone,
     IReadOnlyList<SalesReturnItemDto> Items, IReadOnlyList<SalesRefundPaymentDto> RefundPayments);
 
 public sealed record SalesReturnReceiptDto(
     string ReturnNumber, string OriginalInvoiceNumber, string BranchName, string? BranchAddress,
     string? BranchPhone, DateTime ReturnDateUtc, string ProcessedByName, string? CustomerName,
-    SalesReturnReason Reason, decimal RefundAmount, IReadOnlyList<SalesReturnItemDto> Items,
+    SalesReturnReason Reason, decimal RefundAmount, decimal CustomerCreditReductionAmount,
+    decimal CashRefundAmount, IReadOnlyList<SalesReturnItemDto> Items,
     IReadOnlyList<SalesRefundPaymentDto> RefundPayments);
 
 public enum SalesReturnState

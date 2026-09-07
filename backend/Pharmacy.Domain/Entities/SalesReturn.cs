@@ -18,6 +18,8 @@ public class SalesReturn : Entity
     public decimal DiscountReturnAmount { get; set; }
     public decimal TaxReturnAmount { get; set; }
     public decimal RefundAmount { get; set; }
+    public decimal CustomerCreditReductionAmount { get; set; }
+    public decimal CashRefundAmount { get; set; }
     public SalesReturnStatus Status { get; set; } = SalesReturnStatus.Posted;
     public DateTime? PostedAtUtc { get; set; }
     public ICollection<SalesReturnItem> Items { get; set; } = new List<SalesReturnItem>();

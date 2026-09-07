@@ -12,6 +12,8 @@ public class Sale : Entity
     public DateTime? PostedAtUtc { get; set; }
     public Guid CashierUserId { get; set; }
     public User? CashierUser { get; set; }
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
     public decimal Subtotal { get; set; }
@@ -19,6 +21,7 @@ public class Sale : Entity
     public decimal TaxTotal { get; set; }
     public decimal NetTotal { get; set; }
     public decimal AmountPaid { get; set; }
+    public decimal CreditAmount { get; set; }
     public decimal ChangeGiven { get; set; }
     public string? Notes { get; set; }
     public ICollection<SaleItem> Items { get; set; } = new List<SaleItem>();

@@ -128,6 +128,34 @@ abstract interface class PharmacyApi {
     String id,
     Map<String, dynamic> values,
   );
+  Future<PagedCustomers> listCustomers(
+    String token, {
+    String? search,
+    bool? isActive,
+  });
+  Future<List<CustomerLookup>> lookupCustomers(String token, {String? search});
+  Future<CustomerDetails> customerDetails(String token, String id);
+  Future<CustomerListItem> createCustomer(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<CustomerListItem> updateCustomer(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> setCustomerActive(String token, String id, bool active);
+  Future<PagedCustomerLedger> customerLedger(String token, String id);
+  Future<void> recordCustomerPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> adjustCustomerBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
   Future<PagedPurchaseOrders> listPurchaseOrders(
     String token, {
     String? search,
@@ -642,6 +670,102 @@ class ApiClient implements PharmacyApi {
   ) async => _request(
     'POST',
     '/api/suppliers/$id/adjustments',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<PagedCustomers> listCustomers(
+    String token, {
+    String? search,
+    bool? isActive,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (isActive != null) q['isActive'] = '$isActive';
+    return PagedCustomers.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/customers', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<List<CustomerLookup>> lookupCustomers(
+    String token, {
+    String? search,
+  }) async {
+    final q = <String, String>{'activeOnly': 'true'};
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    final data = await _request(
+      'GET',
+      Uri(path: '/api/customers/lookup', queryParameters: q).toString(),
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => CustomerLookup.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<CustomerDetails> customerDetails(String token, String id) async =>
+      CustomerDetails.fromJson(
+        (await _request('GET', '/api/customers/$id', token: token))!,
+      );
+
+  @override
+  Future<CustomerListItem> createCustomer(
+    String token,
+    Map<String, dynamic> values,
+  ) async => CustomerListItem.fromJson(
+    (await _request('POST', '/api/customers', token: token, body: values))!,
+  );
+
+  @override
+  Future<CustomerListItem> updateCustomer(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => CustomerListItem.fromJson(
+    (await _request('PUT', '/api/customers/$id', token: token, body: values))!,
+  );
+
+  @override
+  Future<void> setCustomerActive(String token, String id, bool active) async =>
+      _void(
+        'POST',
+        '/api/customers/$id/${active ? 'activate' : 'deactivate'}',
+        token,
+      );
+
+  @override
+  Future<PagedCustomerLedger> customerLedger(String token, String id) async =>
+      PagedCustomerLedger.fromJson(
+        (await _request('GET', '/api/customers/$id/ledger', token: token))!,
+      );
+
+  @override
+  Future<void> recordCustomerPayment(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/customers/$id/payments',
+    token: token,
+    body: values,
+  );
+
+  @override
+  Future<void> adjustCustomerBalance(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => _request(
+    'POST',
+    '/api/customers/$id/adjustments',
     token: token,
     body: values,
   );

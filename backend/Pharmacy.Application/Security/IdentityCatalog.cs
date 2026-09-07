@@ -40,6 +40,14 @@ public static class PermissionCatalog
     public const string SuppliersLedgerView = "suppliers.ledger.view";
     public const string SuppliersPaymentCreate = "suppliers.payment.create";
     public const string SuppliersAdjustBalance = "suppliers.adjust_balance";
+    public const string CustomersView = "customers.view";
+    public const string CustomersCreate = "customers.create";
+    public const string CustomersUpdate = "customers.update";
+    public const string CustomersActivate = "customers.activate";
+    public const string CustomersDeactivate = "customers.deactivate";
+    public const string CustomersLedgerView = "customers.ledger.view";
+    public const string CustomersPaymentCreate = "customers.payment.create";
+    public const string CustomersAdjustBalance = "customers.adjust_balance";
     public const string PurchasesView = "purchases.view";
     public const string PurchasesCreate = "purchases.create";
     public const string PurchasesUpdateDraft = "purchases.update_draft";
@@ -51,6 +59,7 @@ public static class PermissionCatalog
     public const string PurchaseOrdersCancel = "purchase_orders.cancel";
     public const string SalesView = "sales.view";
     public const string SalesCreate = "sales.create";
+    public const string SalesCredit = "sales.credit";
     public const string SalesHold = "sales.hold";
     public const string SalesDiscount = "sales.discount";
     public const string SalesReprint = "sales.reprint";
@@ -74,10 +83,13 @@ public static class PermissionCatalog
         SuppliersView, SuppliersCreate, SuppliersUpdate, SuppliersActivate,
         SuppliersDeactivate, SuppliersLedgerView, SuppliersPaymentCreate,
         SuppliersAdjustBalance,
+        CustomersView, CustomersCreate, CustomersUpdate, CustomersActivate,
+        CustomersDeactivate, CustomersLedgerView, CustomersPaymentCreate,
+        CustomersAdjustBalance,
         PurchasesView, PurchasesCreate, PurchasesUpdateDraft, PurchasesCancel,
         PurchasesReceive, PurchaseOrdersView, PurchaseOrdersCreate,
         PurchaseOrdersUpdate, PurchaseOrdersCancel,
-        SalesView, SalesCreate, SalesHold, SalesDiscount, SalesReprint,
+        SalesView, SalesCreate, SalesCredit, SalesHold, SalesDiscount, SalesReprint,
         SalesReturnsView, SalesReturnsCreate, SalesReturnsRefund, SalesReturnsReprint,
         PurchaseReturnsView, PurchaseReturnsCreate, PurchaseReturnsReprint
     ];

@@ -221,6 +221,26 @@ class AuthState extends ChangeNotifier {
       _api.recordSupplierPayment(_requiredToken, id, values);
   Future<void> adjustSupplierBalance(String id, Map<String, dynamic> values) =>
       _api.adjustSupplierBalance(_requiredToken, id, values);
+  Future<PagedCustomers> listCustomers({String? search, bool? isActive}) =>
+      _api.listCustomers(_requiredToken, search: search, isActive: isActive);
+  Future<List<CustomerLookup>> lookupCustomers({String? search}) =>
+      _api.lookupCustomers(_requiredToken, search: search);
+  Future<CustomerDetails> customerDetails(String id) =>
+      _api.customerDetails(_requiredToken, id);
+  Future<CustomerListItem> createCustomer(Map<String, dynamic> values) =>
+      _api.createCustomer(_requiredToken, values);
+  Future<CustomerListItem> updateCustomer(
+    String id,
+    Map<String, dynamic> values,
+  ) => _api.updateCustomer(_requiredToken, id, values);
+  Future<void> setCustomerActive(String id, bool active) =>
+      _api.setCustomerActive(_requiredToken, id, active);
+  Future<PagedCustomerLedger> customerLedger(String id) =>
+      _api.customerLedger(_requiredToken, id);
+  Future<void> recordCustomerPayment(String id, Map<String, dynamic> values) =>
+      _api.recordCustomerPayment(_requiredToken, id, values);
+  Future<void> adjustCustomerBalance(String id, Map<String, dynamic> values) =>
+      _api.adjustCustomerBalance(_requiredToken, id, values);
 
   Future<PagedPurchaseOrders> listPurchaseOrders({String? search}) =>
       _api.listPurchaseOrders(_requiredToken, search: search);

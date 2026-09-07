@@ -11,12 +11,15 @@ public interface ISalesRepository
     Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default);
     Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default);
     Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default);
+    Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default);
+    Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default);
     Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default);
     Task<Sale?> GetSaleAsync(Guid id, CancellationToken cancellationToken = default);
     Task<string> NextInvoiceNumberAsync(DateTime postedAtUtc, CancellationToken cancellationToken = default);
     Task<string> NextHoldNumberAsync(DateTime createdAtUtc, CancellationToken cancellationToken = default);
     Task AddSaleAsync(Sale sale, CancellationToken cancellationToken = default);
+    Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default);
     Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default);
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
     Task<PagedResult<SaleListItemDto>> ListSalesAsync(SalesHistoryQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);

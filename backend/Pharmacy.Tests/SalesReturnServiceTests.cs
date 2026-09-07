@@ -141,6 +141,33 @@ public sealed class SalesReturnServiceTests
         await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(SalesReturnReason.Other, null, [new(other.Id, 1, SalesReturnDisposition.Restockable)], [new(SalePaymentMethod.Cash, 100)])));
     }
 
+    [Fact]
+    public async Task Credit_sale_return_reduces_customer_balance_before_cash_refund()
+    {
+        var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund);
+        var customer = new Customer { CustomerCode = "CUS-000001", Name = "Credit Customer", NormalizedName = "CREDIT CUSTOMER", CreditLimit = 500 };
+        f.Sale.CustomerId = customer.Id;
+        f.Sale.Customer = customer;
+        var allocation = f.AddOriginalSaleAllocation("A", 1, 100, 100);
+        f.Sale.AmountPaid = 0;
+        f.Sale.CreditAmount = 100;
+        f.CustomerLedger.Add(new CustomerLedgerEntry { CustomerId = customer.Id, BranchId = f.Branch.Id, EntryType = CustomerLedgerEntryType.CreditSale, Amount = 100, EntryDate = f.Today });
+
+        var posted = await f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(
+            SalesReturnReason.CustomerReturn,
+            null,
+            [new(allocation.Id, 1, SalesReturnDisposition.Restockable)],
+            []));
+
+        Assert.Equal(100, posted.RefundAmount);
+        Assert.Equal(100, posted.CustomerCreditReductionAmount);
+        Assert.Equal(0, posted.CashRefundAmount);
+        Assert.Empty(posted.RefundPayments);
+        var reduction = Assert.Single(f.CustomerLedger, x => x.EntryType == CustomerLedgerEntryType.SalesReturn);
+        Assert.Equal(-100, reduction.Amount);
+        Assert.Equal(posted.Id, reduction.ReferenceId);
+    }
+
     private sealed class Fixture : ISalesReturnRepository
     {
         public readonly DateOnly Today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time")));
@@ -155,6 +182,7 @@ public sealed class SalesReturnServiceTests
         public readonly List<DomainInventory> Inventories = [];
         public readonly List<SalesReturn> Returns = [];
         public readonly List<StockMovement> Movements = [];
+        public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
         public SalesReturnService Service { get; }
 
@@ -206,8 +234,10 @@ public sealed class SalesReturnServiceTests
         public Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) => Task.FromResult<DomainInventory?>(Inventories.SingleOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId));
         public Task<IReadOnlyDictionary<Guid, int>> GetReturnedQuantitiesAsync(IEnumerable<Guid> allocationIds, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<Guid, int>>(Returns.SelectMany(x => x.Items).SelectMany(x => x.Allocations).Where(x => allocationIds.Contains(x.OriginalSaleItemBatchAllocationId)).GroupBy(x => x.OriginalSaleItemBatchAllocationId).ToDictionary(x => x.Key, x => x.Sum(a => a.Quantity)));
         public Task<IReadOnlyDictionary<Guid, decimal>> GetRefundedAmountsAsync(IEnumerable<Guid> allocationIds, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<Guid, decimal>>(Returns.SelectMany(x => x.Items).SelectMany(x => x.Allocations).Where(x => allocationIds.Contains(x.OriginalSaleItemBatchAllocationId)).GroupBy(x => x.OriginalSaleItemBatchAllocationId).ToDictionary(x => x.Key, x => x.Sum(a => a.RefundAmount)));
+        public Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(CustomerLedger.Where(x => x.CustomerId == customerId && x.BranchId == branchId).Sum(x => x.Amount));
         public Task<string> NextReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default) => Task.FromResult($"RET-{returnDateUtc.Year}-{Returns.Count + 1:000000}");
         public Task AddSalesReturnAsync(SalesReturn salesReturn, CancellationToken cancellationToken = default) { Returns.Add(salesReturn); return Task.CompletedTask; }
+        public Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) { CustomerLedger.Add(entry); return Task.CompletedTask; }
         public Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) { Movements.Add(movement); return Task.CompletedTask; }
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task<PagedResult<SalesReturnListItemDto>> ListReturnsAsync(SalesReturnsQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<SalesReturnListItemDto>([], query.Page, query.PageSize, 0));
@@ -222,12 +252,12 @@ public sealed class SalesReturnServiceTests
             var remaining = items.Sum(x => x.RemainingQuantity);
             var sold = items.Sum(x => x.SoldQuantity);
             var state = remaining == sold ? SalesReturnState.NotReturned : remaining == 0 ? SalesReturnState.FullyReturned : SalesReturnState.PartiallyReturned;
-            return new ReturnableSaleDto(Sale.Id, Sale.InvoiceNumber!, Sale.PostedAtUtc!.Value, Sale.BranchId, Branch.Name, Actor.FullName, Sale.CustomerName, Sale.CustomerPhone, Sale.NetTotal, state, items, []);
+            return new ReturnableSaleDto(Sale.Id, Sale.InvoiceNumber!, Sale.PostedAtUtc!.Value, Sale.BranchId, Branch.Name, Actor.FullName, Sale.CustomerName, Sale.CustomerPhone, Sale.NetTotal, Sale.CustomerId, Sale.Customer?.CustomerCode, Sale.AmountPaid, Sale.CreditAmount, state, items, []);
         }
         public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => await operation(cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        private SalesReturnDetailsDto Map(SalesReturn x) => new(x.Id, x.ReturnNumber, x.OriginalSaleId, Sale.InvoiceNumber!, x.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, x.ProcessedByUserId, Actor.FullName, x.ReturnDateUtc, x.Reason, x.Notes, x.GrossReturnAmount, x.DiscountReturnAmount, x.TaxReturnAmount, x.RefundAmount, x.Status, Sale.CustomerName, Sale.CustomerPhone,
+        private SalesReturnDetailsDto Map(SalesReturn x) => new(x.Id, x.ReturnNumber, x.OriginalSaleId, Sale.InvoiceNumber!, x.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, x.ProcessedByUserId, Actor.FullName, x.ReturnDateUtc, x.Reason, x.Notes, x.GrossReturnAmount, x.DiscountReturnAmount, x.TaxReturnAmount, x.RefundAmount, x.CustomerCreditReductionAmount, x.CashRefundAmount, x.Status, Sale.CustomerName, Sale.CustomerPhone,
             x.Items.Select(i => new SalesReturnItemDto(i.Id, i.OriginalSaleItemId, i.ProductId, Product.Name, Product.SKU, i.Quantity, i.GrossReturnAmount, i.DiscountReturnAmount, i.TaxReturnAmount, i.RefundAmount, i.Allocations.Select(a => new SalesReturnAllocationDto(a.Id, a.OriginalSaleItemBatchAllocationId, a.ProductBatchId, Batches.Single(b => b.Id == a.ProductBatchId).BatchNumber, a.ExpiryDateSnapshot, a.Quantity, a.Disposition, a.UnitSalePriceSnapshot, a.GrossReturnAmount, a.DiscountReturnAmount, a.TaxReturnAmount, a.RefundAmount)).ToList())).ToList(),
             x.RefundPayments.Select(p => new SalesRefundPaymentDto(p.Id, p.Method, p.Amount, p.ReferenceNumber)).ToList());
     }

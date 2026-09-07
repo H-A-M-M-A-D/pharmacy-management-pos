@@ -17,6 +17,9 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
             .FirstOrDefaultAsync(x => x.Id == actorId, cancellationToken);
     public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => context.Branches.FirstOrDefaultAsync(x => x.Id == branchId, cancellationToken);
     public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => context.Products.FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+    public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => context.Customers.FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
+    public async Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) =>
+        await context.CustomerLedgerEntries.Where(x => x.CustomerId == customerId && x.BranchId == branchId).SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
     public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default) =>
         await context.ProductBatches.Where(x => x.BranchId == branchId && x.ProductId == productId).OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToListAsync(cancellationToken);
     public Task<Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) =>
@@ -28,6 +31,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
     public async Task<string> NextHoldNumberAsync(DateTime createdAtUtc, CancellationToken cancellationToken = default) =>
         $"HOLD-{createdAtUtc.Year}-{await context.Sales.CountAsync(x => x.HoldNumber != null && x.CreatedAt.Year == createdAtUtc.Year, cancellationToken) + 1:000000}";
     public async Task AddSaleAsync(Sale sale, CancellationToken cancellationToken = default) => await context.Sales.AddAsync(sale, cancellationToken);
+    public async Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) => await context.CustomerLedgerEntries.AddAsync(entry, cancellationToken);
     public async Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) => await context.StockMovements.AddAsync(movement, cancellationToken);
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
@@ -102,6 +106,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
                 x.NetTotal,
                 x.AmountPaid,
                 x.ChangeGiven,
+                x.CreditAmount,
                 string.Join(", ", x.Payments.Select(p => $"{p.Method}:{p.AmountApplied}")),
                 ReturnState(x.Items.Sum(i => i.RequestedQuantity), returnedBySale.GetValueOrDefault(x.Id))))
             .ToList();
@@ -110,7 +115,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
 
     public async Task<SaleDetailsDto?> GetSaleDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
-        var sale = await context.Sales.AsNoTracking().Include(x => x.Branch).Include(x => x.CashierUser)
+        var sale = await context.Sales.AsNoTracking().Include(x => x.Branch).Include(x => x.CashierUser).Include(x => x.Customer)
             .Include(x => x.Items).ThenInclude(x => x.Product)
             .Include(x => x.Items).ThenInclude(x => x.Allocations).ThenInclude(x => x.ProductBatch)
             .Include(x => x.Payments)
@@ -122,7 +127,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
             return new SaleItemDto(item.Id, item.ProductId, item.Product!.Name, item.Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, allocations.Select(x => x.UnitRetailPriceSnapshot).Distinct().Count() > 1, allocations);
         }).ToList();
         var payments = sale.Payments.OrderBy(x => x.CreatedAt).Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
-        return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, sale.Branch!.Name, sale.Branch.Address, sale.Branch.PhoneNumber, sale.CashierUserId, sale.CashierUser!.FullName, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.ChangeGiven, sale.Notes, items, payments);
+        return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, sale.Branch!.Name, sale.Branch.Address, sale.Branch.PhoneNumber, sale.CashierUserId, sale.CashierUser!.FullName, sale.CustomerId, sale.Customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments);
     }
 
     private static SalesReturnState ReturnState(int soldQuantity, int returnedQuantity) =>
