@@ -9,4 +9,6 @@ public class SalesRefundPayment : Entity
     public SalePaymentMethod Method { get; set; }
     public decimal Amount { get; set; }
     public string? ReferenceNumber { get; set; }
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
 }

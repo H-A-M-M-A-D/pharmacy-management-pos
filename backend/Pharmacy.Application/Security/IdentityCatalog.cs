@@ -70,6 +70,15 @@ public static class PermissionCatalog
     public const string PurchaseReturnsView = "purchase_returns.view";
     public const string PurchaseReturnsCreate = "purchase_returns.create";
     public const string PurchaseReturnsReprint = "purchase_returns.reprint";
+    public const string AccountsView = "accounts.view";
+    public const string AccountsManage = "accounts.manage";
+    public const string ExpensesView = "expenses.view";
+    public const string ExpensesCreate = "expenses.create";
+    public const string ExpensesPost = "expenses.post";
+    public const string FinanceLedgerView = "finance.ledger.view";
+    public const string FinanceIncomeCreate = "finance.income.create";
+    public const string FinanceTransfer = "finance.transfer";
+    public const string FinanceAdjust = "finance.adjust";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -91,7 +100,9 @@ public static class PermissionCatalog
         PurchaseOrdersUpdate, PurchaseOrdersCancel,
         SalesView, SalesCreate, SalesCredit, SalesHold, SalesDiscount, SalesReprint,
         SalesReturnsView, SalesReturnsCreate, SalesReturnsRefund, SalesReturnsReprint,
-        PurchaseReturnsView, PurchaseReturnsCreate, PurchaseReturnsReprint
+        PurchaseReturnsView, PurchaseReturnsCreate, PurchaseReturnsReprint,
+        AccountsView, AccountsManage, ExpensesView, ExpensesCreate, ExpensesPost,
+        FinanceLedgerView, FinanceIncomeCreate, FinanceTransfer, FinanceAdjust
     ];
 }
 

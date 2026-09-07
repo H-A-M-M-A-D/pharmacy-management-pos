@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, `20260902051500_CompleteSupplierManagement`, `20260902055022_CompletePurchasingAndGoodsReceiving`, `20260902114037_CompletePosAndSales`, `20260902222101_CompleteSalesReturnsAndRefunds`, `20260903231207_CompletePurchaseReturns`, and `20260904125716_CompleteCustomerManagementAndCreditSales`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations are `20260829211152_InitialCreate`, `20260829223012_AddUserSecurityAndManagement`, `20260901194508_CompleteProductMaster`, `20260901215409_CompleteBatchAndInventoryManagement`, `20260902051500_CompleteSupplierManagement`, `20260902055022_CompletePurchasingAndGoodsReceiving`, `20260902114037_CompletePosAndSales`, `20260902222101_CompleteSalesReturnsAndRefunds`, `20260903231207_CompletePurchaseReturns`, `20260904125716_CompleteCustomerManagementAndCreditSales`, and `20260907195029_CompleteAccountsExpensesAndCashManagement`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. All ten migrations are applied to both databases, and `__EFMigrationsHistory` contains all ten migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All eleven migrations are applied to both databases, and `__EFMigrationsHistory` contains all eleven migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -80,6 +80,8 @@ Phase 8 sales-return endpoints are under `/api/sales/{saleId}/returnable` and `/
 Phase 9 purchase-return endpoints are under `/api/goods-receipts/{goodsReceiptId}/returnable`, `/api/goods-receipts/{goodsReceiptId}/purchase-returns`, and `/api/purchase-returns`. Purchase returns must use original goods-receipt items and original batches. Paid return quantities reduce stock and supplier payable; bonus returns reduce physical stock without supplier credit. Posted purchase returns are immutable and can be viewed/reprinted as return notes.
 
 Phase 10 customer endpoints are under `/api/customers`. Customer master records are global, customer receivable ledger entries are branch-scoped, and payments/adjustments are controlled ledger commands. Customer credit sales require an active customer, `sales.credit`, and available credit. Sales returns for credit sales reduce customer receivable before requiring any cash refund payment.
+
+Phase 11 finance endpoints are under `/api/financial-accounts`, `/api/expense-categories`, `/api/expenses`, and `/api/finance`. Create an active branch financial account before posting new monetary sales, customer payments, supplier payments, or cash refunds; each request selects the account used for the movement.
 
 ## Verify Flutter
 

@@ -50,7 +50,8 @@ public sealed record SupplierLedgerEntryDto(
 
 public sealed record SupplierPaymentRequest(
     Guid SupplierId, Guid BranchId, decimal Amount, DateOnly PaymentDate,
-    SupplierPaymentMethod PaymentMethod, string? ReferenceNumber, string? Notes);
+    SupplierPaymentMethod PaymentMethod, string? ReferenceNumber, string? Notes,
+    Guid? FinancialAccountId = null);
 
 public sealed record SupplierAdjustmentRequest(
     Guid SupplierId, Guid BranchId, SupplierAdjustmentType Type, decimal Amount,

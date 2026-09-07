@@ -216,10 +216,32 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   }
 
   Future<void> _showPayment(SupplierListItem supplier) async {
+    final accounts = (await widget.authState.listFinancialAccounts(
+      branchId: widget.authState.currentUser!.branch.id,
+    )).where((x) => x.isActive).toList();
+    if (!mounted) return;
+    final account = await showDialog<FinancialAccountInfo>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Payment source account'),
+        children: accounts
+            .map(
+              (x) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, x),
+                child: Text('${x.name} (${_money(x.currentBalance)})'),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (account == null || !mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) =>
-          _PaymentDialog(authState: widget.authState, supplier: supplier),
+      builder: (_) => _PaymentDialog(
+        authState: widget.authState,
+        supplier: supplier,
+        account: account,
+      ),
     );
     if (ok == true) await _load();
   }
@@ -516,9 +538,14 @@ class _SupplierLedgerDialogState extends State<_SupplierLedgerDialog> {
 }
 
 class _PaymentDialog extends StatelessWidget {
-  const _PaymentDialog({required this.authState, required this.supplier});
+  const _PaymentDialog({
+    required this.authState,
+    required this.supplier,
+    required this.account,
+  });
   final AuthState authState;
   final SupplierListItem supplier;
+  final FinancialAccountInfo account;
   @override
   Widget build(BuildContext context) => _AmountDialog(
     title: 'Record Payment',
@@ -530,6 +557,7 @@ class _PaymentDialog extends StatelessWidget {
       'amount': amount,
       'paymentDate': _date(DateTime.now()),
       'paymentMethod': 'Cash',
+      'financialAccountId': account.id,
       'notes': note,
     }),
   );

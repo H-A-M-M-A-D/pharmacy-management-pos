@@ -21,7 +21,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            10L,
+            11L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -35,11 +35,12 @@ public sealed class PostgreSqlIntegrationTests
                     '20260902114037_CompletePosAndSales',
                     '20260902222101_CompleteSalesReturnsAndRefunds',
                     '20260903231207_CompletePurchaseReturns',
-                    '20260904125716_CompleteCustomerManagementAndCreditSales');
+                    '20260904125716_CompleteCustomerManagementAndCreditSales',
+                    '20260907195029_CompleteAccountsExpensesAndCashManagement');
                 """));
 
         Assert.Equal(
-            31L,
+            37L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -984,6 +985,87 @@ public sealed class PostgreSqlIntegrationTests
                 VALUES (@id,@branch,'INV-CREDIT-PG-3',2,now(),@cashier,@customer,100,0,0,100,25,70,0,now(),now());
                 """, ("id", Guid.NewGuid()), ("branch", branchId), ("cashier", userId), ("customer", customerId)));
 
+        await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase11_financial_ledger_constraints_indexes_and_immutability_are_real()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var branchId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(connection, transaction, branchId);
+        var username = Unique("finance-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, userId);
+        var categoryId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"ExpenseCategories\" ORDER BY \"Id\" LIMIT 1;");
+        var accountId = Guid.NewGuid();
+        var openingId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialAccounts" ("Id","BranchId","Name","NormalizedName","AccountType","OpeningBalance","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@name,@normalized,1,10000,true,now(),now());
+            """, ("id", accountId), ("branch", branchId), ("name", Unique("Finance")), ("normalized", Unique("FINANCE")));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@account,@branch,1,10000,'FinancialAccount',@account,'Opening balance',@user,now(),now(),now());
+            """, ("id", openingId), ("account", accountId), ("branch", branchId), ("user", userId));
+
+        var expenseId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Expenses" ("Id","ExpenseNumber","BranchId","ExpenseCategoryId","FinancialAccountId","ExpenseDateUtc","Amount","Description","CreatedByUserId","PostedAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@number,@branch,@category,@account,now(),3000,'Integration expense',@user,now(),now(),now());
+            """, ("id", expenseId), ("number", Unique("EXP")), ("branch", branchId), ("category", categoryId), ("account", accountId), ("user", userId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@account,@branch,6,-3000,'Expense',@expense,'Integration expense',@user,now(),now(),now());
+            """, ("id", Guid.NewGuid()), ("account", accountId), ("branch", branchId), ("expense", expenseId), ("user", userId));
+        Assert.Equal(7000m, await ScalarAsync<decimal>(connection, transaction, "SELECT SUM(\"Amount\") FROM \"FinancialLedgerEntries\" WHERE \"FinancialAccountId\"=@account;", ("account", accountId)));
+
+        var incomeId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "OtherIncomes" ("Id","IncomeNumber","BranchId","FinancialAccountId","Amount","Description","OccurredAtUtc","CreatedByUserId","CreatedAt","UpdatedAt")
+            VALUES (@id,@number,@branch,@account,2000,'Other income',now(),@user,now(),now());
+            """, ("id", incomeId), ("number", Unique("INC")), ("branch", branchId), ("account", accountId), ("user", userId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@account,@branch,7,2000,'OtherIncome',@income,'Other income',@user,now(),now(),now());
+            """, ("id", Guid.NewGuid()), ("account", accountId), ("branch", branchId), ("income", incomeId), ("user", userId));
+
+        var destinationId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialAccounts" ("Id","BranchId","Name","NormalizedName","AccountType","OpeningBalance","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@name,@normalized,2,0,true,now(),now());
+            """, ("id", destinationId), ("branch", branchId), ("name", Unique("Bank")), ("normalized", Unique("BANK")));
+        var transferId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialTransfers" ("Id","TransferNumber","BranchId","SourceAccountId","DestinationAccountId","Amount","OccurredAtUtc","CreatedByUserId","CreatedAt","UpdatedAt")
+            VALUES (@id,@number,@branch,@source,@destination,3000,now(),@user,now(),now());
+            """, ("id", transferId), ("number", Unique("TRF")), ("branch", branchId), ("source", accountId), ("destination", destinationId), ("user", userId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt") VALUES
+            (@outId,@source,@branch,8,-3000,'FinancialTransfer',@transfer,'Transfer out',@user,now(),now(),now()),
+            (@inId,@destination,@branch,9,3000,'FinancialTransfer',@transfer,'Transfer in',@user,now(),now(),now());
+            """, ("outId", Guid.NewGuid()), ("inId", Guid.NewGuid()), ("source", accountId), ("destination", destinationId), ("branch", branchId), ("transfer", transferId), ("user", userId));
+        Assert.Equal(6000m, await ScalarAsync<decimal>(connection, transaction, "SELECT SUM(\"Amount\") FROM \"FinancialLedgerEntries\" WHERE \"FinancialAccountId\"=@account;", ("account", accountId)));
+        Assert.Equal(3000m, await ScalarAsync<decimal>(connection, transaction, "SELECT SUM(\"Amount\") FROM \"FinancialLedgerEntries\" WHERE \"FinancialAccountId\"=@account;", ("account", destinationId)));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM \"FinancialLedgerEntries\" WHERE \"ReferenceType\"='FinancialTransfer' AND \"ReferenceId\"=@transfer;", ("transfer", transferId)));
+
+        await AssertDatabaseErrorAsync(connection, transaction, "bad_sign", "23514", () => ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@account,@branch,6,1,'Expense',@reference,'Bad sign',@user,now(),now(),now());
+            """, ("id", Guid.NewGuid()), ("account", accountId), ("branch", branchId), ("reference", Guid.NewGuid()), ("user", userId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "insufficient", "23514", () => ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialLedgerEntries" ("Id","FinancialAccountId","BranchId","EntryType","Amount","ReferenceType","ReferenceId","Description","CreatedByUserId","OccurredAtUtc","CreatedAt","UpdatedAt")
+            VALUES (@id,@account,@branch,6,-8000,'Expense',@reference,'Too large',@user,now(),now(),now());
+            """, ("id", Guid.NewGuid()), ("account", accountId), ("branch", branchId), ("reference", Guid.NewGuid()), ("user", userId)));
+        await AssertDatabaseErrorAsync(connection, transaction, "immutable", "23514", () => ExecuteAsync(connection, transaction,
+            "UPDATE \"FinancialLedgerEntries\" SET \"Description\"='Changed' WHERE \"Id\"=@id;", ("id", openingId)));
+
+        Assert.Equal(9L, await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM \"Permissions\" WHERE \"Category\"='finance';"));
+        Assert.Equal(5L, await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM pg_trigger WHERE tgname IN ('TR_FinancialLedgerEntries_Guard','TR_FinancialLedgerEntries_Immutable','TR_Expenses_Immutable','TR_OtherIncomes_Immutable','TR_FinancialTransfers_Immutable') AND NOT tgisinternal;"));
+        Assert.True(await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('IX_FinancialLedgerEntries_FinancialAccountId_OccurredAtUtc','IX_FinancialLedgerEntries_BranchId_OccurredAtUtc','IX_FinancialLedgerEntries_EntryType_OccurredAtUtc','IX_FinancialLedgerEntries_ReferenceType_ReferenceId','IX_Expenses_ExpenseNumber');") >= 5);
         await transaction.RollbackAsync();
     }
 

@@ -1929,3 +1929,133 @@ String _enumName(dynamic value) {
   if (value is String) return value;
   return value.toString();
 }
+
+class FinancialAccountInfo {
+  const FinancialAccountInfo({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.name,
+    required this.accountType,
+    required this.openingBalance,
+    required this.currentBalance,
+    required this.isActive,
+    this.notes,
+  });
+  final String id, branchId, branchName, name, accountType;
+  final double openingBalance, currentBalance;
+  final bool isActive;
+  final String? notes;
+  factory FinancialAccountInfo.fromJson(Map<String, dynamic> json) =>
+      FinancialAccountInfo(
+        id: json['id'] as String? ?? '',
+        branchId: json['branchId'] as String? ?? '',
+        branchName: json['branchName'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        accountType: _enumName(json['accountType']),
+        openingBalance: (json['openingBalance'] as num?)?.toDouble() ?? 0,
+        currentBalance: (json['currentBalance'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? false,
+        notes: json['notes'] as String?,
+      );
+}
+
+class ExpenseCategoryInfo {
+  const ExpenseCategoryInfo({
+    required this.id,
+    required this.name,
+    required this.isActive,
+    this.description,
+  });
+  final String id, name;
+  final bool isActive;
+  final String? description;
+  factory ExpenseCategoryInfo.fromJson(Map<String, dynamic> json) =>
+      ExpenseCategoryInfo(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        isActive: json['isActive'] as bool? ?? false,
+        description: json['description'] as String?,
+      );
+}
+
+class ExpenseInfo {
+  const ExpenseInfo({
+    required this.id,
+    required this.expenseNumber,
+    required this.branchName,
+    required this.categoryName,
+    required this.accountName,
+    required this.expenseDateUtc,
+    required this.amount,
+    required this.description,
+    required this.createdByName,
+    this.payee,
+  });
+  final String id,
+      expenseNumber,
+      branchName,
+      categoryName,
+      accountName,
+      description,
+      createdByName;
+  final DateTime expenseDateUtc;
+  final double amount;
+  final String? payee;
+  factory ExpenseInfo.fromJson(Map<String, dynamic> json) => ExpenseInfo(
+    id: json['id'] as String? ?? '',
+    expenseNumber: json['expenseNumber'] as String? ?? '',
+    branchName: json['branchName'] as String? ?? '',
+    categoryName: json['categoryName'] as String? ?? '',
+    accountName: json['accountName'] as String? ?? '',
+    expenseDateUtc: DateTime.parse(json['expenseDateUtc'] as String).toLocal(),
+    amount: (json['amount'] as num?)?.toDouble() ?? 0,
+    description: json['description'] as String? ?? '',
+    createdByName: json['createdByName'] as String? ?? '',
+    payee: json['payee'] as String?,
+  );
+}
+
+class FinancialLedgerItem {
+  const FinancialLedgerItem({
+    required this.id,
+    required this.occurredAtUtc,
+    required this.entryType,
+    required this.description,
+    required this.amount,
+    required this.runningBalance,
+    required this.createdByName,
+  });
+  final String id, entryType, description, createdByName;
+  final DateTime occurredAtUtc;
+  final double amount, runningBalance;
+  factory FinancialLedgerItem.fromJson(Map<String, dynamic> json) =>
+      FinancialLedgerItem(
+        id: json['id'] as String? ?? '',
+        occurredAtUtc: DateTime.parse(
+          json['occurredAtUtc'] as String,
+        ).toLocal(),
+        entryType: _enumName(json['entryType']),
+        description: json['description'] as String? ?? '',
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        runningBalance: (json['runningBalance'] as num?)?.toDouble() ?? 0,
+        createdByName: json['createdByName'] as String? ?? '',
+      );
+}
+
+class DailyCashPosition {
+  const DailyCashPosition({
+    required this.openingBalance,
+    required this.moneyIn,
+    required this.moneyOut,
+    required this.closingBalance,
+  });
+  final double openingBalance, moneyIn, moneyOut, closingBalance;
+  factory DailyCashPosition.fromJson(Map<String, dynamic> json) =>
+      DailyCashPosition(
+        openingBalance: (json['openingBalance'] as num?)?.toDouble() ?? 0,
+        moneyIn: (json['moneyIn'] as num?)?.toDouble() ?? 0,
+        moneyOut: (json['moneyOut'] as num?)?.toDouble() ?? 0,
+        closingBalance: (json['closingBalance'] as num?)?.toDouble() ?? 0,
+      );
+}

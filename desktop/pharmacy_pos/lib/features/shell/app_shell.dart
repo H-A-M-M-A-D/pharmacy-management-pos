@@ -5,6 +5,7 @@ import '../profile/profile_screen.dart';
 import '../catalog/products_screen.dart';
 import '../catalog/catalog_masters_screen.dart';
 import '../customers/customers_screen.dart';
+import '../finance/finance_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../purchasing/purchasing_screen.dart';
 import '../sales/pos_screen.dart';
@@ -39,6 +40,10 @@ class _AppShellState extends State<AppShell> {
     final canViewSales =
         widget.authState.can('sales.view') ||
         widget.authState.can('sales.create');
+    final canViewFinance =
+        widget.authState.can('accounts.view') ||
+        widget.authState.can('expenses.view') ||
+        widget.authState.can('finance.ledger.view');
     final destinations = <NavigationRailDestination>[
       const NavigationRailDestination(
         icon: Icon(Icons.dashboard_outlined),
@@ -99,6 +104,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.point_of_sale),
           label: Text('Sales'),
         ),
+      if (canViewFinance)
+        const NavigationRailDestination(
+          icon: Icon(Icons.account_balance_wallet_outlined),
+          selectedIcon: Icon(Icons.account_balance_wallet),
+          label: Text('Finance'),
+        ),
       const NavigationRailDestination(
         icon: Icon(Icons.account_circle_outlined),
         selectedIcon: Icon(Icons.account_circle),
@@ -124,6 +135,7 @@ class _AppShellState extends State<AppShell> {
       if (canViewCustomers) CustomersScreen(authState: widget.authState),
       if (canViewPurchasing) PurchasingScreen(authState: widget.authState),
       if (canViewSales) PosScreen(authState: widget.authState),
+      if (canViewFinance) FinanceScreen(authState: widget.authState),
       ProfileScreen(authState: widget.authState),
     ];
     if (_selected >= pages.length) _selected = 0;

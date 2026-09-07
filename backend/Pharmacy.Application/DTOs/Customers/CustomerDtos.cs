@@ -48,7 +48,8 @@ public sealed record CustomerLedgerEntryDto(
 
 public sealed record CustomerPaymentRequest(
     Guid CustomerId, Guid BranchId, decimal Amount, DateTime PaymentDateUtc,
-    CustomerPaymentMethod PaymentMethod, string? ReferenceNumber, string? Notes);
+    CustomerPaymentMethod PaymentMethod, string? ReferenceNumber, string? Notes,
+    Guid? FinancialAccountId = null);
 
 public sealed record CustomerAdjustmentRequest(
     Guid CustomerId, Guid BranchId, CustomerAdjustmentType Type, decimal Amount,

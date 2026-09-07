@@ -224,6 +224,25 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _showPayment(CustomerListItem customer) async {
+    final accounts = (await widget.authState.listFinancialAccounts(
+      branchId: widget.authState.currentUser!.branch.id,
+    )).where((x) => x.isActive).toList();
+    if (!mounted) return;
+    final account = await showDialog<FinancialAccountInfo>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Receiving financial account'),
+        children: accounts
+            .map(
+              (x) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, x),
+                child: Text('${x.name} (${_money(x.currentBalance)})'),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (account == null || !mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => _AmountDialog(
@@ -237,6 +256,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               'amount': amount,
               'paymentDateUtc': DateTime.now().toUtc().toIso8601String(),
               'paymentMethod': 'Cash',
+              'financialAccountId': account.id,
               'notes': note,
             }),
       ),

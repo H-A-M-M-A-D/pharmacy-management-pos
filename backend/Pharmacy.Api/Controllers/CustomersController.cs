@@ -55,8 +55,11 @@ public sealed class CustomersController(ICustomerService customers) : Controller
         customers.ListLedgerAsync(UserId(), id, query, ct);
 
     [HttpPost("{id:guid}/payments"), HasPermission(PermissionCatalog.CustomersPaymentCreate)]
-    public Task<CustomerDetailsDto> Payment(Guid id, CustomerPaymentRequest request, CancellationToken ct) =>
-        customers.RecordPaymentAsync(UserId(), request with { CustomerId = id }, ct);
+    public Task<CustomerDetailsDto> Payment(Guid id, CustomerPaymentRequest request, CancellationToken ct)
+    {
+        if (request.FinancialAccountId is null) throw new RequestValidationException("A receiving financial account is required.");
+        return customers.RecordPaymentAsync(UserId(), request with { CustomerId = id }, ct);
+    }
 
     [HttpPost("{id:guid}/adjustments"), HasPermission(PermissionCatalog.CustomersAdjustBalance)]
     public Task<CustomerDetailsDto> Adjustment(Guid id, CustomerAdjustmentRequest request, CancellationToken ct) =>

@@ -10,6 +10,8 @@ public class SalePayment : Entity
     public decimal AmountApplied { get; set; }
     public decimal? TenderedAmount { get; set; }
     public string? ReferenceNumber { get; set; }
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
 }
 
 public enum SalePaymentMethod

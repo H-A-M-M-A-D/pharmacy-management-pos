@@ -24,6 +24,7 @@ public sealed class SalesController(ISalesService sales) : ControllerBase
     [HttpPost("post"), HasPermission(PermissionCatalog.SalesCreate)]
     public async Task<ActionResult<SaleDetailsDto>> Post(PostSaleRequest request, CancellationToken ct)
     {
+        RequirePaymentAccounts(request.Payments);
         var result = await sales.PostSaleAsync(UserId(), request, ct);
         return CreatedAtAction(nameof(Get), new { id = result.Id }, result);
     }
@@ -44,8 +45,11 @@ public sealed class SalesController(ISalesService sales) : ControllerBase
         sales.UpdateHeldSaleAsync(UserId(), id, request, ct);
 
     [HttpPost("held/{id:guid}/post"), HasPermission(PermissionCatalog.SalesCreate)]
-    public Task<SaleDetailsDto> PostHeld(Guid id, PostHeldSaleRequest request, CancellationToken ct) =>
-        sales.PostHeldSaleAsync(UserId(), id, request, ct);
+    public Task<SaleDetailsDto> PostHeld(Guid id, PostHeldSaleRequest request, CancellationToken ct)
+    {
+        RequirePaymentAccounts(request.Payments);
+        return sales.PostHeldSaleAsync(UserId(), id, request, ct);
+    }
 
     [HttpPost("held/{id:guid}/cancel"), HasPermission(PermissionCatalog.SalesHold)]
     public async Task<IActionResult> CancelHeld(Guid id, CancellationToken ct)
@@ -63,4 +67,8 @@ public sealed class SalesController(ISalesService sales) : ControllerBase
         sales.ReceiptAsync(UserId(), id, true, ct);
 
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    private static void RequirePaymentAccounts(IReadOnlyList<SalePaymentRequest> payments)
+    {
+        if (payments.Any(x => x.FinancialAccountId is null)) throw new RequestValidationException("Every monetary payment must select a financial account.");
+    }
 }

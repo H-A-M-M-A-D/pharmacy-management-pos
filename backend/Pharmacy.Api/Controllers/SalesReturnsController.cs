@@ -19,6 +19,7 @@ public sealed class SalesReturnsController(ISalesReturnService returns) : Contro
     [HttpPost("api/sales/{saleId:guid}/returns"), HasPermission(PermissionCatalog.SalesReturnsCreate)]
     public async Task<ActionResult<SalesReturnDetailsDto>> Post(Guid saleId, PostSalesReturnRequest request, CancellationToken ct)
     {
+        if (request.RefundPayments.Any(x => x.FinancialAccountId is null)) throw new RequestValidationException("Every cash refund must select a financial account.");
         var result = await returns.PostReturnAsync(UserId(), saleId, request, ct);
         return CreatedAtAction(nameof(Get), new { id = result.Id }, result);
     }

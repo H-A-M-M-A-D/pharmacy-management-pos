@@ -270,7 +270,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             if (payment.AmountApplied <= 0) throw new RequestValidationException("Payment amount must be greater than zero.");
             if (payment.Method == SalePaymentMethod.Cash && (!payment.TenderedAmount.HasValue || payment.TenderedAmount.Value < payment.AmountApplied)) throw new RequestValidationException("Cash tendered amount cannot be less than applied cash amount.");
             if (payment.Method != SalePaymentMethod.Cash && payment.TenderedAmount.HasValue) throw new RequestValidationException("Tendered amount is only valid for cash payments.");
-            sale.Payments.Add(new SalePayment { Method = payment.Method, AmountApplied = Money(payment.AmountApplied), TenderedAmount = payment.TenderedAmount.HasValue ? Money(payment.TenderedAmount.Value) : null, ReferenceNumber = Clean(payment.ReferenceNumber) });
+            sale.Payments.Add(new SalePayment { Method = payment.Method, AmountApplied = Money(payment.AmountApplied), TenderedAmount = payment.TenderedAmount.HasValue ? Money(payment.TenderedAmount.Value) : null, ReferenceNumber = Clean(payment.ReferenceNumber), FinancialAccountId = payment.FinancialAccountId });
         }
         sale.AmountPaid = applied;
         sale.CreditAmount = Money(sale.NetTotal - applied);

@@ -238,7 +238,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
         {
             if (!Enum.IsDefined(payment.Method)) throw new RequestValidationException("Refund payment method is invalid.");
             if (payment.Amount <= 0) throw new RequestValidationException("Refund payment amount must be greater than zero.");
-            salesReturn.RefundPayments.Add(new SalesRefundPayment { Method = payment.Method, Amount = Money(payment.Amount), ReferenceNumber = Clean(payment.ReferenceNumber) });
+            salesReturn.RefundPayments.Add(new SalesRefundPayment { Method = payment.Method, Amount = Money(payment.Amount), ReferenceNumber = Clean(payment.ReferenceNumber), FinancialAccountId = payment.FinancialAccountId });
         }
     }
 

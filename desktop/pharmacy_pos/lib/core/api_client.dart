@@ -217,6 +217,29 @@ abstract interface class PharmacyApi {
   Future<SalesReturnDetails> salesReturnDetails(String token, String id);
   Future<SalesReturnDetails> salesReturnReceipt(String token, String id);
   Future<SalesReturnDetails> reprintSalesReturnReceipt(String token, String id);
+  Future<List<FinancialAccountInfo>> listFinancialAccounts(
+    String token, {
+    String? branchId,
+  });
+  Future<FinancialAccountInfo> createFinancialAccount(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<List<ExpenseCategoryInfo>> listExpenseCategories(String token);
+  Future<List<ExpenseInfo>> listExpenses(String token);
+  Future<ExpenseInfo> postExpense(String token, Map<String, dynamic> values);
+  Future<void> postOtherIncome(String token, Map<String, dynamic> values);
+  Future<void> postFinancialTransfer(String token, Map<String, dynamic> values);
+  Future<List<FinancialLedgerItem>> financialLedger(
+    String token,
+    String accountId,
+  );
+  Future<DailyCashPosition> dailyCashPosition(
+    String token,
+    String branchId,
+    DateTime date, {
+    String? accountId,
+  });
   void close();
 }
 
@@ -1095,6 +1118,114 @@ class ApiClient implements PharmacyApi {
       token: token,
     ))!,
   );
+
+  @override
+  Future<List<FinancialAccountInfo>> listFinancialAccounts(
+    String token, {
+    String? branchId,
+  }) async {
+    final query = branchId == null ? '' : '?branchId=$branchId';
+    final data = await _request(
+      'GET',
+      '/api/financial-accounts$query',
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => FinancialAccountInfo.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<FinancialAccountInfo> createFinancialAccount(
+    String token,
+    Map<String, dynamic> values,
+  ) async => FinancialAccountInfo.fromJson(
+    (await _request(
+      'POST',
+      '/api/financial-accounts',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<List<ExpenseCategoryInfo>> listExpenseCategories(String token) async {
+    final data = await _request(
+      'GET',
+      '/api/expense-categories?active=true',
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => ExpenseCategoryInfo.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<List<ExpenseInfo>> listExpenses(String token) async {
+    final data = await _request('GET', '/api/expenses', token: token);
+    return (data as List<dynamic>? ?? [])
+        .map((x) => ExpenseInfo.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<ExpenseInfo> postExpense(
+    String token,
+    Map<String, dynamic> values,
+  ) async => ExpenseInfo.fromJson(
+    (await _request('POST', '/api/expenses', token: token, body: values))!,
+  );
+  @override
+  Future<void> postOtherIncome(
+    String token,
+    Map<String, dynamic> values,
+  ) async =>
+      _request('POST', '/api/finance/other-income', token: token, body: values);
+  @override
+  Future<void> postFinancialTransfer(
+    String token,
+    Map<String, dynamic> values,
+  ) async =>
+      _request('POST', '/api/finance/transfers', token: token, body: values);
+  @override
+  Future<List<FinancialLedgerItem>> financialLedger(
+    String token,
+    String accountId,
+  ) async {
+    final data = await _request(
+      'GET',
+      '/api/financial-accounts/$accountId/ledger',
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => FinancialLedgerItem.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<DailyCashPosition> dailyCashPosition(
+    String token,
+    String branchId,
+    DateTime date, {
+    String? accountId,
+  }) async {
+    final query = <String, String>{
+      'branchId': branchId,
+      'date': date.toIso8601String().substring(0, 10),
+    };
+    if (accountId != null) query['accountId'] = accountId;
+    return DailyCashPosition.fromJson(
+      (await _request(
+        'GET',
+        Uri(
+          path: '/api/finance/cash-position',
+          queryParameters: query,
+        ).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
   Future<void> _void(String method, String path, String token) async {
     await _request(method, path, token: token, expectBody: false);
   }

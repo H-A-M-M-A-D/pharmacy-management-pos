@@ -111,6 +111,17 @@ Posting runs in a serializable PostgreSQL transaction. It verifies branch access
 Restockable returns create a positive `SaleReturn` stock movement and increase the original `ProductBatch.QuantityAvailable` and `Inventory.QuantityInStock` projections. Non-resellable returns create a positive `SaleReturn` movement plus a negative `Damaged` movement, or `Expired` when the original batch is expired, leaving sellable projections unchanged. Disposed batches cannot be restocked.
 
 Refund amounts are derived from the original allocation snapshots for sale price, discount, tax, and cost. The final partial return receives any rounding residual so cumulative refund cannot exceed the original sale economics. Cash-sale returns require refund payments equal to the refund amount. Customer-credit returns reduce customer receivable first and require refund payments only for the remaining cash refund amount. Posted `SalesReturn`, `SalesReturnItem`, `SalesReturnAllocation`, and `SalesRefundPayment` rows are immutable through `PharmacyDbContext`. Return numbers use a PostgreSQL sequence plus a unique index.
+
+## Accounts, Expenses, and Cash Management
+
+`FinancialLedgerEntry` is the permanent source of truth for operational account balances. Positive entries are inflows and negative entries are outflows. `FinancialAccount.OpeningBalance` records the account-creation input, while the actual balance is always derived from ledger entries. Opening balances, expenses, other income, transfers, adjustments, sale payments, customer receipts, supplier payments, and sales refunds use explicit entry types; clients never submit an arbitrary signed amount or editable balance.
+
+Financial accounts are branch-scoped. Money-out operations use serializable transactions and account-row locking. A PostgreSQL insert guard enforces the matching branch and active state and rejects an outflow that would take the account below zero, including concurrent attempts. Posted finance documents and ledger rows are protected from update/delete in both `PharmacyDbContext` and PostgreSQL triggers.
+
+Sales payments and customer payments create positive financial entries. Supplier payments and sales-refund payments create negative entries. The credit portion of a sale creates only a customer-ledger receivable. Purchase returns continue to reduce supplier payable without fabricating a cash receipt. Pre-Phase-11 payment rows remain nullable for `FinancialAccountId`; the migration deliberately does not invent historical cash movements.
+
+Daily cash position is derived from the same ledger: balance before the business day plus the day's inflows minus outflows equals closing balance. This module is operational cash management, not a double-entry general ledger, inventory valuation journal, tax engine, bank reconciliation, payroll, or external banking integration.
+
 ## FEFO Policy
 
 `Pharmacy.Application.Services.Inventory.FefoAllocationService` receives candidate batches plus branch, product, requested quantity, and sale date. It:
@@ -137,7 +148,7 @@ Entity validation and `CK_StockMovements_QuantitySign` enforce the convention. Z
 
 ## Entity and Table Truth
 
-There are 31 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
+There are 37 mapped application entities/tables. PostgreSQL also creates `__EFMigrationsHistory` when migrations are applied.
 
 Global/catalog and organization data:
 
@@ -178,6 +189,17 @@ Branch-scoped operational data:
 | SalesReturnItem | SalesReturnItems | Return line linked to original sale item |
 | SalesReturnAllocation | SalesReturnAllocations | Return quantity linked to original sale batch allocation |
 | SalesRefundPayment | SalesRefundPayments | Refund payment line |
+| FinancialAccount | FinancialAccounts | Branch-scoped cash/bank/wallet/settlement account |
+| FinancialLedgerEntry | FinancialLedgerEntries | Immutable branch/account money ledger |
+| Expense | Expenses | Immutable posted branch expense |
+| OtherIncome | OtherIncomes | Immutable posted non-sales income |
+| FinancialTransfer | FinancialTransfers | Immutable paired account transfer document |
+
+Global finance catalog:
+
+| Entity | Table | Scope |
+|---|---|---|
+| ExpenseCategory | ExpenseCategories | Global customizable expense category catalog |
 
 Audit data:
 
@@ -209,6 +231,9 @@ Audit data:
 - FEFO, branch, active-state, audit, stock-ledger, supplier, supplier-ledger, customer, customer-ledger, customer-payment, purchase-order, goods-receipt, purchase-return, POS search, sales history, sale payment, sales-return, refund-payment, and receipt query paths have supporting indexes.
 - Foreign keys and delete behaviors are defined in `PharmacyDbContext` and generated into the migration.
 - Audit old/new value columns are configured as PostgreSQL `jsonb`.
+- Financial account names are unique per branch. Expense and other-income amounts are positive, transfer accounts differ, and financial ledger amounts are non-zero with type-specific signs.
+- PostgreSQL guards lock the account row for every financial entry, enforce account/branch consistency, prevent negative balances under concurrent spending, and reject updates/deletes to posted financial history.
+- Finance lookup indexes cover account/date, branch/date, type/date, references, expense dates, and unique document numbers.
 
 These statements are verified in the EF model, migrations, and real PostgreSQL 17 catalogs. Rollback-isolated integration tests also exercise nullable unique barcodes, scoped batch uniqueness, JSONB/date/timestamp mappings, stock sign checks, non-negative inventory constraints, ledger/projection consistency, supplier uniqueness, supplier financial checks, supplier ledger sign checks, customer uniqueness, customer ledger sign checks, customer payment checks, customer permission seeds, purchase/receipt uniqueness, purchase quantity checks, receipt item checks, purchasing permission seeds, sales permission seeds, sale/receipt uniqueness, sale payment checks, sale allocation checks, sales credit constraints, sales-return uniqueness, sales-return checks, refund payment checks, customer-credit return settlement, return allocation checks, sales-return permission seeds, purchase-return uniqueness, purchase-return checks, purchase-return foreign keys, purchase-return supplier-ledger/stock-movement signs, purchase-return permission seeds, and return-number sequence existence.
 
@@ -235,22 +260,23 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260902222101_CompleteSalesReturnsAndRefunds`
 - Migration: `20260903231207_CompletePurchaseReturns`
 - Migration: `20260904125716_CompleteCustomerManagementAndCreditSales`
+- Migration: `20260907195029_CompleteAccountsExpensesAndCashManagement`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1 through Phase 10 migrations recorded with product version `10.0.11`
-- Real schema: 31 application tables plus `__EFMigrationsHistory`, with foreign keys and catalog/operational indexes verified in PostgreSQL
+- EF history: Phase 1 through Phase 11 migrations recorded with product version `10.0.11`
+- Real schema: 37 application tables plus `__EFMigrationsHistory`, with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, supplier, customer, and purchasing screens. Inventory UI includes stock, batches, expiry, movement history, opening stock, adjustment, and stock count workflows. Supplier UI includes supplier list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. Customer UI includes customer list/search, add/edit, activate/deactivate, ledger statement, payment, and balance-adjustment dialogs. Purchasing UI includes purchase-order list/create/submit/cancel, goods receiving, direct purchase posting, purchase history, purchase-return posting from original GRNs, purchase-return history, and return-note preview/reprint actions. POS UI includes product/barcode search, customer lookup, cart, discount-aware line editing, held-sale action, cash/card/credit checkout, sales history, original-allocation return/refund dialog, credit-return settlement, sales-return history, and receipt preview/reprint actions. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, supplier, customer, purchasing, sales, and finance screens. Finance UI includes account balances, one-time opening-balance guidance, posted expenses, other income, transfers, daily cash position, and a read-only ledger. POS, customer-payment, supplier-payment, and refund workflows select the financial account used. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
 
 ## Current Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, transfers, reports, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, shift/cash drawer closing, or background expiry processing.
+- No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, reports, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, shift/cash drawer closing, bank reconciliation, or background expiry processing.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.
 

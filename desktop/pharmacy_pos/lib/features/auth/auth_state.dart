@@ -310,6 +310,33 @@ class AuthState extends ChangeNotifier {
       _api.salesReturnReceipt(_requiredToken, id);
   Future<SalesReturnDetails> reprintSalesReturnReceipt(String id) =>
       _api.reprintSalesReturnReceipt(_requiredToken, id);
+  Future<List<FinancialAccountInfo>> listFinancialAccounts({
+    String? branchId,
+  }) => _api.listFinancialAccounts(_requiredToken, branchId: branchId);
+  Future<FinancialAccountInfo> createFinancialAccount(
+    Map<String, dynamic> values,
+  ) => _api.createFinancialAccount(_requiredToken, values);
+  Future<List<ExpenseCategoryInfo>> listExpenseCategories() =>
+      _api.listExpenseCategories(_requiredToken);
+  Future<List<ExpenseInfo>> listExpenses() => _api.listExpenses(_requiredToken);
+  Future<ExpenseInfo> postExpense(Map<String, dynamic> values) =>
+      _api.postExpense(_requiredToken, values);
+  Future<void> postOtherIncome(Map<String, dynamic> values) =>
+      _api.postOtherIncome(_requiredToken, values);
+  Future<void> postFinancialTransfer(Map<String, dynamic> values) =>
+      _api.postFinancialTransfer(_requiredToken, values);
+  Future<List<FinancialLedgerItem>> financialLedger(String accountId) =>
+      _api.financialLedger(_requiredToken, accountId);
+  Future<DailyCashPosition> dailyCashPosition(
+    String branchId,
+    DateTime date, {
+    String? accountId,
+  }) => _api.dailyCashPosition(
+    _requiredToken,
+    branchId,
+    date,
+    accountId: accountId,
+  );
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;

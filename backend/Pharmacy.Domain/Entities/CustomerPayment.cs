@@ -16,6 +16,8 @@ public class CustomerPayment : Entity
     public string? Notes { get; set; }
     public Guid ReceivedByUserId { get; set; }
     public User? ReceivedByUser { get; set; }
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
 }
 
 public enum CustomerPaymentMethod

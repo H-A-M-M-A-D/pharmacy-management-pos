@@ -144,7 +144,7 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
             throw new RequestValidationException("Branch is invalid or inactive.");
         await RequiredSupplier(request.SupplierId, cancellationToken);
         await AddLedger(actorId, request.SupplierId, request.BranchId, SupplierLedgerEntryType.Payment, -request.Amount,
-            request.PaymentDate, request.PaymentMethod.ToString(), request.ReferenceNumber, "SupplierPayment", request.Notes, "SupplierPaymentRecorded", cancellationToken);
+            request.PaymentDate, request.PaymentMethod.ToString(), request.ReferenceNumber, "SupplierPayment", request.Notes, "SupplierPaymentRecorded", cancellationToken, request.FinancialAccountId);
         return (await repository.GetSupplierDetailsAsync(request.SupplierId, actor.BranchId, CanSelectBranch(actor), cancellationToken))!;
     }
 
@@ -163,7 +163,7 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
         return (await repository.GetSupplierDetailsAsync(request.SupplierId, actor.BranchId, CanSelectBranch(actor), cancellationToken))!;
     }
 
-    private async Task AddLedger(Guid actorId, Guid supplierId, Guid branchId, SupplierLedgerEntryType type, decimal amount, DateOnly date, string? paymentMethod, string? referenceNumber, string referenceType, string? notes, string auditAction, CancellationToken cancellationToken)
+    private async Task AddLedger(Guid actorId, Guid supplierId, Guid branchId, SupplierLedgerEntryType type, decimal amount, DateOnly date, string? paymentMethod, string? referenceNumber, string referenceType, string? notes, string auditAction, CancellationToken cancellationToken, Guid? financialAccountId = null)
     {
         await repository.ExecuteInTransactionAsync(async ct =>
         {
@@ -178,7 +178,8 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
                 ReferenceNumber = Clean(referenceNumber),
                 ReferenceType = referenceType,
                 Notes = Clean(notes),
-                CreatedByUserId = actorId
+                CreatedByUserId = actorId,
+                FinancialAccountId = financialAccountId
             }, ct);
             await Audit(actorId, auditAction, "Supplier", supplierId, null, new { supplierId, branchId, type, amount, date }, ct);
             await repository.SaveChangesAsync(ct);

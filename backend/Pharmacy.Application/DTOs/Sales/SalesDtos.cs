@@ -10,7 +10,7 @@ public sealed record PosProductDto(
     decimal? IndicativeRetailPrice, decimal MaximumDiscountPercent, bool IsActive);
 
 public sealed record SaleLineRequest(Guid ProductId, int Quantity, decimal DiscountPercent = 0);
-public sealed record SalePaymentRequest(SalePaymentMethod Method, decimal AmountApplied, decimal? TenderedAmount = null, string? ReferenceNumber = null);
+public sealed record SalePaymentRequest(SalePaymentMethod Method, decimal AmountApplied, decimal? TenderedAmount = null, string? ReferenceNumber = null, Guid? FinancialAccountId = null);
 
 public sealed record HoldSaleRequest(
     Guid? BranchId, string? CustomerName, string? CustomerPhone, string? Notes,
@@ -81,7 +81,7 @@ public sealed record ReturnableAllocationDto(
     bool IsBatchExpired);
 
 public sealed record SalesReturnAllocationRequest(Guid OriginalAllocationId, int Quantity, SalesReturnDisposition Disposition);
-public sealed record SalesRefundPaymentRequest(SalePaymentMethod Method, decimal Amount, string? ReferenceNumber = null);
+public sealed record SalesRefundPaymentRequest(SalePaymentMethod Method, decimal Amount, string? ReferenceNumber = null, Guid? FinancialAccountId = null);
 public sealed record PostSalesReturnRequest(SalesReturnReason Reason, string? Notes, IReadOnlyList<SalesReturnAllocationRequest> Allocations, IReadOnlyList<SalesRefundPaymentRequest> RefundPayments);
 
 public sealed record SalesReturnsQuery(

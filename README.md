@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management system with completed Phase 10 Customer Management and Credit Sales foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Accounting general ledger, supplier cash-refund settlement, and reporting workflows have not started.
+Pharmacy management system with completed Phase 11 Accounts, Expenses, and Cash Management foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Full general-ledger accounting, bank reconciliation, and reporting workflows have not started.
 
 ## Current Scope
 
@@ -19,7 +19,7 @@ Pharmacy management system with completed Phase 10 Customer Management and Credi
 - Customer master management with activation, lookup, branch-scoped receivable ledger, opening balances, payments, balance adjustments, and credit-limit enforcement
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 
-Accounting general ledger, supplier cash-refund settlement, exchange/store-credit returns, and reporting modules are not implemented.
+Full general-ledger accounting, supplier cash-refund settlement for purchase returns, exchange/store-credit returns, bank reconciliation, and reporting modules are not implemented.
 
 ## Dependency Graph
 
@@ -59,9 +59,18 @@ backend/Pharmacy.Infrastructure/Migrations/20260902114037_CompletePosAndSales.cs
 backend/Pharmacy.Infrastructure/Migrations/20260902222101_CompleteSalesReturnsAndRefunds.cs
 backend/Pharmacy.Infrastructure/Migrations/20260903231207_CompletePurchaseReturns.cs
 backend/Pharmacy.Infrastructure/Migrations/20260904125716_CompleteCustomerManagementAndCreditSales.cs
+backend/Pharmacy.Infrastructure/Migrations/20260907195029_CompleteAccountsExpensesAndCashManagement.cs
 ```
 
-All ten migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 31 application tables plus `__EFMigrationsHistory`; Phase 10 adds customers, customer ledger entries, customer payments, customer-credit permissions, customer/payment sequences, credit-sale settlement columns, and PostgreSQL constraints/indexes. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All eleven migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 37 application tables plus `__EFMigrationsHistory`; Phase 11 adds branch financial accounts, an immutable financial ledger, expense categories, posted expenses, other income, transfers, finance permissions, sequences, constraints, indexes, and database guards. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+
+## Operational Finance Policy
+
+`FinancialLedgerEntries` is the permanent source of truth for balances. Positive entries mean money enters an account; negative entries mean money leaves it. Balances are derived from ledger sums and cannot be edited directly. Opening balances are recorded once. Posted expenses, other income, transfers, and ledger entries are immutable.
+
+Accounts are branch-scoped. PostgreSQL locks the account row during ledger insertion and rejects outflows that would make an account negative. Actual sales payments and customer receipts create positive entries; supplier payments and cash refunds create negative entries. Credit portions of sales affect only the customer receivable ledger, and purchase returns affect only supplier payable unless a separate cash receipt is posted.
+
+Daily cash position is calculated only from the financial ledger: opening plus inflows minus outflows equals closing. This operational layer is not a chart of accounts, double-entry general ledger, tax system, bank reconciliation system, or financial-statement engine.
 
 ## Product Master Policy
 

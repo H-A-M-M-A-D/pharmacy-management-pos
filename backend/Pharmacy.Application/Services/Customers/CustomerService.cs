@@ -146,6 +146,7 @@ public sealed class CustomerService(ICustomerRepository repository, TimeProvider
                 ReferenceNumber = Clean(request.ReferenceNumber),
                 Notes = Clean(request.Notes),
                 ReceivedByUserId = actorId
+                , FinancialAccountId = request.FinancialAccountId
             };
             await repository.AddPaymentAsync(payment, ct);
             await repository.AddLedgerEntryAsync(new CustomerLedgerEntry

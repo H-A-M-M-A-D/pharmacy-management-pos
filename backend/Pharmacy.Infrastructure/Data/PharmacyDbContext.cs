@@ -45,24 +45,34 @@ public class PharmacyDbContext : DbContext
     public DbSet<Customer> Customers { get; set; } = null!;
     public DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; set; } = null!;
     public DbSet<CustomerPayment> CustomerPayments { get; set; } = null!;
+    public DbSet<FinancialAccount> FinancialAccounts { get; set; } = null!;
+    public DbSet<FinancialLedgerEntry> FinancialLedgerEntries { get; set; } = null!;
+    public DbSet<ExpenseCategory> ExpenseCategories { get; set; } = null!;
+    public DbSet<Expense> Expenses { get; set; } = null!;
+    public DbSet<OtherIncome> OtherIncomes { get; set; } = null!;
+    public DbSet<FinancialTransfer> FinancialTransfers { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AddFinancialEntriesForPayments();
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
         ValidateCustomerFinancialEntries();
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
+        ValidateFinanceDocuments();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AddFinancialEntriesForPayments();
         ValidateStockMovements();
         ValidateSupplierLedgerEntries();
         ValidateCustomerFinancialEntries();
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
+        ValidateFinanceDocuments();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -100,6 +110,61 @@ public class PharmacyDbContext : DbContext
                 throw new InvalidOperationException("Purchase return item history is permanent and cannot be updated or deleted.");
             }
         }
+    }
+
+    private void AddFinancialEntriesForPayments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var tracked in ChangeTracker.Entries<SalePayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        {
+            var payment = tracked.Entity;
+            var sale = payment.Sale ?? ChangeTracker.Entries<Sale>().Select(x => x.Entity).First(x => x.Id == payment.SaleId);
+            FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = sale.BranchId,
+                EntryType = FinancialLedgerEntryType.SalePayment, Amount = payment.AmountApplied, ReferenceType = "SalePayment", ReferenceId = payment.Id,
+                ReferenceNumber = sale.InvoiceNumber, Description = "Sale payment", CreatedByUserId = sale.CashierUserId, OccurredAtUtc = sale.PostedAtUtc ?? DateTime.UtcNow });
+        }
+        foreach (var tracked in ChangeTracker.Entries<CustomerPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        {
+            var payment = tracked.Entity;
+            FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = payment.BranchId,
+                EntryType = FinancialLedgerEntryType.CustomerPayment, Amount = payment.Amount, ReferenceType = "CustomerPayment", ReferenceId = payment.Id,
+                ReferenceNumber = payment.ReceiptNumber, Description = "Customer payment", CreatedByUserId = payment.ReceivedByUserId, OccurredAtUtc = payment.PaymentDateUtc });
+        }
+        foreach (var tracked in ChangeTracker.Entries<SupplierLedgerEntry>().Where(x => x.State == EntityState.Added && x.Entity.EntryType == SupplierLedgerEntryType.Payment && x.Entity.FinancialAccountId.HasValue))
+        {
+            var payment = tracked.Entity;
+            FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = payment.BranchId,
+                EntryType = FinancialLedgerEntryType.SupplierPayment, Amount = payment.Amount, ReferenceType = "SupplierPayment", ReferenceId = payment.Id,
+                ReferenceNumber = payment.ReferenceNumber, Description = "Supplier payment", CreatedByUserId = payment.CreatedByUserId ?? throw new InvalidOperationException("Supplier payment requires a user."), OccurredAtUtc = payment.CreatedAt });
+        }
+        foreach (var tracked in ChangeTracker.Entries<SalesRefundPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        {
+            var payment = tracked.Entity;
+            var salesReturn = payment.SalesReturn ?? ChangeTracker.Entries<SalesReturn>().Select(x => x.Entity).First(x => x.Id == payment.SalesReturnId);
+            FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = salesReturn.BranchId,
+                EntryType = FinancialLedgerEntryType.SalesRefund, Amount = -payment.Amount, ReferenceType = "SalesRefundPayment", ReferenceId = payment.Id,
+                ReferenceNumber = salesReturn.ReturnNumber, Description = "Sales refund", CreatedByUserId = salesReturn.ProcessedByUserId, OccurredAtUtc = salesReturn.ReturnDateUtc });
+        }
+    }
+
+    private void ValidateFinanceDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<FinancialLedgerEntry>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Financial ledger history is permanent and cannot be updated or deleted.");
+            if (entry.State == EntityState.Added && entry.Entity.Amount == 0)
+                throw new InvalidOperationException("Financial ledger amount cannot be zero.");
+        }
+        foreach (var entry in ChangeTracker.Entries<Expense>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted expenses are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<OtherIncome>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted other income is permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<FinancialTransfer>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted transfers are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<FinancialAccount>())
+            if (entry.State == EntityState.Modified && entry.Property(x => x.OpeningBalance).IsModified) throw new InvalidOperationException("Opening balance cannot be edited after account creation.");
     }
 
 
@@ -279,6 +344,10 @@ public class PharmacyDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.HasSequence<long>("ExpenseNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("OtherIncomeNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("FinancialTransferNumberSequence").StartsAt(1);
+
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
         ConfigureRole(modelBuilder);
@@ -311,6 +380,12 @@ public class PharmacyDbContext : DbContext
         ConfigureSalesReturnItem(modelBuilder);
         ConfigureSalesReturnAllocation(modelBuilder);
         ConfigureSalesRefundPayment(modelBuilder);
+        ConfigureFinancialAccount(modelBuilder);
+        ConfigureFinancialLedgerEntry(modelBuilder);
+        ConfigureExpenseCategory(modelBuilder);
+        ConfigureExpense(modelBuilder);
+        ConfigureOtherIncome(modelBuilder);
+        ConfigureFinancialTransfer(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -682,6 +757,7 @@ public class PharmacyDbContext : DbContext
             .WithMany()
             .HasForeignKey(e => e.CreatedByUserId)
             .OnDelete(DeleteBehavior.SetNull);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureCustomer(ModelBuilder modelBuilder)
@@ -779,6 +855,7 @@ public class PharmacyDbContext : DbContext
             .WithMany()
             .HasForeignKey(e => e.ReceivedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigurePurchaseOrder(ModelBuilder modelBuilder)
@@ -1118,6 +1195,7 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_SalesRefundPayments_Amount_Positive", "\"Amount\" > 0");
         });
         entity.HasOne(e => e.SalesReturn).WithMany(r => r.RefundPayments).HasForeignKey(e => e.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
     }
     private void ConfigureSalePayment(ModelBuilder modelBuilder)
     {
@@ -1135,5 +1213,115 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_SalePayments_CashTender", "(\"Method\" = 1 AND \"TenderedAmount\" IS NOT NULL AND \"TenderedAmount\" >= \"AmountApplied\") OR (\"Method\" <> 1 AND \"TenderedAmount\" IS NULL)");
         });
         entity.HasOne(e => e.Sale).WithMany(s => s.Payments).HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureFinancialAccount(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<FinancialAccount>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.OpeningBalance).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => new { e.BranchId, e.NormalizedName }).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.IsActive });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint("CK_FinancialAccounts_Type", "\"AccountType\" IN (1, 2, 3, 4, 5)"));
+    }
+
+    private void ConfigureFinancialLedgerEntry(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<FinancialLedgerEntry>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceType).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.HasIndex(e => new { e.FinancialAccountId, e.OccurredAtUtc });
+        entity.HasIndex(e => new { e.BranchId, e.OccurredAtUtc });
+        entity.HasIndex(e => new { e.EntryType, e.OccurredAtUtc });
+        entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId });
+        entity.HasIndex(e => new { e.FinancialAccountId, e.EntryType, e.ReferenceType, e.ReferenceId }).IsUnique();
+        entity.HasOne(e => e.FinancialAccount).WithMany(a => a.LedgerEntries).HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_FinancialLedgerEntries_Amount_NonZero", "\"Amount\" <> 0");
+            table.HasCheckConstraint("CK_FinancialLedgerEntries_Type", "\"EntryType\" IN (1,2,3,4,5,6,7,8,9,10,11)");
+            table.HasCheckConstraint("CK_FinancialLedgerEntries_Sign", "(\"EntryType\" IN (2,3,7,9,11) AND \"Amount\" > 0) OR (\"EntryType\" IN (4,5,6,8,10) AND \"Amount\" < 0) OR \"EntryType\" = 1");
+        });
+    }
+
+    private void ConfigureExpenseCategory(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<ExpenseCategory>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.NormalizedName).IsUnique();
+        entity.HasIndex(e => e.IsActive);
+    }
+
+    private void ConfigureExpense(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<Expense>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.ExpenseNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Payee).HasMaxLength(200);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.ExpenseNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.ExpenseDateUtc });
+        entity.HasIndex(e => new { e.ExpenseCategoryId, e.ExpenseDateUtc });
+        entity.HasIndex(e => new { e.FinancialAccountId, e.ExpenseDateUtc });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ExpenseCategory).WithMany().HasForeignKey(e => e.ExpenseCategoryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint("CK_Expenses_Amount_Positive", "\"Amount\" > 0"));
+    }
+
+    private void ConfigureOtherIncome(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<OtherIncome>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.IncomeNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.IncomeNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.OccurredAtUtc });
+        entity.HasIndex(e => new { e.FinancialAccountId, e.OccurredAtUtc });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint("CK_OtherIncomes_Amount_Positive", "\"Amount\" > 0"));
+    }
+
+    private void ConfigureFinancialTransfer(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<FinancialTransfer>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.TransferNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.TransferNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.OccurredAtUtc });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SourceAccount).WithMany().HasForeignKey(e => e.SourceAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.DestinationAccount).WithMany().HasForeignKey(e => e.DestinationAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_FinancialTransfers_Amount_Positive", "\"Amount\" > 0");
+            table.HasCheckConstraint("CK_FinancialTransfers_DifferentAccounts", "\"SourceAccountId\" <> \"DestinationAccountId\"");
+        });
     }
 }

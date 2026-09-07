@@ -171,12 +171,23 @@ class _PosScreenState extends State<PosScreen>
       setState(() => _error = 'Add at least one product.');
       return;
     }
+    List<FinancialAccountInfo> accounts;
+    try {
+      accounts = await widget.authState.listFinancialAccounts(
+        branchId: widget.authState.currentUser!.branch.id,
+      );
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+      return;
+    }
+    if (!mounted) return;
     final payments = await showDialog<List<Map<String, dynamic>>>(
       context: context,
       builder: (_) => _PaymentDialog(
         total: _total,
         creditAllowed: can('sales.credit') && _selectedCustomer != null,
         customerName: _selectedCustomer?.name,
+        accounts: accounts.where((x) => x.isActive).toList(),
       ),
     );
     if (payments == null) return;
@@ -790,10 +801,12 @@ class _PaymentDialog extends StatefulWidget {
     required this.total,
     required this.creditAllowed,
     this.customerName,
+    required this.accounts,
   });
   final double total;
   final bool creditAllowed;
   final String? customerName;
+  final List<FinancialAccountInfo> accounts;
 
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
@@ -804,6 +817,8 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   final _cashTendered = TextEditingController();
   final _cardApplied = TextEditingController();
   String? _error;
+  String? _cashAccountId;
+  String? _cardAccountId;
 
   double get _applied =>
       (double.tryParse(_cashApplied.text) ?? 0) +
@@ -814,6 +829,12 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   @override
   void initState() {
     super.initState();
+    final cash = widget.accounts.where((x) => x.accountType == 'Cash');
+    final card = widget.accounts.where(
+      (x) => x.accountType == 'CardSettlement',
+    );
+    _cashAccountId = cash.isEmpty ? null : cash.first.id;
+    _cardAccountId = card.isEmpty ? null : card.first.id;
     if (widget.creditAllowed) {
       _cashApplied.text = '0.00';
       _cashTendered.text = '0.00';
@@ -840,10 +861,28 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             decoration: const InputDecoration(labelText: 'Cash applied'),
             onChanged: (_) => setState(() {}),
           ),
+          DropdownButtonFormField<String>(
+            initialValue: _cashAccountId,
+            decoration: const InputDecoration(labelText: 'Cash account'),
+            items: widget.accounts
+                .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+                .toList(),
+            onChanged: (value) => setState(() => _cashAccountId = value),
+          ),
           TextField(
             key: const Key('cash_tendered'),
             controller: _cashTendered,
             decoration: const InputDecoration(labelText: 'Cash tendered'),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _cardAccountId,
+            decoration: const InputDecoration(
+              labelText: 'Card settlement account',
+            ),
+            items: widget.accounts
+                .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+                .toList(),
+            onChanged: (value) => setState(() => _cardAccountId = value),
           ),
           TextField(
             key: const Key('card_applied'),
@@ -898,16 +937,26 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       );
       return;
     }
+    if ((cash > 0 && _cashAccountId == null) ||
+        (card > 0 && _cardAccountId == null)) {
+      setState(() => _error = 'Select a financial account for each payment.');
+      return;
+    }
     final payments = <Map<String, dynamic>>[];
     if (cash > 0) {
       payments.add({
         'method': 1,
         'amountApplied': cash,
         'tenderedAmount': tendered,
+        'financialAccountId': _cashAccountId,
       });
     }
     if (card > 0) {
-      payments.add({'method': 2, 'amountApplied': card});
+      payments.add({
+        'method': 2,
+        'amountApplied': card,
+        'financialAccountId': _cardAccountId,
+      });
     }
     Navigator.pop(context, payments);
   }
@@ -945,6 +994,8 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
   String _reason = 'CustomerReturn';
   String? _error;
   bool _posting = false;
+  List<FinancialAccountInfo> _refundAccounts = [];
+  String? _refundAccountId;
 
   @override
   void initState() {
@@ -964,6 +1015,26 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
       }
     }
     _updateCash();
+    _loadRefundAccounts();
+  }
+
+  Future<void> _loadRefundAccounts() async {
+    try {
+      final accounts = await widget.authState.listFinancialAccounts(
+        branchId: widget.authState.currentUser!.branch.id,
+      );
+      final active = accounts.where((x) => x.isActive).toList();
+      if (mounted) {
+        setState(() {
+          _refundAccounts = active;
+          _refundAccountId =
+              active.where((x) => x.accountType == 'Cash').firstOrNull?.id ??
+              active.firstOrNull?.id;
+        });
+      }
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    }
   }
 
   @override
@@ -1102,6 +1173,19 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
               controller: _cash,
               decoration: const InputDecoration(labelText: 'Cash refund'),
             ),
+            DropdownButtonFormField<String>(
+              key: ValueKey(_refundAccountId),
+              initialValue: _refundAccountId,
+              decoration: const InputDecoration(
+                labelText: 'Refund financial account',
+              ),
+              items: _refundAccounts
+                  .map(
+                    (a) => DropdownMenuItem(value: a.id, child: Text(a.name)),
+                  )
+                  .toList(),
+              onChanged: (value) => setState(() => _refundAccountId = value),
+            ),
             if (_error != null)
               Text(
                 _error!,
@@ -1154,6 +1238,12 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
       setState(() => _error = 'Cash refund must equal return amount.');
       return;
     }
+    if (cash > 0 && _refundAccountId == null) {
+      setState(
+        () => _error = 'Select the financial account used for the refund.',
+      );
+      return;
+    }
     if (_reason == 'Other' && _notes.text.trim().isEmpty) {
       setState(() => _error = 'Notes are required for Other.');
       return;
@@ -1188,7 +1278,11 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
           'allocations': allocations,
           'refundPayments': cash > 0
               ? [
-                  {'method': 1, 'amount': cash},
+                  {
+                    'method': 1,
+                    'amount': cash,
+                    'financialAccountId': _refundAccountId,
+                  },
                 ]
               : <Map<String, dynamic>>[],
         },

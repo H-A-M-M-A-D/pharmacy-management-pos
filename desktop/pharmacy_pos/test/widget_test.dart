@@ -357,6 +357,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Record payment'));
     await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Cash Counter'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('save_supplier_payment')));
     await tester.pump();
     expect(find.text('Enter a positive amount'), findsOneWidget);
@@ -667,6 +669,75 @@ void main() {
     await tester.tap(find.text('Sales Returns'));
     await tester.pumpAndSettle();
     expect(find.text('RET-2026-000001'), findsOneWidget);
+  });
+
+  testWidgets('finance navigation follows finance permissions', (tester) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Finance'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'accounts.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Finance'), findsOneWidget);
+  });
+
+  testWidgets('accounts and daily cash position render ledger-backed values', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'accounts.view', 'finance.ledger.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Finance'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cash Counter'), findsOneWidget);
+    expect(find.text('Rs. 8000.00'), findsOneWidget);
+    await tester.tap(find.text('Cash position'));
+    await tester.pumpAndSettle();
+    expect(find.text('Opening'), findsOneWidget);
+    expect(find.text('Closing'), findsOneWidget);
+  });
+
+  testWidgets('add account displays immutable opening balance guidance', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'accounts.view', 'accounts.manage'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Finance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Account'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Recorded once in the ledger and cannot be edited later.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('financial ledger is read only', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'accounts.view', 'finance.ledger.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Finance'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('View ledger'));
+    await tester.tap(find.byTooltip('View ledger'));
+    await tester.pumpAndSettle();
+    expect(find.text('Opening balance'), findsOneWidget);
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
   });
 }
 
@@ -1776,6 +1847,97 @@ class FakeApi implements PharmacyApi {
     String token,
     String id,
   ) async => salesReturn;
+
+  @override
+  Future<List<FinancialAccountInfo>> listFinancialAccounts(
+    String token, {
+    String? branchId,
+  }) async => [
+    const FinancialAccountInfo(
+      id: 'account-1',
+      branchId: 'branch-1',
+      branchName: 'Head Office',
+      name: 'Cash Counter',
+      accountType: 'Cash',
+      openingBalance: 10000,
+      currentBalance: 8000,
+      isActive: true,
+    ),
+  ];
+
+  @override
+  Future<FinancialAccountInfo> createFinancialAccount(
+    String token,
+    Map<String, dynamic> values,
+  ) async => (await listFinancialAccounts(token)).first;
+
+  @override
+  Future<List<ExpenseCategoryInfo>> listExpenseCategories(String token) async =>
+      const [
+        ExpenseCategoryInfo(id: 'category-1', name: 'Rent', isActive: true),
+      ];
+
+  @override
+  Future<List<ExpenseInfo>> listExpenses(String token) async => [
+    ExpenseInfo(
+      id: 'expense-1',
+      expenseNumber: 'EXP-2026-000001',
+      branchName: 'Head Office',
+      categoryName: 'Rent',
+      accountName: 'Cash Counter',
+      expenseDateUtc: DateTime(2026, 9, 7),
+      amount: 2000,
+      description: 'Shop rent',
+      createdByName: 'Test User',
+    ),
+  ];
+
+  @override
+  Future<ExpenseInfo> postExpense(
+    String token,
+    Map<String, dynamic> values,
+  ) async => (await listExpenses(token)).first;
+
+  @override
+  Future<void> postOtherIncome(
+    String token,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<void> postFinancialTransfer(
+    String token,
+    Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<List<FinancialLedgerItem>> financialLedger(
+    String token,
+    String accountId,
+  ) async => [
+    FinancialLedgerItem(
+      id: 'ledger-1',
+      occurredAtUtc: DateTime(2026, 9, 7),
+      entryType: 'OpeningBalance',
+      description: 'Opening balance',
+      amount: 10000,
+      runningBalance: 10000,
+      createdByName: 'Test User',
+    ),
+  ];
+
+  @override
+  Future<DailyCashPosition> dailyCashPosition(
+    String token,
+    String branchId,
+    DateTime date, {
+    String? accountId,
+  }) async => const DailyCashPosition(
+    openingBalance: 10000,
+    moneyIn: 1000,
+    moneyOut: 3000,
+    closingBalance: 8000,
+  );
 
   @override
   void close() {}

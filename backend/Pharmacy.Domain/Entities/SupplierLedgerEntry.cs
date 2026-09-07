@@ -4,6 +4,8 @@ namespace Pharmacy.Domain.Entities;
 
 public class SupplierLedgerEntry : Entity
 {
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
     public Guid SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
     public Guid BranchId { get; set; }

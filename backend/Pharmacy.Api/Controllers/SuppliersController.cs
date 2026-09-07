@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Suppliers;
+using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Suppliers;
@@ -54,8 +55,11 @@ public sealed class SuppliersController(ISupplierService suppliers) : Controller
         suppliers.ListLedgerAsync(UserId(), id, query, ct);
 
     [HttpPost("{id:guid}/payments"), HasPermission(PermissionCatalog.SuppliersPaymentCreate)]
-    public Task<SupplierDetailsDto> Payment(Guid id, SupplierPaymentRequest request, CancellationToken ct) =>
-        suppliers.RecordPaymentAsync(UserId(), request with { SupplierId = id }, ct);
+    public Task<SupplierDetailsDto> Payment(Guid id, SupplierPaymentRequest request, CancellationToken ct)
+    {
+        if (request.FinancialAccountId is null) throw new RequestValidationException("A payment source financial account is required.");
+        return suppliers.RecordPaymentAsync(UserId(), request with { SupplierId = id }, ct);
+    }
 
     [HttpPost("{id:guid}/adjustments"), HasPermission(PermissionCatalog.SuppliersAdjustBalance)]
     public Task<SupplierDetailsDto> Adjustment(Guid id, SupplierAdjustmentRequest request, CancellationToken ct) =>
