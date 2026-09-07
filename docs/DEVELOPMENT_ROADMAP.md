@@ -822,6 +822,13 @@ The project is structured in 18 distinct phases, prioritized by business value a
 ### Phase 7+
 Similar criteria for each remaining phase...
 
+### Phase 12
+- [x] Read-only sales, purchase, inventory, financial, and profitability query services
+- [x] Branch and permission enforcement, explicit UTC ranges, pagination, and CSV export
+- [x] Historical allocation cost and return-aware gross profit calculations
+- [x] Ledger-backed outstanding and cash position reports with transfer-neutral consolidated activity
+- [x] PostgreSQL provider execution and Flutter report workspace tests
+
 ---
 
 ## Risk Mitigation

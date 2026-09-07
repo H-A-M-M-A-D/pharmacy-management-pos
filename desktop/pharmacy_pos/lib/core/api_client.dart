@@ -240,6 +240,22 @@ abstract interface class PharmacyApi {
     DateTime date, {
     String? accountId,
   });
+  Future<dynamic> report(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  });
+  Future<List<int>> exportReport(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  });
   void close();
 }
 
@@ -1224,6 +1240,64 @@ class ApiClient implements PharmacyApi {
         token: token,
       ))!,
     );
+  }
+
+  @override
+  Future<dynamic> report(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) => _request(
+    'GET',
+    _reportUri(path, fromUtc, toUtc, branchId, option),
+    token: token,
+  );
+
+  @override
+  Future<List<int>> exportReport(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) async {
+    final request = await _httpClient.openUrl(
+      'GET',
+      baseUri.resolve(
+        _reportUri('$path/export.csv', fromUtc, toUtc, branchId, option),
+      ),
+    );
+    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    final response = await request.close();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw const ApiException('The report export could not be completed.');
+    }
+    return response.fold<List<int>>(
+      <int>[],
+      (all, bytes) => all..addAll(bytes),
+    );
+  }
+
+  static String _reportUri(
+    String path,
+    DateTime fromUtc,
+    DateTime toUtc,
+    String? branchId,
+    String? option,
+  ) {
+    final query = <String, String>{
+      'fromUtc': fromUtc.toUtc().toIso8601String(),
+      'toUtc': toUtc.toUtc().toIso8601String(),
+      'page': '1',
+      'pageSize': '100',
+    };
+    if (branchId != null) query['branchId'] = branchId;
+    if (option != null) query['option'] = option;
+    return Uri(path: '/api/reports/$path', queryParameters: query).toString();
   }
 
   Future<void> _void(String method, String path, String token) async {

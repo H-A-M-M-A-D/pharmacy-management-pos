@@ -261,22 +261,31 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260903231207_CompletePurchaseReturns`
 - Migration: `20260904125716_CompleteCustomerManagementAndCreditSales`
 - Migration: `20260907195029_CompleteAccountsExpensesAndCashManagement`
+- Migration: `20260907210154_AddReportingPermissions`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1 through Phase 11 migrations recorded with product version `10.0.11`
+- EF history: Phase 1 through Phase 12 migrations recorded with product version `10.0.11`
 - Real schema: 37 application tables plus `__EFMigrationsHistory`, with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell, `ApiClient`, `AuthState`, login, forced-password, user-management, profile, products, categories, manufacturers, inventory, supplier, customer, purchasing, sales, and finance screens. Finance UI includes account balances, one-time opening-balance guidance, posted expenses, other income, transfers, daily cash position, and a read-only ledger. POS, customer-payment, supplier-payment, and refund workflows select the financial account used. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout. Navigation and actions follow permission codes while the backend remains authoritative.
+The Flutter project contains a Material desktop shell and permission-aware operational screens through Reports and Analytics. The reports workspace provides Overview, Sales, Purchases, Inventory, Financial, and restricted Profitability sections; consistent business-date presets; branch scope where authorized; loading/empty/error states; and CSV export. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout.
 
 ## Current Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, reports, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, shift/cash drawer closing, bank reconciliation, or background expiry processing.
+- No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, true AR/AP aging, shift/cash drawer closing, bank reconciliation, or background expiry processing.
+
+## Read-only Reporting
+
+`ReportingService` owns permission, branch, UTC-range, and pagination validation. `ReportingRepository` uses `AsNoTracking`, projection, SQL aggregation, bounded detail pages, and existing transactional indexes. Controllers contain only HTTP routing and safe CSV serialization. Reports have no write repository methods and no report entity/table.
+
+Sales net after returns equals posted sale net less separately posted returns. Payment-method totals include `SalePayment` only; credit is shown separately. Product profitability uses `SaleItemBatchAllocation.UnitCostPriceSnapshot` and reverses revenue and cost through `SalesReturnAllocation`, never current batch prices. Category reports use the current product category because no historical category snapshot exists.
+
+Purchase reports distinguish paid quantity, bonus quantity, and supplier credit. Inventory valuation is operational batch quantity multiplied by batch purchase price. Customer, supplier, and financial balances are ledger sums. Consolidated cash flow excludes transfer-in/out from external business activity while closing balance still includes all account ledger movements. Asia/Karachi business dates are converted to explicit half-open UTC ranges; date-only purchase fields are compared using Karachi business dates.
 - CORS is permissive for local foundation development and must be restricted before deployment.
 - API error handling and setup-owner exposure require deployment hardening.
 

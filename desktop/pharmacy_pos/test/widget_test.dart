@@ -739,6 +739,103 @@ void main() {
     expect(find.text('Edit'), findsNothing);
     expect(find.text('Delete'), findsNothing);
   });
+
+  testWidgets('reports navigation follows reports.view permission', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Reports'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'reports.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Reports'), findsOneWidget);
+  });
+
+  testWidgets('reports overview renders real API summary cards', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'reports.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reports & Analytics'), findsOneWidget);
+    expect(find.text('Net sales'), findsOneWidget);
+    expect(find.text('Rs 900.00'), findsOneWidget);
+  });
+
+  testWidgets('profitability and export controls are permission aware', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'reports.view', 'reports.sales'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    expect(find.text('Profitability'), findsNothing);
+    expect(find.byTooltip('Export CSV'), findsNothing);
+  });
+
+  testWidgets('report date presets apply without automatic query churn', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'reports.view'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Today').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('This Month').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Apply'), findsOneWidget);
+  });
+
+  testWidgets('reports show an empty state', (tester) async {
+    final fixture = TestFixture(permissions: {'reports.sales'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    expect(find.text('No report data for this period.'), findsOneWidget);
+  });
+
+  testWidgets('reports show a safe error state', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'reports.view'},
+      reportError: true,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    expect(find.text('The report could not be loaded.'), findsOneWidget);
+  });
+
+  testWidgets('reports show a loading state', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'reports.view'},
+      reportDelay: const Duration(seconds: 1),
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -759,6 +856,8 @@ class TestFixture {
     this.adjustmentError = false,
     this.supplierError = false,
     this.purchaseError = false,
+    this.reportError = false,
+    this.reportDelay = Duration.zero,
   }) {
     api = FakeApi(
       user: CurrentUser(
@@ -774,6 +873,8 @@ class TestFixture {
       adjustmentError: adjustmentError,
       supplierError: supplierError,
       purchaseError: purchaseError,
+      reportError: reportError,
+      reportDelay: reportDelay,
     );
     state = AuthState(api, MemoryTokenStore());
   }
@@ -784,6 +885,8 @@ class TestFixture {
   final bool adjustmentError;
   final bool supplierError;
   final bool purchaseError;
+  final bool reportError;
+  final Duration reportDelay;
   final branch = const BranchInfo(
     id: 'branch-1',
     code: 'HQ',
@@ -803,6 +906,8 @@ class FakeApi implements PharmacyApi {
     this.adjustmentError = false,
     this.supplierError = false,
     this.purchaseError = false,
+    this.reportError = false,
+    this.reportDelay = Duration.zero,
   });
 
   CurrentUser user;
@@ -810,6 +915,8 @@ class FakeApi implements PharmacyApi {
   final bool adjustmentError;
   final bool supplierError;
   final bool purchaseError;
+  final bool reportError;
+  final Duration reportDelay;
   Map<String, dynamic>? lastPurchaseReturnBody;
 
   @override
@@ -1938,6 +2045,43 @@ class FakeApi implements PharmacyApi {
     moneyOut: 3000,
     closingBalance: 8000,
   );
+
+  @override
+  Future<dynamic> report(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) async {
+    if (reportDelay != Duration.zero) await Future<void>.delayed(reportDelay);
+    if (reportError) throw const ApiException('Internal report failure');
+    return path == 'overview'
+        ? <String, dynamic>{
+            'netSales': 900,
+            'grossProfit': 300,
+            'inventoryValue': 5000,
+            'lowStockCount': 2,
+            'nearExpiryCount': 1,
+            'customerOutstanding': 1000,
+            'supplierOutstanding': 2000,
+            'expenses': 100,
+            'cashPosition': 8000,
+            'topProducts': <dynamic>[],
+          }
+        : <dynamic>[];
+  }
+
+  @override
+  Future<List<int>> exportReport(
+    String token,
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) async => <int>[65, 44, 66, 10];
 
   @override
   void close() {}

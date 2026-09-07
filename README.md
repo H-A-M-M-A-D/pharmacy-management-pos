@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management system with completed Phase 11 Accounts, Expenses, and Cash Management foundations for an ASP.NET Core API and Flutter Windows client. The code and PostgreSQL schema are verified locally through PostgreSQL integration tests. Full general-ledger accounting, bank reconciliation, and reporting workflows have not started.
+Pharmacy management system with completed Phase 12 operational Reports and Analytics for an ASP.NET Core API and Flutter Windows client. Reports are read-only projections over verified PostgreSQL transactional data. Full general-ledger accounting and bank reconciliation have not started.
 
 ## Current Scope
 
@@ -18,8 +18,9 @@ Pharmacy management system with completed Phase 11 Accounts, Expenses, and Cash 
 - Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, immutable original-GRN purchase returns, supplier credit ledger entries, POS checkout, sales posting, held sales, split payments, customer credit settlement, receipt preview/reprint, sales history, original-allocation sales returns, customer-credit reduction, refunds, and return receipt history
 - Customer master management with activation, lookup, branch-scoped receivable ledger, opening balances, payments, balance adjustments, and credit-limit enforcement
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
+- Branch- and permission-scoped sales, purchase, inventory, financial, profitability, and dashboard reports with safe CSV export
 
-Full general-ledger accounting, supplier cash-refund settlement for purchase returns, exchange/store-credit returns, bank reconciliation, and reporting modules are not implemented.
+Full general-ledger accounting, supplier cash-refund settlement for purchase returns, exchange/store-credit returns, bank reconciliation, and true invoice aging are not implemented.
 
 ## Dependency Graph
 
@@ -60,9 +61,16 @@ backend/Pharmacy.Infrastructure/Migrations/20260902222101_CompleteSalesReturnsAn
 backend/Pharmacy.Infrastructure/Migrations/20260903231207_CompletePurchaseReturns.cs
 backend/Pharmacy.Infrastructure/Migrations/20260904125716_CompleteCustomerManagementAndCreditSales.cs
 backend/Pharmacy.Infrastructure/Migrations/20260907195029_CompleteAccountsExpensesAndCashManagement.cs
+backend/Pharmacy.Infrastructure/Migrations/20260907210154_AddReportingPermissions.cs
 ```
 
-All eleven migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema has 37 application tables plus `__EFMigrationsHistory`; Phase 11 adds branch financial accounts, an immutable financial ledger, expense categories, posted expenses, other income, transfers, finance permissions, sequences, constraints, indexes, and database guards. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All twelve migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 37 application tables plus `__EFMigrationsHistory`; Phase 12 adds reporting permissions only because existing query indexes cover the report paths. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+
+## Reporting Policy
+
+Reports never mutate data or persist report snapshots. Sales and returns remain separate transactions; net sales is posted sale net less posted return value. Cash collected at sale is distinct from credit created and later customer receipts. Product cost and gross profit use historical sale-allocation cost snapshots, including allocation-linked return reversals. Inventory value is the operational sum of available batch quantity times batch purchase price, not an accounting valuation journal. Purchases keep paid and bonus quantities separate, and bonus-only returns have zero supplier credit.
+
+Financial reports use the financial, customer, and supplier ledgers. Consolidated cash activity excludes internal transfers from external inflow/outflow, while per-account ledgers retain transfer entries. True customer/supplier invoice aging is intentionally deferred because payments are not allocated to individual documents. API date ranges are explicit UTC half-open boundaries derived from Asia/Karachi business dates by the client. CSV export uses quoted escaping and the same permission and branch scope as screen reports.
 
 ## Operational Finance Policy
 

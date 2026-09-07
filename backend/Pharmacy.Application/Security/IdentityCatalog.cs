@@ -79,6 +79,13 @@ public static class PermissionCatalog
     public const string FinanceIncomeCreate = "finance.income.create";
     public const string FinanceTransfer = "finance.transfer";
     public const string FinanceAdjust = "finance.adjust";
+    public const string ReportsView = "reports.view";
+    public const string ReportsSales = "reports.sales";
+    public const string ReportsPurchases = "reports.purchases";
+    public const string ReportsInventory = "reports.inventory";
+    public const string ReportsFinancial = "reports.financial";
+    public const string ReportsProfitability = "reports.profitability";
+    public const string ReportsExport = "reports.export";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -102,7 +109,9 @@ public static class PermissionCatalog
         SalesReturnsView, SalesReturnsCreate, SalesReturnsRefund, SalesReturnsReprint,
         PurchaseReturnsView, PurchaseReturnsCreate, PurchaseReturnsReprint,
         AccountsView, AccountsManage, ExpensesView, ExpensesCreate, ExpensesPost,
-        FinanceLedgerView, FinanceIncomeCreate, FinanceTransfer, FinanceAdjust
+        FinanceLedgerView, FinanceIncomeCreate, FinanceTransfer, FinanceAdjust,
+        ReportsView, ReportsSales, ReportsPurchases, ReportsInventory, ReportsFinancial,
+        ReportsProfitability, ReportsExport
     ];
 }
 

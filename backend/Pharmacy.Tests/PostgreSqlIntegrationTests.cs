@@ -1,4 +1,8 @@
 using Npgsql;
+using Microsoft.EntityFrameworkCore;
+using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Infrastructure.Data;
+using Pharmacy.Infrastructure.Persistence;
 
 namespace Pharmacy.Tests;
 
@@ -21,7 +25,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            11L,
+            12L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -36,7 +40,8 @@ public sealed class PostgreSqlIntegrationTests
                     '20260902222101_CompleteSalesReturnsAndRefunds',
                     '20260903231207_CompletePurchaseReturns',
                     '20260904125716_CompleteCustomerManagementAndCreditSales',
-                    '20260907195029_CompleteAccountsExpensesAndCashManagement');
+                    '20260907195029_CompleteAccountsExpensesAndCashManagement',
+                    '20260907210154_AddReportingPermissions');
                 """));
 
         Assert.Equal(
@@ -122,6 +127,58 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal("numeric", types["Sales.CreditAmount"]);
         Assert.Equal("numeric", types["SalesReturns.CustomerCreditReductionAmount"]);
         Assert.Equal("numeric", types["SalesReturns.CashRefundAmount"]);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase12_reporting_permissions_and_queries_are_real()
+    {
+        await using var connection = await OpenConnectionAsync();
+        Assert.Equal(7L, await ScalarAsync<long>(connection, null,
+            "SELECT count(*) FROM \"Permissions\" WHERE \"Code\" LIKE 'reports.%';"));
+        Assert.Equal(7L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "RolePermissions" rp
+            JOIN "Roles" r ON r."Id"=rp."RoleId"
+            JOIN "Permissions" p ON p."Id"=rp."PermissionId"
+            WHERE r."Name"='Owner' AND p."Code" LIKE 'reports.%';
+            """));
+        Assert.Equal(0L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "RolePermissions" rp
+            JOIN "Roles" r ON r."Id"=rp."RoleId"
+            JOIN "Permissions" p ON p."Id"=rp."PermissionId"
+            WHERE r."Name" IN ('Cashier','Pharmacist','StoreKeeper','PurchaseManager','Accountant')
+              AND p."Code"='reports.profitability';
+            """));
+
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PharmacyDbContext(options);
+        var reports = new ReportingRepository(context);
+        var from = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var query = new ReportQuery(null, from, to, 1, 20);
+        _ = await reports.SalesSummaryAsync(null, from, to, default);
+        _ = await reports.DailySalesAsync(null, query, default);
+        _ = await reports.ProductSalesAsync(null, from, to, default);
+        _ = await reports.SalesByCategoryAsync(null, from, to, default);
+        _ = await reports.SalesByCashierAsync(null, from, to, default);
+        _ = await reports.SalesByPaymentAsync(null, from, to, default);
+        _ = await reports.DiscountsAsync(null, query, default);
+        _ = await reports.CreditSalesAsync(null, query, default);
+        _ = await reports.PurchaseSummaryAsync(null, from, to, default);
+        _ = await reports.PurchasesBySupplierAsync(null, from, to, default);
+        _ = await reports.PurchasesByProductAsync(null, from, to, default);
+        _ = await reports.PurchaseReturnsAsync(null, query, default);
+        _ = await reports.CurrentStockAsync(null, null, default);
+        _ = await reports.BatchStockAsync(null, query, 30, false, default);
+        _ = await reports.StockMovementsAsync(null, query, null, default);
+        _ = await reports.InventorySummaryAsync(null, from, default);
+        _ = await reports.ExpensesAsync(null, query, default);
+        _ = await reports.OtherIncomeAsync(null, query, default);
+        _ = await reports.CustomerOutstandingAsync(null, default);
+        _ = await reports.SupplierOutstandingAsync(null, default);
+        _ = await reports.AccountLedgerAsync(null, null, query, default);
+        _ = await reports.CashPositionAsync(null, from, to, default);
+        _ = await reports.TrendAsync(null, from, to, default);
     }
 
     [PostgreSqlFact]

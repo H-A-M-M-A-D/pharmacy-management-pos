@@ -337,6 +337,34 @@ class AuthState extends ChangeNotifier {
     date,
     accountId: accountId,
   );
+  Future<dynamic> report(
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) => _api.report(
+    _requiredToken,
+    path,
+    fromUtc: fromUtc,
+    toUtc: toUtc,
+    branchId: branchId,
+    option: option,
+  );
+  Future<List<int>> exportReport(
+    String path, {
+    required DateTime fromUtc,
+    required DateTime toUtc,
+    String? branchId,
+    String? option,
+  }) => _api.exportReport(
+    _requiredToken,
+    path,
+    fromUtc: fromUtc,
+    toUtc: toUtc,
+    branchId: branchId,
+    option: option,
+  );
   Future<void> logout() async {
     await _tokenStore.clear();
     _token = null;
