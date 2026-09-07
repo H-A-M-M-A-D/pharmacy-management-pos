@@ -200,6 +200,8 @@ Global finance catalog:
 | Entity | Table | Scope |
 |---|---|---|
 | ExpenseCategory | ExpenseCategories | Global customizable expense category catalog |
+| SystemSetting | SystemSettings | Global controlled configuration keys |
+| BackupRecord | BackupRecords | Global backup operation metadata; never contains credentials |
 
 Audit data:
 
@@ -262,20 +264,24 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 - Migration: `20260904125716_CompleteCustomerManagementAndCreditSales`
 - Migration: `20260907195029_CompleteAccountsExpensesAndCashManagement`
 - Migration: `20260907210154_AddReportingPermissions`
+- Migration: `20260907220809_CompleteSystemAdministration`
+- Migration: `20260907222557_EnforceAuditImmutability`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: Phase 1 through Phase 12 migrations recorded with product version `10.0.11`
-- Real schema: 37 application tables plus `__EFMigrationsHistory`, with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL
+- EF history: 14 migrations through Phase 13 recorded with product version `10.0.11`
+- Real schema: 39 application tables plus `__EFMigrationsHistory`, with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL
 
 ## Flutter Foundation
 
-The Flutter project contains a Material desktop shell and permission-aware operational screens through Reports and Analytics. The reports workspace provides Overview, Sales, Purchases, Inventory, Financial, and restricted Profitability sections; consistent business-date presets; branch scope where authorized; loading/empty/error states; and CSV export. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout.
+The Flutter project contains a Material desktop shell and permission-aware operational screens through System Administration. Administration provides audit, recycle-bin, branch, settings, backup, and system-information workspaces based on the current user's permissions. The API base URL is supplied with `API_BASE_URL`. Tokens are stored through `flutter_secure_storage`, restored through `/api/auth/me`, and cleared on logout.
 
 ## Current Limitations
 
 - Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
 - No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
+- Audit CSV export, point-in-time audit field snapshots, scheduled backups, retention/encryption management, backup download, and in-app restore are not implemented. Restore is deliberately an offline maintenance procedure.
+- Settings currently cover business/receipt presentation only; currency is PKR and timezone is Asia/Karachi. Tax, numbering, and finance defaults remain owned by their existing modules.
 - No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
 - No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, true AR/AP aging, shift/cash drawer closing, bank reconciliation, or background expiry processing.
 

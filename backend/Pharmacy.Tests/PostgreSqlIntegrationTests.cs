@@ -25,7 +25,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            12L,
+            14L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -41,11 +41,13 @@ public sealed class PostgreSqlIntegrationTests
                     '20260903231207_CompletePurchaseReturns',
                     '20260904125716_CompleteCustomerManagementAndCreditSales',
                     '20260907195029_CompleteAccountsExpensesAndCashManagement',
-                    '20260907210154_AddReportingPermissions');
+                    '20260907210154_AddReportingPermissions',
+                    '20260907220809_CompleteSystemAdministration',
+                    '20260907222557_EnforceAuditImmutability');
                 """));
 
         Assert.Equal(
-            37L,
+            39L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -1178,8 +1180,8 @@ public sealed class PostgreSqlIntegrationTests
         Guid id) =>
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "Branches"
-                ("Id", "Code", "Name", "IsHeadOffice", "IsActive", "CreatedAt", "UpdatedAt")
-            VALUES (@id, @code, @name, false, true, now(), now());
+                ("Id", "Code", "NormalizedCode", "Name", "IsHeadOffice", "IsActive", "CreatedAt", "UpdatedAt")
+            VALUES (@id, @code, upper(@code), @name, false, true, now(), now());
             """, ("id", id), ("code", Unique("branch")), ("name", Unique("branch")));
 
     private static async Task InsertProductAsync(
@@ -1366,6 +1368,19 @@ public sealed class PostgreSqlIntegrationTests
             ("productId", productId),
             ("batchId", batchId),
             ("quantity", quantity));
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task System_administration_schema_and_permissions_are_real()
+    {
+        await using var connection = await OpenConnectionAsync();
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260907220809_CompleteSystemAdministration';"));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('SystemSettings','BackupRecords');"));
+        Assert.Equal(8L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"Permissions\" WHERE \"Code\" IN ('system.view','system.settings.manage','system.backup','branches.view','branches.manage','recycle_bin.view','recycle_bin.restore','audit.export');"));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='Branches' AND indexname='IX_Branches_NormalizedCode' AND indexdef ILIKE '%UNIQUE%';"));
+        Assert.Equal(9L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name IN ('IsDeleted','DeletedAtUtc','DeletedByUserId') AND table_name IN ('ProductCategories','Manufacturers','ExpenseCategories');"));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM pg_trigger WHERE tgname='TR_AuditLogs_AppendOnly' AND NOT tgisinternal;"));
+    }
 
     private static async Task InsertUserAsync(
         NpgsqlConnection connection,

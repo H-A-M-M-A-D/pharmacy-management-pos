@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Infrastructure.Data;
@@ -51,6 +53,8 @@ public class PharmacyDbContext : DbContext
     public DbSet<Expense> Expenses { get; set; } = null!;
     public DbSet<OtherIncome> OtherIncomes { get; set; } = null!;
     public DbSet<FinancialTransfer> FinancialTransfers { get; set; } = null!;
+    public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
+    public DbSet<BackupRecord> BackupRecords { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -61,6 +65,7 @@ public class PharmacyDbContext : DbContext
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         ValidateFinanceDocuments();
+        ProtectAuditLog();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -73,6 +78,7 @@ public class PharmacyDbContext : DbContext
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         ValidateFinanceDocuments();
+        ProtectAuditLog();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -386,6 +392,8 @@ public class PharmacyDbContext : DbContext
         ConfigureExpense(modelBuilder);
         ConfigureOtherIncome(modelBuilder);
         ConfigureFinancialTransfer(modelBuilder);
+        ConfigureSystemSetting(modelBuilder);
+        ConfigureBackupRecord(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -394,13 +402,14 @@ public class PharmacyDbContext : DbContext
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Code).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.NormalizedCode).IsRequired().HasMaxLength(50);
         entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
         entity.Property(e => e.Address).HasMaxLength(500);
         entity.Property(e => e.City).HasMaxLength(100);
         entity.Property(e => e.PhoneNumber).HasMaxLength(20);
         entity.Property(e => e.Email).HasMaxLength(100);
 
-        entity.HasIndex(e => e.Code).IsUnique();
+        entity.HasIndex(e => e.NormalizedCode).IsUnique();
         entity.HasIndex(e => e.IsActive);
     }
 
@@ -488,6 +497,8 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.IsActive);
+        entity.HasIndex(e => e.DeletedAtUtc);
+        entity.HasQueryFilter(e => !e.IsDeleted);
     }
 
     private void ConfigureManufacturer(ModelBuilder modelBuilder)
@@ -506,6 +517,8 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.IsActive);
+        entity.HasIndex(e => e.DeletedAtUtc);
+        entity.HasQueryFilter(e => !e.IsDeleted);
     }
 
     private void ConfigureSupplier(ModelBuilder modelBuilder)
@@ -1263,6 +1276,8 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.Description).HasMaxLength(500);
         entity.HasIndex(e => e.NormalizedName).IsUnique();
         entity.HasIndex(e => e.IsActive);
+        entity.HasIndex(e => e.DeletedAtUtc);
+        entity.HasQueryFilter(e => !e.IsDeleted);
     }
 
     private void ConfigureExpense(ModelBuilder modelBuilder)
@@ -1323,5 +1338,73 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_FinancialTransfers_Amount_Positive", "\"Amount\" > 0");
             table.HasCheckConstraint("CK_FinancialTransfers_DifferentAccounts", "\"SourceAccountId\" <> \"DestinationAccountId\"");
         });
+    }
+
+    private static void ConfigureSystemSetting(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SystemSetting>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.Value).IsRequired().HasMaxLength(2000);
+        entity.HasIndex(e => e.Key).IsUnique();
+        entity.HasIndex(e => e.UpdatedAt);
+    }
+
+    private static void ConfigureBackupRecord(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<BackupRecord>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.FileName).IsRequired().HasMaxLength(260);
+        entity.Property(e => e.Status).IsRequired().HasMaxLength(30);
+        entity.Property(e => e.ErrorMessage).HasMaxLength(500);
+        entity.HasIndex(e => e.CreatedAt);
+        entity.HasIndex(e => new { e.Status, e.CreatedAt });
+    }
+
+    private void ProtectAuditLog()
+    {
+        foreach (var entry in ChangeTracker.Entries<AuditLog>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Audit events are append-only and cannot be updated or deleted.");
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.OldValues = ScrubAuditJson(entry.Entity.OldValues);
+                entry.Entity.NewValues = ScrubAuditJson(entry.Entity.NewValues);
+            }
+        }
+    }
+
+    private static string? ScrubAuditJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return json;
+        try
+        {
+            var node = JsonNode.Parse(json);
+            Scrub(node);
+            return node?.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Audit values must contain valid JSON.");
+        }
+    }
+
+    private static void Scrub(JsonNode? node)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var key in obj.Select(x => x.Key).ToArray())
+            {
+                if (key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+                    key.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+                    key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+                    key.Contains("connectionstring", StringComparison.OrdinalIgnoreCase))
+                    obj[key] = "[REDACTED]";
+                else Scrub(obj[key]);
+            }
+        }
+        else if (node is JsonArray array)
+            foreach (var child in array) Scrub(child);
     }
 }

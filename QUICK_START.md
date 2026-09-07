@@ -18,7 +18,7 @@ dotnet test PharmacySystem.slnx
 dotnet ef migrations list --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-Expected migrations include the Phase 1 through Phase 11 migrations plus `20260907210154_AddReportingPermissions`. Seeing them in the list verifies discovery, not application to a database.
+Expected migrations include the Phase 1 through Phase 12 migrations plus `20260907220809_CompleteSystemAdministration` and `20260907222557_EnforceAuditImmutability`. Seeing them in the list verifies discovery, not application to a database.
 
 ## Configure Local Secrets
 
@@ -52,7 +52,7 @@ cd backend
 dotnet ef database update --project Pharmacy.Infrastructure --startup-project Pharmacy.Api
 ```
 
-The local verification environment uses PostgreSQL `17.11`. All twelve migrations are applied to both databases, and `__EFMigrationsHistory` contains all twelve migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
+The local verification environment uses PostgreSQL `17.11`. All fourteen migrations are applied to both databases, and `__EFMigrationsHistory` contains all fourteen migration identifiers. Keep the application password outside the repository; the verified machine uses user-scoped environment variables.
 
 ## Run API
 
@@ -84,6 +84,8 @@ Phase 10 customer endpoints are under `/api/customers`. Customer master records 
 Phase 11 finance endpoints are under `/api/financial-accounts`, `/api/expense-categories`, `/api/expenses`, and `/api/finance`. Create an active branch financial account before posting new monetary sales, customer payments, supplier payments, or cash refunds; each request selects the account used for the movement.
 
 Phase 12 read-only reports are under `/api/reports`. Supply explicit `fromUtc` and exclusive `toUtc` boundaries, with optional authorized `branchId`. CSV routes end in `/export.csv` and additionally require `reports.export`. Reports use transactional tables and ledgers directly; they do not create report snapshots.
+
+Phase 13 administration endpoints are under `/api/admin`. Audit search, recycle-bin restoration, branch administration, controlled receipt/business settings, token-version session revocation, system information, and custom-format `pg_dump` backups are permission-gated. Backup files are created below the current Windows user's local application-data folder. Restore remains an offline maintenance procedure: stop application writes, verify the backup and target, restore with `pg_restore` using credentials supplied outside source control, run EF migration verification, and smoke-test before reopening access.
 
 ## Verify Flutter
 

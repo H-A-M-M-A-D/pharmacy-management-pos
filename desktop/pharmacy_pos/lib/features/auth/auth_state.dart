@@ -137,6 +137,15 @@ class AuthState extends ChangeNotifier {
       _api.setUserActive(_requiredToken, id, active);
   Future<void> resetPassword(String id, String password) =>
       _api.resetPassword(_requiredToken, id, password);
+  Future<dynamic> administration(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? body,
+  }) => _api.administration(_requiredToken, path, method: method, body: body);
+  Future<void> signOutEverywhere() async {
+    await administration('sessions/revoke', method: 'POST');
+    await logout();
+  }
 
   Future<PagedProducts> listProducts({
     int page = 1,

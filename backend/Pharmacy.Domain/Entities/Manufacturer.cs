@@ -5,7 +5,7 @@ namespace Pharmacy.Domain.Entities;
 /// <summary>
 /// Represents a pharmaceutical manufacturer/company.
 /// </summary>
-public class Manufacturer : Entity
+public class Manufacturer : Entity, ISoftDeletable
 {
     /// <summary>
     /// Manufacturer name.
@@ -42,6 +42,9 @@ public class Manufacturer : Entity
     /// Whether the manufacturer is currently active.
     /// </summary>
     public bool IsActive { get; set; } = true;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    public Guid? DeletedByUserId { get; set; }
 
     /// <summary>
     /// Navigation property for products manufactured by this company.

@@ -11,6 +11,7 @@ public class Branch : Entity
     /// Unique branch code.
     /// </summary>
     public required string Code { get; set; }
+    public string NormalizedCode { get; set; } = string.Empty;
 
     /// <summary>
     /// Branch name.

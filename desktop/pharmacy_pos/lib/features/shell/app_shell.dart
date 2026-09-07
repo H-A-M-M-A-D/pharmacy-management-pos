@@ -12,6 +12,7 @@ import '../reports/reports_screen.dart';
 import '../sales/pos_screen.dart';
 import '../suppliers/suppliers_screen.dart';
 import '../users/users_screen.dart';
+import '../administration/administration_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({required this.authState, super.key});
@@ -52,6 +53,13 @@ class _AppShellState extends State<AppShell> {
       'reports.inventory',
       'reports.financial',
       'reports.profitability',
+    ].any(widget.authState.can);
+    final canViewAdministration = const [
+      'audit.view',
+      'recycle_bin.view',
+      'branches.view',
+      'system.view',
+      'system.backup',
     ].any(widget.authState.can);
     final destinations = <NavigationRailDestination>[
       const NavigationRailDestination(
@@ -125,6 +133,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.analytics),
           label: Text('Reports'),
         ),
+      if (canViewAdministration)
+        const NavigationRailDestination(
+          icon: Icon(Icons.admin_panel_settings_outlined),
+          selectedIcon: Icon(Icons.admin_panel_settings),
+          label: Text('Administration'),
+        ),
       const NavigationRailDestination(
         icon: Icon(Icons.account_circle_outlined),
         selectedIcon: Icon(Icons.account_circle),
@@ -152,6 +166,8 @@ class _AppShellState extends State<AppShell> {
       if (canViewSales) PosScreen(authState: widget.authState),
       if (canViewFinance) FinanceScreen(authState: widget.authState),
       if (canViewReports) ReportsScreen(authState: widget.authState),
+      if (canViewAdministration)
+        AdministrationScreen(authState: widget.authState),
       ProfileScreen(authState: widget.authState),
     ];
     if (_selected >= pages.length) _selected = 0;

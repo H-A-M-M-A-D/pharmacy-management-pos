@@ -197,6 +197,15 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 
 ## Verification
 
+## System Administration Policy
+
+- Audit events are append-only. `PharmacyDbContext` rejects updates/deletes and centrally redacts password, secret, token, and connection-string fields from audit JSON.
+- The recycle bin is deliberately limited to unreferenced `ProductCategory`, `Manufacturer`, and `ExpenseCategory` records. Transaction documents, ledgers, payments, stock movements, batches, users, branches, products, suppliers, customers, and financial accounts cannot enter it. There is no permanent-delete API.
+- Branch codes are normalized and globally unique. A branch cannot be deactivated when it is the last active branch or has active assigned users.
+- Settings use a controlled key catalog with optimistic version checks. Currency is fixed to PKR and the business timezone to Asia/Karachi in this phase.
+- Sign-out-everywhere increments the user's token version, immediately invalidating existing JWTs at the next authenticated request.
+- Backups use PostgreSQL `pg_dump` custom format, generated filenames, and a server-controlled local application-data directory. Database passwords are passed only through the child-process environment. Restore is a documented maintenance operation, not an application endpoint.
+
 ```powershell
 cd backend
 dotnet restore PharmacySystem.slnx

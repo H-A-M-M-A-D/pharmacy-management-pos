@@ -62,6 +62,25 @@ void main() {
     expect(find.text('Users'), findsOneWidget);
   });
 
+  testWidgets('administration navigation follows system permissions', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Administration'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'system.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Administration'), findsOneWidget);
+    await tester.tap(find.text('Administration'));
+    await tester.pumpAndSettle();
+    expect(find.text('System Info'), findsOneWidget);
+  });
+
   testWidgets('user list renders API results', (tester) async {
     final fixture = TestFixture(permissions: {'users.view'});
     await tester.pumpWidget(fixture.app);
@@ -2082,6 +2101,39 @@ class FakeApi implements PharmacyApi {
     String? branchId,
     String? option,
   }) async => <int>[65, 44, 66, 10];
+
+  @override
+  Future<dynamic> administration(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? body,
+  }) async {
+    if (path == 'audit') {
+      return <String, dynamic>{'items': <dynamic>[], 'totalCount': 0};
+    }
+    if (path == 'recycle-bin' || path == 'branches' || path == 'backups') {
+      return <dynamic>[];
+    }
+    if (path == 'settings') {
+      return <String, dynamic>{
+        'businessName': 'Pharmacy',
+        'timeZone': 'Asia/Karachi',
+        'currency': 'PKR',
+        'version': 0,
+        'showCustomerPhone': false,
+      };
+    }
+    return <String, dynamic>{
+      'status': 'healthy',
+      'databaseProvider': 'PostgreSQL',
+      'databaseVersion': '17',
+      'latestMigration': 'CompleteSystemAdministration',
+      'canConnect': true,
+      'timeZone': 'Asia/Karachi',
+      'currency': 'PKR',
+    };
+  }
 
   @override
   void close() {}

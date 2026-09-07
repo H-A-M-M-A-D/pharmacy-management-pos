@@ -129,6 +129,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         icon: const Icon(Icons.password),
                         label: const Text('Change password'),
                       ),
+                    OutlinedButton.icon(
+                      onPressed: widget.authState.signOutEverywhere,
+                      icon: const Icon(Icons.phonelink_erase_outlined),
+                      label: const Text('Sign out everywhere'),
+                    ),
                   ],
                 ),
               ],

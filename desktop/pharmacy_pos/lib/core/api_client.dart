@@ -256,6 +256,12 @@ abstract interface class PharmacyApi {
     String? branchId,
     String? option,
   });
+  Future<dynamic> administration(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? body,
+  });
   void close();
 }
 
@@ -1255,6 +1261,14 @@ class ApiClient implements PharmacyApi {
     _reportUri(path, fromUtc, toUtc, branchId, option),
     token: token,
   );
+
+  @override
+  Future<dynamic> administration(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? body,
+  }) => _request(method, '/api/admin/$path', token: token, body: body);
 
   @override
   Future<List<int>> exportReport(

@@ -152,7 +152,7 @@ public sealed class AuthService : IAuthService
         var branch = await _repository.GetBranchByCodeAsync("HQ", cancellationToken);
         if (branch is null)
         {
-            branch = new Branch { Code = "HQ", Name = "Head Office", IsHeadOffice = true, IsActive = true };
+            branch = new Branch { Code = "HQ", NormalizedCode = "HQ", Name = "Head Office", IsHeadOffice = true, IsActive = true };
             await _repository.AddBranchAsync(branch, cancellationToken);
         }
 
