@@ -13,6 +13,155 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
+    public async Task Sale_payments_generate_exact_financial_entries_without_mutating_live_tracker_enumeration()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PharmacyDbContext(options);
+        await context.Database.UseTransactionAsync(transaction);
+
+        var branchId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var inventoryId = Guid.NewGuid();
+        var cashAccountId = Guid.NewGuid();
+        var cardAccountId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+
+        await InsertBranchAsync(connection, transaction, branchId);
+        var username = Unique("sale-payment-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, userId);
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("SALE-PAYMENT"), null, productId);
+        await InsertBatchAsync(connection, transaction, branchId, productId, Unique("SALE-BATCH"), batchId);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Inventory"
+                ("Id","BranchId","ProductId","ProductBatchId","QuantityInStock","ReorderLevel","LastCountedAt","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@product,@batch,100,0,now(),now(),now());
+            """, ("id", inventoryId), ("branch", branchId), ("product", productId), ("batch", batchId));
+        await InsertMovementAsync(connection, transaction, branchId, productId, batchId, (int)StockMovementType.OpeningStock, 100);
+        foreach (var (id, name, type) in new[]
+                 {
+                     (cashAccountId, Unique("Sale cash"), (int)FinancialAccountType.Cash),
+                     (cardAccountId, Unique("Sale card"), (int)FinancialAccountType.CardSettlement)
+                 })
+        {
+            await ExecuteAsync(connection, transaction, """
+                INSERT INTO "FinancialAccounts"
+                    ("Id","BranchId","Name","NormalizedName","AccountType","OpeningBalance","IsActive","CreatedAt","UpdatedAt")
+                VALUES (@id,@branch,@name,@normalized,@type,0,true,now(),now());
+                """, ("id", id), ("branch", branchId), ("name", name),
+                ("normalized", name.ToUpperInvariant()), ("type", type));
+        }
+
+        var batch = await context.ProductBatches.SingleAsync(x => x.Id == batchId);
+        var inventory = await context.Inventory.SingleAsync(x => x.Id == inventoryId);
+        var cashSale = CreatePostedSale(branchId, userId, productId, batch, 1, 4500m,
+            [new SalePayment { Method = SalePaymentMethod.Cash, AmountApplied = 4500m, TenderedAmount = 5000m, FinancialAccountId = cashAccountId }]);
+        batch.QuantityAvailable -= 1;
+        inventory.QuantityInStock -= 1;
+        context.Sales.Add(cashSale);
+        context.StockMovements.Add(CreateSaleMovement(branchId, productId, batchId, userId, cashSale.Id, -1));
+
+        await context.SaveChangesAsync();
+
+        Assert.Equal(SaleStatus.Posted, cashSale.Status);
+        Assert.Equal(500m, cashSale.ChangeGiven);
+        Assert.Equal(1L, await context.SalePayments.CountAsync(x => x.SaleId == cashSale.Id));
+        var cashEntries = await context.FinancialLedgerEntries.AsNoTracking()
+            .Where(x => x.ReferenceType == "SalePayment" && x.ReferenceId == cashSale.Payments.Single().Id)
+            .ToListAsync();
+        Assert.Single(cashEntries);
+        Assert.Equal(4500m, cashEntries[0].Amount);
+        Assert.Equal(99, batch.QuantityAvailable);
+        Assert.Equal(99, inventory.QuantityInStock);
+        Assert.Equal(-1, await context.StockMovements.Where(x => x.ReferenceId == cashSale.Id).SumAsync(x => x.Quantity));
+
+        var splitSale = CreatePostedSale(branchId, userId, productId, batch, 5, 5000m,
+            [
+                new SalePayment { Method = SalePaymentMethod.Cash, AmountApplied = 2000m, TenderedAmount = 2000m, FinancialAccountId = cashAccountId },
+                new SalePayment { Method = SalePaymentMethod.Card, AmountApplied = 3000m, FinancialAccountId = cardAccountId }
+            ]);
+        batch.QuantityAvailable -= 5;
+        inventory.QuantityInStock -= 5;
+        context.Sales.Add(splitSale);
+        context.StockMovements.Add(CreateSaleMovement(branchId, productId, batchId, userId, splitSale.Id, -5));
+
+        await context.SaveChangesAsync();
+
+        var splitPaymentIds = splitSale.Payments.Select(x => x.Id).ToArray();
+        var splitEntries = await context.FinancialLedgerEntries.AsNoTracking()
+            .Where(x => x.ReferenceType == "SalePayment" && splitPaymentIds.Contains(x.ReferenceId))
+            .ToListAsync();
+        Assert.Equal(2, splitSale.Payments.Count);
+        Assert.Equal(2, splitEntries.Count);
+        Assert.Equal(5000m, splitEntries.Sum(x => x.Amount));
+        Assert.Equal(2000m, splitEntries.Single(x => x.FinancialAccountId == cashAccountId).Amount);
+        Assert.Equal(3000m, splitEntries.Single(x => x.FinancialAccountId == cardAccountId).Amount);
+        Assert.Equal(94, batch.QuantityAvailable);
+        Assert.Equal(94, inventory.QuantityInStock);
+
+        await transaction.RollbackAsync();
+    }
+
+    private static Sale CreatePostedSale(Guid branchId, Guid userId, Guid productId,
+        ProductBatch batch, int quantity, decimal total, IReadOnlyList<SalePayment> payments)
+    {
+        var sale = new Sale
+        {
+            BranchId = branchId,
+            CashierUserId = userId,
+            InvoiceNumber = Unique("INV-PAYMENT"),
+            Status = SaleStatus.Posted,
+            PostedAtUtc = DateTime.UtcNow,
+            Subtotal = total,
+            NetTotal = total,
+            AmountPaid = total,
+            ChangeGiven = payments.Sum(x => (x.TenderedAmount ?? x.AmountApplied) - x.AmountApplied)
+        };
+        var item = new SaleItem
+        {
+            ProductId = productId,
+            RequestedQuantity = quantity,
+            GrossAmount = total,
+            NetAmount = total
+        };
+        item.Allocations.Add(new SaleItemBatchAllocation
+        {
+            ProductBatchId = batch.Id,
+            Quantity = quantity,
+            UnitRetailPriceSnapshot = total / quantity,
+            UnitSalePriceSnapshot = total / quantity,
+            UnitCostPriceSnapshot = batch.PurchasePrice,
+            ExpiryDateSnapshot = batch.ExpiryDate,
+            GrossAmount = total,
+            NetAmount = total
+        });
+        sale.Items.Add(item);
+        foreach (var payment in payments) sale.Payments.Add(payment);
+        return sale;
+    }
+
+    private static StockMovement CreateSaleMovement(Guid branchId, Guid productId, Guid batchId,
+        Guid userId, Guid saleId, int quantity) => new()
+    {
+        MovementType = StockMovementType.Sale,
+        BranchId = branchId,
+        ProductId = productId,
+        ProductBatchId = batchId,
+        Quantity = quantity,
+        ReferenceType = "Sale",
+        ReferenceId = saleId,
+        PerformedByUserId = userId
+    };
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
     public async Task Customer_repository_sequences_generate_unique_codes_and_payment_receipts()
     {
         await using var connection = await OpenConnectionAsync();

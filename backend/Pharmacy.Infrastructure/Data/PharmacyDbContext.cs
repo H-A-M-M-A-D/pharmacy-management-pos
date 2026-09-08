@@ -121,7 +121,7 @@ public class PharmacyDbContext : DbContext
     private void AddFinancialEntriesForPayments()
     {
         ChangeTracker.DetectChanges();
-        foreach (var tracked in ChangeTracker.Entries<SalePayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        foreach (var tracked in ChangeTracker.Entries<SalePayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue).ToList())
         {
             var payment = tracked.Entity;
             var sale = payment.Sale ?? ChangeTracker.Entries<Sale>().Select(x => x.Entity).First(x => x.Id == payment.SaleId);
@@ -136,14 +136,14 @@ public class PharmacyDbContext : DbContext
                 EntryType = FinancialLedgerEntryType.CustomerPayment, Amount = payment.Amount, ReferenceType = "CustomerPayment", ReferenceId = payment.Id,
                 ReferenceNumber = payment.ReceiptNumber, Description = "Customer payment", CreatedByUserId = payment.ReceivedByUserId, OccurredAtUtc = payment.PaymentDateUtc });
         }
-        foreach (var tracked in ChangeTracker.Entries<SupplierLedgerEntry>().Where(x => x.State == EntityState.Added && x.Entity.EntryType == SupplierLedgerEntryType.Payment && x.Entity.FinancialAccountId.HasValue))
+        foreach (var tracked in ChangeTracker.Entries<SupplierLedgerEntry>().Where(x => x.State == EntityState.Added && x.Entity.EntryType == SupplierLedgerEntryType.Payment && x.Entity.FinancialAccountId.HasValue).ToList())
         {
             var payment = tracked.Entity;
             FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = payment.BranchId,
                 EntryType = FinancialLedgerEntryType.SupplierPayment, Amount = payment.Amount, ReferenceType = "SupplierPayment", ReferenceId = payment.Id,
                 ReferenceNumber = payment.ReferenceNumber, Description = "Supplier payment", CreatedByUserId = payment.CreatedByUserId ?? throw new InvalidOperationException("Supplier payment requires a user."), OccurredAtUtc = payment.CreatedAt });
         }
-        foreach (var tracked in ChangeTracker.Entries<SalesRefundPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        foreach (var tracked in ChangeTracker.Entries<SalesRefundPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue).ToList())
         {
             var payment = tracked.Entity;
             var salesReturn = payment.SalesReturn ?? ChangeTracker.Entries<SalesReturn>().Select(x => x.Entity).First(x => x.Id == payment.SalesReturnId);
