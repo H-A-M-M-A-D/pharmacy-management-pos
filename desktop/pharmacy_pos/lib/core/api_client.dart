@@ -266,19 +266,21 @@ abstract interface class PharmacyApi {
 }
 
 class ApiClient implements PharmacyApi {
-  ApiClient({Uri? baseUri, HttpClient? httpClient})
+  ApiClient({Uri? baseUri, HttpClient? httpClient, this.onUnauthorized})
     : baseUri =
           baseUri ??
           Uri.parse(
-            const String.fromEnvironment(
-              'API_BASE_URL',
-              defaultValue: 'http://localhost:5000',
-            ),
+            Platform.environment['PHARMACY_API_URL'] ??
+                const String.fromEnvironment(
+                  'API_BASE_URL',
+                  defaultValue: 'http://localhost:5000',
+                ),
           ),
       _httpClient = httpClient ?? HttpClient();
 
   final Uri baseUri;
   final HttpClient _httpClient;
+  final void Function()? onUnauthorized;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -1339,6 +1341,13 @@ class ApiClient implements PharmacyApi {
       );
       final responseBody = await utf8.decoder.bind(response).join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == HttpStatus.unauthorized && token != null) {
+          onUnauthorized?.call();
+          throw const ApiException(
+            'Your session expired. Sign in again.',
+            statusCode: 401,
+          );
+        }
         var message = 'The request could not be completed.';
         try {
           final problem = jsonDecode(responseBody) as Map<String, dynamic>;

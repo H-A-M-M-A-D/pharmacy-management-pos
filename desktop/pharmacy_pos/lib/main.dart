@@ -19,9 +19,12 @@ class PharmacyPOSApp extends StatefulWidget {
 }
 
 class _PharmacyPOSAppState extends State<PharmacyPOSApp> {
+  late final ApiClient _apiClient = ApiClient(onUnauthorized: _expireSession);
   late final AuthState _authState =
-      widget.authState ?? AuthState(ApiClient(), const SecureTokenStore());
+      widget.authState ?? AuthState(_apiClient, const SecureTokenStore());
   late final bool _ownsAuthState = widget.authState == null;
+
+  void _expireSession() => _authState.expireSession();
 
   @override
   void initState() {

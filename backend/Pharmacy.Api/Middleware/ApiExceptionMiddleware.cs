@@ -25,17 +25,19 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExce
             await context.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Status = statusCode,
-                Title = exception.Message
+                Title = exception.Message,
+                Extensions = { ["correlationId"] = context.TraceIdentifier }
             });
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Unhandled API error");
+            logger.LogError(exception, "Unhandled API error. CorrelationId: {CorrelationId}", context.TraceIdentifier);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Status = StatusCodes.Status500InternalServerError,
-                Title = "An unexpected error occurred."
+                Title = "An unexpected error occurred.",
+                Extensions = { ["correlationId"] = context.TraceIdentifier }
             });
         }
     }

@@ -147,6 +147,15 @@ class AuthState extends ChangeNotifier {
     await logout();
   }
 
+  Future<void> expireSession() async {
+    _token = null;
+    currentUser = null;
+    errorMessage = 'Your session expired. Sign in again.';
+    status = AuthenticationStatus.unauthenticated;
+    await _tokenStore.clear();
+    notifyListeners();
+  }
+
   Future<PagedProducts> listProducts({
     int page = 1,
     String? search,

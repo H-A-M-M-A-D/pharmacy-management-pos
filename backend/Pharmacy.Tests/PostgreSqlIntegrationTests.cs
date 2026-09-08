@@ -1132,6 +1132,14 @@ public sealed class PostgreSqlIntegrationTests
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
             ?? throw new InvalidOperationException($"{ConnectionVariable} is not configured.");
+        var settings = new NpgsqlConnectionStringBuilder(connectionString);
+        var databaseName = settings.Database ?? string.Empty;
+        if (!databaseName.EndsWith("_test", StringComparison.OrdinalIgnoreCase) ||
+            databaseName.Contains("prod", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"{ConnectionVariable} must target a dedicated database whose name ends with '_test'.");
+        }
         var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
         return connection;

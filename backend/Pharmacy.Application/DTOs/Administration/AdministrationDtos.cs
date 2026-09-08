@@ -24,4 +24,5 @@ public sealed record UpdateSystemSettingsRequest(string BusinessName, string? Re
 public sealed record BackupRecordDto(Guid Id, string FileName, long SizeBytes, string Status,
     DateTime CreatedAt, DateTime? CompletedAtUtc, string? ErrorMessage);
 public sealed record SystemInformationDto(string Status, string DatabaseProvider, string DatabaseVersion,
-    string LatestMigration, bool CanConnect, string TimeZone, string Currency);
+    string LatestMigration, bool CanConnect, string TimeZone, string Currency, string ApiVersion,
+    bool BackupToolAvailable, bool BackupDirectoryWritable, DateTime? LastSuccessfulBackupUtc);

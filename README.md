@@ -197,6 +197,12 @@ All stock quantities operate in the product's configured inventory unit. Box/str
 
 ## Verification
 
+## Release Candidate Operations
+
+The API version is `0.1.0-rc.1`. Production migrations are explicit deployment operations and never run silently at API startup. Public liveness is process-only; readiness verifies PostgreSQL. Detailed system and backup diagnostics remain permission-protected.
+
+Backups are written atomically through a `.partial` file, validated with `pg_restore --list`, then renamed to `.backup`. The default retention is the latest 10 completed archives inside the configured server-controlled directory. See `docs/DEPLOYMENT_CHECKLIST.md`, `docs/OPERATIONS_RUNBOOK.md`, and `docs/DISASTER_RECOVERY.md` before deployment.
+
 ## System Administration Policy
 
 - Audit events are append-only. `PharmacyDbContext` rejects updates/deletes and centrally redacts password, secret, token, and connection-string fields from audit JSON.

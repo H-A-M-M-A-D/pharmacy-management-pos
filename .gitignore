@@ -29,3 +29,10 @@ coverage/
 !.env.example
 appsettings.Local.json
 .postgres-bootstrap.local.ps1
+
+# Database and release artifacts
+*.backup
+*.partial
+*.dump
+publish/
+artifacts/

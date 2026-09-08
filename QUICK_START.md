@@ -102,6 +102,8 @@ Run against a chosen API URL with:
 flutter run -d windows --dart-define=API_BASE_URL=http://localhost:5000
 ```
 
+Packaged Windows deployments may instead set `PHARMACY_API_URL` in the launcher or service environment, avoiding recompilation when the API address changes. Local HTTP is development-only; deployments require HTTPS with normal certificate validation.
+
 The client stores the JWT through `flutter_secure_storage`; on Windows the plugin protects its encryption key with Windows Credential Manager. The API still uses self-contained access tokens rather than refresh tokens.
 
 

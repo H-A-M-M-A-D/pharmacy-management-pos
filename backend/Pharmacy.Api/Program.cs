@@ -123,8 +123,14 @@ builder.Services
     });
 
 builder.Services.AddPermissionAuthorization();
-builder.Services.AddCors(options => options.AddPolicy("AllowAll", policy =>
-    policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+builder.Services.AddCors(options => options.AddPolicy("PharmacyClient", policy =>
+{
+    if (builder.Environment.IsDevelopment() && allowedOrigins.Length == 0)
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+    else if (allowedOrigins.Length > 0)
+        policy.WithOrigins(allowedOrigins).AllowAnyMethod().AllowAnyHeader();
+}));
 
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
@@ -133,15 +139,21 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ApiExceptionMiddleware>();
 app.UseHttpsRedirection();
-app.UseCors("AllowAll");
+app.UseCors("PharmacyClient");
 app.UseAuthentication();
 app.UseMiddleware<MustChangePasswordMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
-app.MapGet("/api/health", () => new { status = "healthy", timestamp = DateTime.UtcNow })
+app.MapGet("/api/health", () => new { status = "healthy" })
     .WithName("HealthCheck");
+app.MapGet("/api/health/live", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/api/health/ready", async (PharmacyDbContext database, CancellationToken ct) =>
+    await database.Database.CanConnectAsync(ct)
+        ? Results.Ok(new { status = "healthy" })
+        : Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable));
 
 app.Run();
 
