@@ -146,6 +146,169 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
+    public async Task Purchase_return_sequence_posts_paid_bonus_and_mixed_lines_with_unique_numbers_stock_and_credit()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='PurchaseManager';");
+
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId,
+            Unique("pr-seq-supplier"), Unique("PR-SEQ-SUPPLIER"));
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("PR-SEQ"), null, productId);
+        var username = Unique("pr-seq-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        var receiptDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var receiptRequest = new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-SEQ"), receiptDate, null,
+            [new GoodsReceiptItemRequest(productId, null, "B-PR-SEQ", null, receiptDate.AddDays(365), 100, 10, 50m, 60m, 0, 0)]);
+        GoodsReceiptDetailsDto receipt;
+        await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            receipt = await service.PostGoodsReceiptAsync(actorId, receiptRequest);
+        }
+        var itemId = receipt.Items.Single().Id;
+
+        // Historically, NextPurchaseReturnNumberAsync failed here with PostgreSQL 42703
+        // ("column s.Value does not exist") because the scalar nextval(...) projection was unaliased.
+        PurchaseReturnDetailsDto paid;
+        await using (var paidContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(paidContext), TimeProvider.System);
+            paid = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
+                new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemId, 20, 0)]));
+        }
+        Assert.Equal(1000m, paid.NetSupplierCredit);
+
+        PurchaseReturnDetailsDto bonus;
+        await using (var bonusContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(bonusContext), TimeProvider.System);
+            bonus = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
+                new PostPurchaseReturnRequest(PurchaseReturnReason.ExcessSupply, null, [new PurchaseReturnItemRequest(itemId, 0, 5)]));
+        }
+        Assert.Equal(0m, bonus.NetSupplierCredit);
+
+        PurchaseReturnDetailsDto mixed;
+        await using (var mixedContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(mixedContext), TimeProvider.System);
+            mixed = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
+                new PostPurchaseReturnRequest(PurchaseReturnReason.WrongItem, null, [new PurchaseReturnItemRequest(itemId, 10, 5)]));
+        }
+        Assert.Equal(500m, mixed.NetSupplierCredit);
+
+        var returnNumbers = new[] { paid.ReturnNumber, bonus.ReturnNumber, mixed.ReturnNumber };
+        Assert.All(returnNumbers, x => Assert.False(string.IsNullOrWhiteSpace(x)));
+        Assert.All(returnNumbers, x => Assert.Matches($@"^PR-{receiptDate.Year}-\d{{6}}$", x));
+        Assert.Equal(3, returnNumbers.Distinct().Count());
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var batch = await verifyContext.ProductBatches.AsNoTracking().SingleAsync(x => x.ProductId == productId);
+        var inventory = await verifyContext.Inventory.AsNoTracking().SingleAsync(x => x.ProductId == productId);
+        Assert.Equal(70, batch.QuantityAvailable);
+        Assert.Equal(70, inventory.QuantityInStock);
+
+        Assert.Equal(-20, await verifyContext.StockMovements.Where(x => x.ReferenceId == paid.Id).SumAsync(x => x.Quantity));
+        Assert.Equal(-5, await verifyContext.StockMovements.Where(x => x.ReferenceId == bonus.Id).SumAsync(x => x.Quantity));
+        Assert.Equal(-15, await verifyContext.StockMovements.Where(x => x.ReferenceId == mixed.Id).SumAsync(x => x.Quantity));
+
+        Assert.Equal(-1000m, await verifyContext.SupplierLedgerEntries.Where(x => x.ReferenceId == paid.Id).SumAsync(x => x.Amount));
+        Assert.False(await verifyContext.SupplierLedgerEntries.AnyAsync(x => x.ReferenceId == bonus.Id));
+        Assert.Equal(-500m, await verifyContext.SupplierLedgerEntries.Where(x => x.ReferenceId == mixed.Id).SumAsync(x => x.Amount));
+
+        foreach (var returnId in new[] { paid.Id, bonus.Id, mixed.Id })
+        {
+            Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x =>
+                x.EntityType == "PurchaseReturn" && x.EntityId == returnId && x.Action == "PurchaseReturnPosted"));
+        }
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Purchase_return_rejects_over_return_and_mismatched_grn_item_without_partial_mutation()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var productAId = Guid.NewGuid();
+        var productBId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='PurchaseManager';");
+
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId,
+            Unique("pr-guard-supplier"), Unique("PR-GUARD-SUPPLIER"));
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("PR-GUARD-A"), null, productAId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("PR-GUARD-B"), null, productBId);
+        var username = Unique("pr-guard-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        var receiptDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        GoodsReceiptDetailsDto receiptA;
+        GoodsReceiptDetailsDto receiptB;
+        await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            receiptA = await service.PostGoodsReceiptAsync(actorId, new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-GUARD-A"), receiptDate, null,
+                [new GoodsReceiptItemRequest(productAId, null, "B-PR-GUARD-A", null, receiptDate.AddDays(365), 10, 0, 50m, 60m, 0, 0)]));
+            receiptB = await service.PostGoodsReceiptAsync(actorId, new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-GUARD-B"), receiptDate, null,
+                [new GoodsReceiptItemRequest(productBId, null, "B-PR-GUARD-B", null, receiptDate.AddDays(365), 10, 0, 50m, 60m, 0, 0)]));
+        }
+        var itemAId = receiptA.Items.Single().Id;
+        var itemBId = receiptB.Items.Single().Id;
+
+        await using (var wrongItemContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(wrongItemContext), TimeProvider.System);
+            await Assert.ThrowsAsync<RequestValidationException>(() => service.PostPurchaseReturnAsync(actorId, receiptA.Id,
+                new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemBId, 1, 0)])));
+        }
+
+        await using (var overReturnContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(overReturnContext), TimeProvider.System);
+            await Assert.ThrowsAsync<ResourceConflictException>(() => service.PostPurchaseReturnAsync(actorId, receiptA.Id,
+                new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemAId, 11, 0)])));
+        }
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        Assert.False(await verifyContext.PurchaseReturns.AnyAsync(x => x.OriginalGoodsReceiptId == receiptA.Id));
+        var batchA = await verifyContext.ProductBatches.AsNoTracking().SingleAsync(x => x.ProductId == productAId);
+        var inventoryA = await verifyContext.Inventory.AsNoTracking().SingleAsync(x => x.ProductId == productAId);
+        Assert.Equal(10, batchA.QuantityAvailable);
+        Assert.Equal(10, inventoryA.QuantityInStock);
+        Assert.False(await verifyContext.StockMovements.AnyAsync(x => x.ProductId == productAId && x.MovementType == StockMovementType.PurchaseReturn));
+        Assert.False(await verifyContext.SupplierLedgerEntries.AnyAsync(x => x.ReferenceType == "PurchaseReturn" && x.SupplierId == supplierId));
+        Assert.False(await verifyContext.AuditLogs.AnyAsync(x => x.EntityType == "PurchaseReturn" && x.UserId == actorId));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
     public async Task Sale_payments_generate_exact_financial_entries_without_mutating_live_tracker_enumeration()
     {
         await using var connection = await OpenConnectionAsync();

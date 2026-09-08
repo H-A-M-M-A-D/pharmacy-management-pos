@@ -36,7 +36,7 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
         $"GRN-{receiptDate.Year}-{await context.GoodsReceipts.CountAsync(x => x.ReceiptDate.Year == receiptDate.Year, cancellationToken) + 1:000000}";
     public async Task<string> NextPurchaseReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default)
     {
-        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"PurchaseReturnNumberSequence\"'::regclass)").SingleAsync(cancellationToken);
+        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"PurchaseReturnNumberSequence\"'::regclass) AS \"Value\"").SingleAsync(cancellationToken);
         return $"PR-{returnDateUtc.Year}-{next:000000}";
     }
     public async Task AddPurchaseOrderAsync(PurchaseOrder order, CancellationToken cancellationToken = default) => await context.PurchaseOrders.AddAsync(order, cancellationToken);
