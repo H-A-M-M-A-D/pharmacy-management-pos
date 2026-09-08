@@ -22,6 +22,7 @@ public interface IPurchasingRepository
     Task<string> NextGrnNumberAsync(DateOnly receiptDate, CancellationToken cancellationToken = default);
     Task<string> NextPurchaseReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default);
     Task AddPurchaseOrderAsync(PurchaseOrder order, CancellationToken cancellationToken = default);
+    void ReplacePurchaseOrderItems(PurchaseOrder order, IReadOnlyCollection<PurchaseOrderItem> items);
     Task AddGoodsReceiptAsync(GoodsReceipt receipt, CancellationToken cancellationToken = default);
     Task AddPurchaseReturnAsync(PurchaseReturn purchaseReturn, CancellationToken cancellationToken = default);
     Task AddBatchAsync(ProductBatch batch, CancellationToken cancellationToken = default);

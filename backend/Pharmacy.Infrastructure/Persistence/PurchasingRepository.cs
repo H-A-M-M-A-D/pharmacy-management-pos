@@ -40,6 +40,17 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
         return $"PR-{returnDateUtc.Year}-{next:000000}";
     }
     public async Task AddPurchaseOrderAsync(PurchaseOrder order, CancellationToken cancellationToken = default) => await context.PurchaseOrders.AddAsync(order, cancellationToken);
+    public void ReplacePurchaseOrderItems(PurchaseOrder order, IReadOnlyCollection<PurchaseOrderItem> items)
+    {
+        context.PurchaseOrderItems.RemoveRange(order.Items);
+        order.Items.Clear();
+        foreach (var item in items)
+        {
+            item.PurchaseOrderId = order.Id;
+            order.Items.Add(item);
+            context.PurchaseOrderItems.Add(item);
+        }
+    }
     public async Task AddGoodsReceiptAsync(GoodsReceipt receipt, CancellationToken cancellationToken = default) => await context.GoodsReceipts.AddAsync(receipt, cancellationToken);
     public async Task AddPurchaseReturnAsync(PurchaseReturn purchaseReturn, CancellationToken cancellationToken = default) => await context.PurchaseReturns.AddAsync(purchaseReturn, cancellationToken);
     public async Task AddBatchAsync(ProductBatch batch, CancellationToken cancellationToken = default) => await context.ProductBatches.AddAsync(batch, cancellationToken);

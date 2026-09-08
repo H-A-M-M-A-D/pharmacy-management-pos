@@ -1,6 +1,9 @@
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
+using Pharmacy.Application.Common;
+using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Application.Services.Purchasing;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
@@ -10,6 +13,136 @@ namespace Pharmacy.Tests;
 public sealed class PostgreSqlIntegrationTests
 {
     private const string ConnectionVariable = "PHARMACY_TEST_CONNECTION_STRING";
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Draft_purchase_order_lines_can_be_replaced_and_removed_without_false_concurrency()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var productAId = Guid.NewGuid();
+        var productBId = Guid.NewGuid();
+        var productCId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='PurchaseManager';");
+
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId,
+            Unique("draft-update-supplier"), Unique("DRAFT-UPDATE-SUPPLIER"));
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("DRAFT-A"), null, productAId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("DRAFT-B"), null, productBId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("DRAFT-C"), null, productCId);
+        var username = Unique("draft-update-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        var orderDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var createRequest = new PurchaseOrderRequest(branchId, supplierId, orderDate,
+            orderDate.AddDays(7), "acceptance-create", "Original notes",
+            [
+                new PurchaseOrderItemRequest(productAId, 10, 100m, "A"),
+                new PurchaseOrderItemRequest(productBId, 5, 200m, "B")
+            ]);
+        PurchaseOrderDetailsDto created;
+        await using (var createContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(createContext), TimeProvider.System);
+            created = await service.CreatePurchaseOrderAsync(actorId, createRequest);
+        }
+
+        var updateRequest = new PurchaseOrderRequest(branchId, supplierId, orderDate,
+            orderDate.AddDays(14), "acceptance-update", "Updated notes",
+            [
+                new PurchaseOrderItemRequest(productAId, 11, 101m, "A updated"),
+                new PurchaseOrderItemRequest(productBId, 6, 201m, "B updated"),
+                new PurchaseOrderItemRequest(productCId, 2, 30m, "C added")
+            ]);
+        await using (var updateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(updateContext), TimeProvider.System);
+            await service.UpdatePurchaseOrderAsync(actorId, created.Id, updateRequest);
+        }
+
+        await using (var verifyContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var order = await verifyContext.PurchaseOrders.AsNoTracking().Include(x => x.Items)
+                .SingleAsync(x => x.Id == created.Id);
+            Assert.Equal(PurchaseOrderStatus.Draft, order.Status);
+            Assert.Equal("Updated notes", order.Notes);
+            Assert.Equal("acceptance-update", order.SupplierReference);
+            Assert.Equal(orderDate.AddDays(14), order.ExpectedDate);
+            Assert.Equal(3, order.Items.Count);
+            Assert.Equal((11, 101m), order.Items.Where(x => x.ProductId == productAId)
+                .Select(x => (x.OrderedQuantity, x.ExpectedPurchasePrice!.Value)).Single());
+            Assert.Equal((6, 201m), order.Items.Where(x => x.ProductId == productBId)
+                .Select(x => (x.OrderedQuantity, x.ExpectedPurchasePrice!.Value)).Single());
+            Assert.Equal((2, 30m), order.Items.Where(x => x.ProductId == productCId)
+                .Select(x => (x.OrderedQuantity, x.ExpectedPurchasePrice!.Value)).Single());
+            Assert.Equal(2377m, order.Items.Sum(x => x.OrderedQuantity * x.ExpectedPurchasePrice!.Value));
+            Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "PurchaseOrder" &&
+                x.EntityId == created.Id && x.Action == "PurchaseOrderUpdated"));
+            Assert.False(await verifyContext.GoodsReceipts.AnyAsync(x => x.PurchaseOrderId == created.Id));
+            Assert.False(await verifyContext.ProductBatches.AnyAsync(x =>
+                x.ProductId == productAId || x.ProductId == productBId || x.ProductId == productCId));
+            Assert.False(await verifyContext.Inventory.AnyAsync(x =>
+                x.ProductId == productAId || x.ProductId == productBId || x.ProductId == productCId));
+            Assert.False(await verifyContext.StockMovements.AnyAsync(x =>
+                x.ProductId == productAId || x.ProductId == productBId || x.ProductId == productCId));
+            Assert.False(await verifyContext.SupplierLedgerEntries.AnyAsync(x => x.SupplierId == supplierId));
+            Assert.False(await verifyContext.FinancialLedgerEntries.AnyAsync(x => x.ReferenceId == created.Id));
+        }
+
+        var removeRequest = updateRequest with
+        {
+            Notes = "Removed one line",
+            Items =
+            [
+                new PurchaseOrderItemRequest(productAId, 12, 102m, "A retained"),
+                new PurchaseOrderItemRequest(productCId, 3, 31m, "C retained")
+            ]
+        };
+        await using (var removeContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(removeContext), TimeProvider.System);
+            await service.UpdatePurchaseOrderAsync(actorId, created.Id, removeRequest);
+        }
+
+        await using (var finalContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var order = await finalContext.PurchaseOrders.AsNoTracking().Include(x => x.Items)
+                .SingleAsync(x => x.Id == created.Id);
+            Assert.Equal(2, order.Items.Count);
+            Assert.DoesNotContain(order.Items, x => x.ProductId == productBId);
+            Assert.Equal(2, await finalContext.AuditLogs.CountAsync(x => x.EntityType == "PurchaseOrder" &&
+                x.EntityId == created.Id && x.Action == "PurchaseOrderUpdated"));
+        }
+
+        await using (var stateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(stateContext), TimeProvider.System);
+            await service.SubmitPurchaseOrderAsync(actorId, created.Id);
+        }
+        await using (var immutableContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(immutableContext), TimeProvider.System);
+            await Assert.ThrowsAsync<RequestValidationException>(() =>
+                service.UpdatePurchaseOrderAsync(actorId, created.Id, removeRequest));
+            await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
+                service.UpdatePurchaseOrderAsync(actorId, Guid.NewGuid(), removeRequest));
+            Assert.Equal(2, await immutableContext.AuditLogs.CountAsync(x => x.EntityType == "PurchaseOrder" &&
+                x.EntityId == created.Id && x.Action == "PurchaseOrderUpdated"));
+        }
+    }
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]

@@ -85,11 +85,11 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
             order.ExpectedDate = request.ExpectedDate;
             order.SupplierReference = Clean(request.SupplierReference);
             order.Notes = Clean(request.Notes);
-            order.Items.Clear();
+            var replacementItems = new List<PurchaseOrderItem>(request.Items.Count);
             foreach (var item in request.Items)
             {
                 var product = await RequireActiveProduct(item.ProductId, ct);
-                order.Items.Add(new PurchaseOrderItem
+                replacementItems.Add(new PurchaseOrderItem
                 {
                     ProductId = product.Id,
                     OrderedQuantity = item.OrderedQuantity,
@@ -97,6 +97,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
                     Notes = Clean(item.Notes)
                 });
             }
+            repository.ReplacePurchaseOrderItems(order, replacementItems);
             order.UpdatedAt = UtcNow();
             await Audit(actorId, "PurchaseOrderUpdated", "PurchaseOrder", order.Id, old, OrderValues(order), ct);
             await repository.SaveChangesAsync(ct);

@@ -223,6 +223,15 @@ public sealed class PurchasingServiceTests
         public Task<string> NextGrnNumberAsync(DateOnly receiptDate, CancellationToken cancellationToken = default) => Task.FromResult($"GRN-{receiptDate.Year}-{Receipts.Count + 1:000000}");
         public Task<string> NextPurchaseReturnNumberAsync(DateTime returnDateUtc, CancellationToken cancellationToken = default) => Task.FromResult($"PR-{returnDateUtc.Year}-{PurchaseReturns.Count + 1:000000}");
         public Task AddPurchaseOrderAsync(PurchaseOrder order, CancellationToken cancellationToken = default) { Orders.Add(order); return Task.CompletedTask; }
+        public void ReplacePurchaseOrderItems(PurchaseOrder order, IReadOnlyCollection<PurchaseOrderItem> items)
+        {
+            order.Items.Clear();
+            foreach (var item in items)
+            {
+                item.PurchaseOrderId = order.Id;
+                order.Items.Add(item);
+            }
+        }
         public Task AddGoodsReceiptAsync(GoodsReceipt receipt, CancellationToken cancellationToken = default) { Receipts.Add(receipt); return Task.CompletedTask; }
         public Task AddPurchaseReturnAsync(PurchaseReturn purchaseReturn, CancellationToken cancellationToken = default) { PurchaseReturns.Add(purchaseReturn); return Task.CompletedTask; }
         public Task AddBatchAsync(ProductBatch batch, CancellationToken cancellationToken = default) { Batches.Add(batch); return Task.CompletedTask; }
