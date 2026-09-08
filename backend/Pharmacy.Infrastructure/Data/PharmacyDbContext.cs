@@ -129,7 +129,7 @@ public class PharmacyDbContext : DbContext
                 EntryType = FinancialLedgerEntryType.SalePayment, Amount = payment.AmountApplied, ReferenceType = "SalePayment", ReferenceId = payment.Id,
                 ReferenceNumber = sale.InvoiceNumber, Description = "Sale payment", CreatedByUserId = sale.CashierUserId, OccurredAtUtc = sale.PostedAtUtc ?? DateTime.UtcNow });
         }
-        foreach (var tracked in ChangeTracker.Entries<CustomerPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue))
+        foreach (var tracked in ChangeTracker.Entries<CustomerPayment>().Where(x => x.State == EntityState.Added && x.Entity.FinancialAccountId.HasValue).ToList())
         {
             var payment = tracked.Entity;
             FinancialLedgerEntries.Add(new FinancialLedgerEntry { FinancialAccountId = payment.FinancialAccountId!.Value, BranchId = payment.BranchId,

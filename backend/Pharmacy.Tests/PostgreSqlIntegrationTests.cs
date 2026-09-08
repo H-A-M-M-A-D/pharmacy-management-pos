@@ -1,6 +1,7 @@
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
 
@@ -9,6 +10,107 @@ namespace Pharmacy.Tests;
 public sealed class PostgreSqlIntegrationTests
 {
     private const string ConnectionVariable = "PHARMACY_TEST_CONNECTION_STRING";
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Customer_repository_sequences_generate_unique_codes_and_payment_receipts()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PharmacyDbContext(options);
+        await context.Database.UseTransactionAsync(transaction);
+        var repository = new CustomerRepository(context);
+
+        var branchId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(connection, transaction, branchId);
+        var username = Unique("customer-sequence-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, userId);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "FinancialAccounts"
+                ("Id","BranchId","Name","NormalizedName","AccountType","OpeningBalance","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@branch,@name,@normalized,1,0,true,now(),now());
+            """, ("id", accountId), ("branch", branchId),
+            ("name", Unique("Customer sequence cash")), ("normalized", Unique("CUSTOMER SEQUENCE CASH")));
+
+        var firstCode = await repository.NextCustomerCodeAsync();
+        var secondCode = await repository.NextCustomerCodeAsync();
+        Assert.NotEqual(firstCode, secondCode);
+        Assert.StartsWith("CUS-", firstCode);
+
+        var firstCustomer = new Customer
+        {
+            CustomerCode = firstCode,
+            Name = "Sequence Customer One",
+            NormalizedName = "SEQUENCE CUSTOMER ONE",
+            CreditLimit = 1000m
+        };
+        var secondCustomer = new Customer
+        {
+            CustomerCode = secondCode,
+            Name = "Sequence Customer Two",
+            NormalizedName = "SEQUENCE CUSTOMER TWO",
+            CreditLimit = 1000m
+        };
+        await repository.AddCustomerAsync(firstCustomer);
+        await repository.AddCustomerAsync(secondCustomer);
+        await repository.SaveChangesAsync();
+
+        var paymentDate = DateTime.UtcNow;
+        var firstReceipt = await repository.NextPaymentReceiptNumberAsync(paymentDate);
+        var secondReceipt = await repository.NextPaymentReceiptNumberAsync(paymentDate);
+        Assert.NotEqual(firstReceipt, secondReceipt);
+        Assert.StartsWith($"CR-{paymentDate.Year}-", firstReceipt);
+
+        foreach (var (customer, receipt) in new[] { (firstCustomer, firstReceipt), (secondCustomer, secondReceipt) })
+        {
+            var payment = new CustomerPayment
+            {
+                ReceiptNumber = receipt,
+                CustomerId = customer.Id,
+                BranchId = branchId,
+                Amount = 100m,
+                PaymentMethod = CustomerPaymentMethod.Cash,
+                PaymentDateUtc = paymentDate,
+                ReceivedByUserId = userId,
+                FinancialAccountId = accountId
+            };
+            await repository.AddPaymentAsync(payment);
+            await repository.AddLedgerEntryAsync(new CustomerLedgerEntry
+            {
+                CustomerId = customer.Id,
+                BranchId = branchId,
+                EntryType = CustomerLedgerEntryType.Payment,
+                Amount = -payment.Amount,
+                EntryDate = DateOnly.FromDateTime(paymentDate),
+                ReferenceType = "CustomerPayment",
+                ReferenceId = payment.Id,
+                ReferenceNumber = receipt,
+                CreatedByUserId = userId
+            });
+        }
+        await repository.SaveChangesAsync();
+
+        Assert.Equal(2L, await ScalarAsync<long>(connection, transaction,
+            "SELECT count(*) FROM \"Customers\" WHERE \"Id\" IN (@first,@second);",
+            ("first", firstCustomer.Id), ("second", secondCustomer.Id)));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, transaction,
+            "SELECT count(*) FROM \"CustomerPayments\" WHERE \"ReceiptNumber\" IN (@first,@second);",
+            ("first", firstReceipt), ("second", secondReceipt)));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, transaction,
+            "SELECT count(*) FROM \"CustomerLedgerEntries\" WHERE \"ReferenceNumber\" IN (@first,@second);",
+            ("first", firstReceipt), ("second", secondReceipt)));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, transaction,
+            "SELECT count(*) FROM \"FinancialLedgerEntries\" WHERE \"ReferenceNumber\" IN (@first,@second);",
+            ("first", firstReceipt), ("second", secondReceipt)));
+
+        await transaction.RollbackAsync();
+    }
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]

@@ -23,12 +23,12 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         context.Customers.AnyAsync(x => x.CustomerCode == customerCode && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
     public async Task<string> NextCustomerCodeAsync(CancellationToken cancellationToken = default)
     {
-        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"CustomerCodeSequence\"'::regclass)").SingleAsync(cancellationToken);
+        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"CustomerCodeSequence\"'::regclass) AS \"Value\"").SingleAsync(cancellationToken);
         return $"CUS-{next:000000}";
     }
     public async Task<string> NextPaymentReceiptNumberAsync(DateTime paymentDateUtc, CancellationToken cancellationToken = default)
     {
-        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"CustomerPaymentReceiptSequence\"'::regclass)").SingleAsync(cancellationToken);
+        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"CustomerPaymentReceiptSequence\"'::regclass) AS \"Value\"").SingleAsync(cancellationToken);
         return $"CR-{paymentDateUtc.Year}-{next:000000}";
     }
     public async Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default) => await context.Customers.AddAsync(customer, cancellationToken);
