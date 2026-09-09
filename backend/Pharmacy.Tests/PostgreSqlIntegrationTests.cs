@@ -1,8 +1,10 @@
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Pharmacy.Application.Common;
+using Pharmacy.Application.DTOs.Finance;
 using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Application.Services.Finance;
 using Pharmacy.Application.Services.Purchasing;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
@@ -1766,6 +1768,108 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(5L, await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM pg_trigger WHERE tgname IN ('TR_FinancialLedgerEntries_Guard','TR_FinancialLedgerEntries_Immutable','TR_Expenses_Immutable','TR_OtherIncomes_Immutable','TR_FinancialTransfers_Immutable') AND NOT tgisinternal;"));
         Assert.True(await ScalarAsync<long>(connection, transaction, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('IX_FinancialLedgerEntries_FinancialAccountId_OccurredAtUtc','IX_FinancialLedgerEntries_BranchId_OccurredAtUtc','IX_FinancialLedgerEntries_EntryType_OccurredAtUtc','IX_FinancialLedgerEntries_ReferenceType_ReferenceId','IX_Expenses_ExpenseNumber');") >= 5);
         await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Finance_sequence_backed_postings_generate_numbers_and_correct_economics_against_postgresql()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("finance-seq-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        var categoryId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"ExpenseCategories\" ORDER BY \"Id\" LIMIT 1;");
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        FinancialAccountDto source;
+        FinancialAccountDto destination;
+        await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            source = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Seq Cash"), FinancialAccountType.Cash, 10000m, null));
+            destination = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Seq Bank"), FinancialAccountType.Bank, 0m, null));
+        }
+
+        // Two expenses prove the sequence advances and produces distinct numbers on repeated calls.
+        ExpenseDto expenseOne;
+        await using (var expenseContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(expenseContext), TimeProvider.System);
+            expenseOne = await service.PostExpenseAsync(actorId,
+                new PostExpenseRequest(branchId, categoryId, source.Id, DateTime.UtcNow, 1200m, "Integration expense one", null, null, null));
+        }
+        ExpenseDto expenseTwo;
+        await using (var expenseContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(expenseContext), TimeProvider.System);
+            expenseTwo = await service.PostExpenseAsync(actorId,
+                new PostExpenseRequest(branchId, categoryId, source.Id, DateTime.UtcNow, 300m, "Integration expense two", null, null, null));
+        }
+
+        OtherIncomeDto income;
+        await using (var incomeContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(incomeContext), TimeProvider.System);
+            income = await service.PostOtherIncomeAsync(actorId,
+                new PostOtherIncomeRequest(branchId, source.Id, DateTime.UtcNow, 800m, "Integration other income", null, null));
+        }
+
+        FinancialTransferDto transfer;
+        await using (var transferContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(transferContext), TimeProvider.System);
+            transfer = await service.PostTransferAsync(actorId,
+                new PostTransferRequest(branchId, source.Id, destination.Id, DateTime.UtcNow, 3000m, null, null));
+        }
+
+        var currentYear = DateTime.UtcNow.Year;
+        Assert.False(string.IsNullOrWhiteSpace(expenseOne.ExpenseNumber));
+        Assert.StartsWith($"EXP-{currentYear}-", expenseOne.ExpenseNumber);
+        Assert.NotEqual(expenseOne.ExpenseNumber, expenseTwo.ExpenseNumber);
+        Assert.False(string.IsNullOrWhiteSpace(income.IncomeNumber));
+        Assert.StartsWith($"INC-{currentYear}-", income.IncomeNumber);
+        Assert.False(string.IsNullOrWhiteSpace(transfer.TransferNumber));
+        Assert.StartsWith($"TRF-{currentYear}-", transfer.TransferNumber);
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+
+        Assert.Equal(1, await verifyContext.Expenses.CountAsync(x => x.Id == expenseOne.Id));
+        Assert.Equal(1, await verifyContext.Expenses.CountAsync(x => x.Id == expenseTwo.Id));
+        Assert.Equal(1, await verifyContext.FinancialLedgerEntries.CountAsync(x => x.ReferenceType == "Expense" && x.ReferenceId == expenseOne.Id));
+        Assert.Equal(-1200m, await verifyContext.FinancialLedgerEntries.Where(x => x.ReferenceId == expenseOne.Id).SumAsync(x => x.Amount));
+        Assert.Equal(-300m, await verifyContext.FinancialLedgerEntries.Where(x => x.ReferenceId == expenseTwo.Id).SumAsync(x => x.Amount));
+
+        Assert.Equal(1, await verifyContext.OtherIncomes.CountAsync(x => x.Id == income.Id));
+        Assert.Equal(1, await verifyContext.FinancialLedgerEntries.CountAsync(x => x.ReferenceType == "OtherIncome" && x.ReferenceId == income.Id));
+        Assert.Equal(800m, await verifyContext.FinancialLedgerEntries.Where(x => x.ReferenceId == income.Id).SumAsync(x => x.Amount));
+
+        Assert.Equal(1, await verifyContext.FinancialTransfers.CountAsync(x => x.Id == transfer.Id));
+        Assert.Equal(2, await verifyContext.FinancialLedgerEntries.CountAsync(x => x.ReferenceType == "FinancialTransfer" && x.ReferenceId == transfer.Id));
+        var sourceTransferEntry = await verifyContext.FinancialLedgerEntries.SingleAsync(x => x.ReferenceId == transfer.Id && x.FinancialAccountId == source.Id);
+        var destinationTransferEntry = await verifyContext.FinancialLedgerEntries.SingleAsync(x => x.ReferenceId == transfer.Id && x.FinancialAccountId == destination.Id);
+        Assert.Equal(FinancialLedgerEntryType.TransferOut, sourceTransferEntry.EntryType);
+        Assert.Equal(-3000m, sourceTransferEntry.Amount);
+        Assert.Equal(FinancialLedgerEntryType.TransferIn, destinationTransferEntry.EntryType);
+        Assert.Equal(3000m, destinationTransferEntry.Amount);
+        Assert.Equal(0m, await verifyContext.FinancialLedgerEntries.Where(x => x.ReferenceId == transfer.Id).SumAsync(x => x.Amount));
+
+        // Opening (10000) - 1200 - 300 + 800 - 3000 = 6300; destination opening (0) + 3000 = 3000.
+        Assert.Equal(6300m, await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == source.Id).SumAsync(x => x.Amount));
+        Assert.Equal(3000m, await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == destination.Id).SumAsync(x => x.Amount));
+
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "Expense" && x.EntityId == expenseOne.Id && x.Action == "ExpensePosted"));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "OtherIncome" && x.EntityId == income.Id && x.Action == "OtherIncomePosted"));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "FinancialTransfer" && x.EntityId == transfer.Id && x.Action == "AccountTransferPosted"));
     }
 
     private static async Task<NpgsqlConnection> OpenConnectionAsync()

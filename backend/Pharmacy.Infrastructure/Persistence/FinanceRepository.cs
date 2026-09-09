@@ -34,9 +34,9 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
     {
         var next = sequence switch
         {
-            "ExpenseNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"ExpenseNumberSequence\"'::regclass)").SingleAsync(ct),
-            "OtherIncomeNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"OtherIncomeNumberSequence\"'::regclass)").SingleAsync(ct),
-            "FinancialTransferNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"FinancialTransferNumberSequence\"'::regclass)").SingleAsync(ct),
+            "ExpenseNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"ExpenseNumberSequence\"'::regclass) AS \"Value\"").SingleAsync(ct),
+            "OtherIncomeNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"OtherIncomeNumberSequence\"'::regclass) AS \"Value\"").SingleAsync(ct),
+            "FinancialTransferNumberSequence" => await context.Database.SqlQueryRaw<long>("SELECT nextval('\"FinancialTransferNumberSequence\"'::regclass) AS \"Value\"").SingleAsync(ct),
             _ => throw new InvalidOperationException("Unknown finance sequence.")
         };
         return $"{prefix}-{date.Year}-{next:000000}";
