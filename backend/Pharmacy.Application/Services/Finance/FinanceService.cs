@@ -244,8 +244,10 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
             var amount = request.Type == FinancialAdjustmentType.Debit ? -Money(request.Amount) : Money(request.Amount);
             if (amount < 0) await EnsureFunds(account.Id, request.Amount, ct);
             var id = Guid.NewGuid();
-            await repository.AddLedgerEntryAsync(Entry(account, request.Type == FinancialAdjustmentType.Debit ? FinancialLedgerEntryType.AdjustmentDebit : FinancialLedgerEntryType.AdjustmentCredit,
-                amount, "FinancialAdjustment", id, request.Reason.Trim(), actorId, AsUtc(request.OccurredAtUtc)), ct);
+            var entry = Entry(account, request.Type == FinancialAdjustmentType.Debit ? FinancialLedgerEntryType.AdjustmentDebit : FinancialLedgerEntryType.AdjustmentCredit,
+                amount, "FinancialAdjustment", id, request.Reason.Trim(), actorId, AsUtc(request.OccurredAtUtc));
+            await repository.AddLedgerEntryAsync(entry, ct);
+            await PostFinancialAdjustmentJournalAsync(actorId, account, entry, ct);
             await Audit(actorId, "FinancialAdjustmentPosted", "FinancialAdjustment", id, new { request.BranchId, request.FinancialAccountId, request.Type, Amount = Money(request.Amount), Reason = request.Reason.Trim() }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -306,6 +308,25 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashTransfer, transfer.Id, transfer.BranchId, transfer.OccurredAtUtc,
             transfer.TransferNumber, $"Account transfer {transfer.TransferNumber}", actorId,
             [new(PaymentAccount(destination.AccountType), transfer.Amount, 0), new(PaymentAccount(source.AccountType), 0, transfer.Amount)]), ct);
+    }
+
+    private async Task PostFinancialAdjustmentJournalAsync(Guid actorId, FinancialAccount account, FinancialLedgerEntry entry, CancellationToken ct)
+    {
+        var amount = Math.Abs(entry.Amount);
+        var accountMapping = PaymentAccount(account.AccountType);
+        var lines = entry.Amount > 0
+            ? new List<JournalLineInput>
+            {
+                new(accountMapping, amount, 0),
+                new(AccountMappingKey.CashBankAdjustmentSuspense, 0, amount)
+            }
+            : new List<JournalLineInput>
+            {
+                new(AccountMappingKey.CashBankAdjustmentSuspense, amount, 0),
+                new(accountMapping, 0, amount)
+            };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.FinancialAccountAdjustment, entry.ReferenceId, entry.BranchId,
+            entry.OccurredAtUtc, entry.ReferenceType, entry.Description, actorId, lines), ct);
     }
 
     private static AccountMappingKey PaymentAccount(FinancialAccountType type) => type == FinancialAccountType.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;

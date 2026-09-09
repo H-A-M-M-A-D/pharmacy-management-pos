@@ -88,10 +88,17 @@ public sealed class SupplierManagementTests
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.AdjustmentCredit && x.Amount == -1500);
         Assert.Equal(-3500, f.Balance);
 
-        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(3, f.Journal.Posted.Count);
+        var journal = Assert.Single(f.Journal.Posted, x => x.SourceType == JournalSourceType.SupplierPayment);
         Assert.Equal(JournalSourceType.SupplierPayment, journal.SourceType);
         Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable).Debit);
         Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Credit);
+        var debitAdjustment = f.Journal.Posted.Single(x => x.SourceType == JournalSourceType.SupplierAdjustment &&
+            x.Lines.Any(line => line.Account == AccountMappingKey.AccountsPayable && line.Credit == 2000));
+        Assert.Equal(2000, debitAdjustment.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayableAdjustmentSuspense).Debit);
+        var creditAdjustment = f.Journal.Posted.Single(x => x.SourceType == JournalSourceType.SupplierAdjustment &&
+            x.Lines.Any(line => line.Account == AccountMappingKey.AccountsPayable && line.Debit == 1500));
+        Assert.Equal(1500, creditAdjustment.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayableAdjustmentSuspense).Credit);
     }
 
     [Fact]

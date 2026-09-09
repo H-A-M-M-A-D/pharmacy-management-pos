@@ -63,5 +63,10 @@ public enum AccountMappingKey
     GeneralExpenseDefault = 10,
     OtherIncomeDefault = 11,
     RetainedEarnings = 12,
-    InventoryAdjustmentGain = 13
+    InventoryAdjustmentGain = 13,
+    AccountsReceivableAdjustmentSuspense = 14,
+    AccountsPayableAdjustmentSuspense = 15,
+    CashBankAdjustmentSuspense = 16,
+    DrawerClearing = 17,
+    CashOverShort = 18
 }

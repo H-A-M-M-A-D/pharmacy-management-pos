@@ -929,7 +929,7 @@ public class PharmacyDbContext : DbContext
         var entity = modelBuilder.Entity<AccountMapping>();
         entity.HasKey(e => e.Id);
         entity.HasIndex(e => e.MappingKey).IsUnique();
-        entity.ToTable(table => table.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 13"));
+        entity.ToTable(table => table.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 18"));
         entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
     }
 

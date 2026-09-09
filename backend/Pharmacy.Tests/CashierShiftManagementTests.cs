@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.CashierShifts;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Domain.Entities;
 
@@ -57,6 +58,39 @@ public sealed class CashierShiftManagementTests
         Assert.Equal(4200, closed.TotalSales);
         Assert.Equal(300, closed.TotalRefunds);
         Assert.Contains(closed.PaymentBreakdown, x => x.PaymentMethod == SalePaymentMethod.Card && x.SalesAmount == 1200);
+
+        Assert.Equal(2, f.Journal.Posted.Count);
+        var cashIn = f.Journal.Posted[0];
+        Assert.Equal(JournalSourceType.CashierDrawerEntry, cashIn.SourceType);
+        Assert.Equal(200, cashIn.Lines.Single(x => x.Account == AccountMappingKey.Cash).Debit);
+        Assert.Equal(200, cashIn.Lines.Single(x => x.Account == AccountMappingKey.DrawerClearing).Credit);
+        var cashOut = f.Journal.Posted[1];
+        Assert.Equal(50, cashOut.Lines.Single(x => x.Account == AccountMappingKey.DrawerClearing).Debit);
+        Assert.Equal(50, cashOut.Lines.Single(x => x.Account == AccountMappingKey.Cash).Credit);
+    }
+
+    [Theory]
+    [InlineData(85, 15, true)]
+    [InlineData(120, 20, false)]
+    public async Task Reconciliation_posts_exact_shortage_or_excess(decimal actualCash, decimal varianceAmount, bool shortage)
+    {
+        var f = new Fixture(PermissionCatalog.CashierShiftOpen, PermissionCatalog.CashierShiftClose, PermissionCatalog.CashierShiftReconcile);
+        var opened = await f.Service.OpenShiftAsync(f.Actor.Id, new(f.Branch.Id, 100, null, null));
+        f.Figures = EmptyFigures();
+        await f.Service.CloseShiftAsync(f.Actor.Id, opened.Id, new(actualCash, null));
+        Assert.Empty(f.Journal.Posted);
+
+        await f.Service.ReconcileShiftAsync(f.Actor.Id, opened.Id, new("manager approved variance"));
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.CashierShiftVariance, journal.SourceType);
+        Assert.Equal(opened.Id, journal.SourceId);
+        var cash = journal.Lines.Single(x => x.Account == AccountMappingKey.Cash);
+        var overShort = journal.Lines.Single(x => x.Account == AccountMappingKey.CashOverShort);
+        Assert.Equal(shortage ? 0 : varianceAmount, cash.Debit);
+        Assert.Equal(shortage ? varianceAmount : 0, cash.Credit);
+        Assert.Equal(shortage ? varianceAmount : 0, overShort.Debit);
+        Assert.Equal(shortage ? 0 : varianceAmount, overShort.Credit);
     }
 
     [Fact]
@@ -127,6 +161,7 @@ public sealed class CashierShiftManagementTests
         public readonly List<CashierShift> Shifts = [];
         public readonly List<AuditLog> Audits = [];
         public readonly Role ManagerRole = new() { Name = RoleCatalog.Manager };
+        public readonly RecordingJournalPostingService Journal = new();
         public User Actor { get; }
         public User Manager { get; }
         public CashierShiftService Service { get; }
@@ -140,7 +175,7 @@ public sealed class CashierShiftManagementTests
             Manager = new User { Username = "manager", NormalizedUsername = "MANAGER", FullName = "Manager", PasswordHash = "hash", BranchId = Branch.Id, RoleId = ManagerRole.Id, Role = ManagerRole };
             Actors.Add(Actor);
             Actors.Add(Manager);
-            Service = new(this, TimeProvider.System);
+            Service = new(this, Journal, TimeProvider.System);
         }
 
         public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => Task.FromResult(Actors.FirstOrDefault(x => x.Id == actorId));
@@ -149,8 +184,16 @@ public sealed class CashierShiftManagementTests
             Task.FromResult(Shifts.FirstOrDefault(x => x.CashierUserId == cashierUserId && x.Status == CashierShiftStatus.Open));
         public Task<CashierShift?> GetShiftAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Shifts.FirstOrDefault(x => x.Id == id));
         public Task AddShiftAsync(CashierShift shift, CancellationToken cancellationToken = default) { Shifts.Add(shift); return Task.CompletedTask; }
-        public Task AddDrawerEntryAsync(CashierShiftDrawerEntry entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task AddPaymentSummaryAsync(CashierShiftPaymentSummary summary, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AddDrawerEntryAsync(CashierShiftDrawerEntry entry, CancellationToken cancellationToken = default)
+        {
+            Shifts.Single(x => x.Id == entry.CashierShiftId).DrawerEntries.Add(entry);
+            return Task.CompletedTask;
+        }
+        public Task AddPaymentSummaryAsync(CashierShiftPaymentSummary summary, CancellationToken cancellationToken = default)
+        {
+            Shifts.Single(x => x.Id == summary.CashierShiftId).PaymentSummaries.Add(summary);
+            return Task.CompletedTask;
+        }
         public Task<ShiftCashFigures> ComputeCashFiguresAsync(Guid branchId, Guid cashierUserId, DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken = default) => Task.FromResult(Figures);
         public Task<PagedResult<CashierShiftListItemDto>> ListShiftsAsync(CashierShiftListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<CashierShiftListItemDto>([], 1, 25, 0));
         public Task<IReadOnlyList<CashierShift>> ListShiftsForDateAsync(Guid branchId, DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CashierShift>>(Shifts.Where(x => x.BranchId == branchId && x.ClosedAtUtc >= fromUtc && x.ClosedAtUtc < toUtc).ToList());
@@ -158,5 +201,15 @@ public sealed class CashierShiftManagementTests
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class RecordingJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            Posted.Add(request);
+            return Task.CompletedTask;
+        }
     }
 }

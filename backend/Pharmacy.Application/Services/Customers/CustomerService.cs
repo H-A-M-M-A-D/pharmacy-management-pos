@@ -199,7 +199,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     {
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            await repository.AddLedgerEntryAsync(new CustomerLedgerEntry
+            var entry = new CustomerLedgerEntry
             {
                 CustomerId = customerId,
                 BranchId = branchId,
@@ -211,7 +211,9 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
                 ReferenceType = referenceType,
                 Notes = Clean(notes),
                 CreatedByUserId = actorId
-            }, ct);
+            };
+            await repository.AddLedgerEntryAsync(entry, ct);
+            await PostCustomerAdjustmentJournalAsync(entry, ct);
             await Audit(actorId, auditAction, "Customer", customerId, null, new { customerId, branchId, type, amount, date }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -222,6 +224,24 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CustomerPayment, payment.Id, payment.BranchId, payment.PaymentDateUtc,
             payment.ReceiptNumber, $"Customer payment {payment.ReceiptNumber}", actor.Id,
             [new(PaymentAccount(payment.PaymentMethod), payment.Amount, 0), new(AccountMappingKey.AccountsReceivable, 0, payment.Amount, CustomerId: payment.CustomerId)]), ct);
+    }
+
+    private async Task PostCustomerAdjustmentJournalAsync(CustomerLedgerEntry entry, CancellationToken ct)
+    {
+        var amount = Math.Abs(entry.Amount);
+        var lines = entry.Amount > 0
+            ? new List<JournalLineInput>
+            {
+                new(AccountMappingKey.AccountsReceivable, amount, 0, CustomerId: entry.CustomerId),
+                new(AccountMappingKey.AccountsReceivableAdjustmentSuspense, 0, amount)
+            }
+            : new List<JournalLineInput>
+            {
+                new(AccountMappingKey.AccountsReceivableAdjustmentSuspense, amount, 0),
+                new(AccountMappingKey.AccountsReceivable, 0, amount, CustomerId: entry.CustomerId)
+            };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CustomerAdjustment, entry.Id, entry.BranchId, UtcNow(),
+            entry.ReferenceType, entry.Notes ?? "Customer balance adjustment", entry.CreatedByUserId ?? throw new InvalidOperationException("Adjustment creator is required."), lines), ct);
     }
 
     private async Task PostCustomerOpeningBalanceJournalAsync(User actor, Customer customer, CustomerLedgerEntry entry, CancellationToken ct)

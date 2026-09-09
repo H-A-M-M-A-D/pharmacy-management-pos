@@ -1,12 +1,18 @@
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Pharmacy.Application.Common;
+using Pharmacy.Application.DTOs.CashierShifts;
+using Pharmacy.Application.DTOs.Customers;
 using Pharmacy.Application.DTOs.Finance;
 using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Application.DTOs.Suppliers;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.CashierShifts;
+using Pharmacy.Application.Services.Customers;
 using Pharmacy.Application.Services.Finance;
 using Pharmacy.Application.Services.Purchasing;
+using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
@@ -1595,8 +1601,8 @@ public sealed class PostgreSqlIntegrationTests
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = 'JournalEntryNumberSequence';
             """));
-        Assert.Equal(29L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"ChartOfAccounts\";"));
-        Assert.Equal(13L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"AccountMappings\";"));
+        Assert.Equal(34L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"ChartOfAccounts\";"));
+        Assert.Equal(18L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"AccountMappings\";"));
         Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM "ChartOfAccounts" WHERE "Code" = '1010' AND "Name" = 'Cash' AND "AccountType" = 1 AND "NormalBalance" = 1;
             """));
@@ -1607,6 +1613,10 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM "AccountMappings" am JOIN "ChartOfAccounts" coa ON coa."Id" = am."ChartOfAccountId"
             WHERE am."MappingKey" = 13 AND coa."Code" = '4091';
+            """));
+        Assert.Equal(5L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "AccountMappings" am JOIN "ChartOfAccounts" coa ON coa."Id" = am."ChartOfAccountId"
+            WHERE (am."MappingKey", coa."Code") IN ((14, '1091'), (15, '2091'), (16, '1092'), (17, '1093'), (18, '6080'));
             """));
         Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM information_schema.table_constraints
@@ -1720,6 +1730,100 @@ public sealed class PostgreSqlIntegrationTests
             Assert.All(entry.Lines, line => Assert.Equal(branchId, line.BranchId));
         });
         Assert.Equal(entries.Count, entries.Select(x => (x.SourceType, x.SourceId)).Distinct().Count());
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Adjustment_and_cash_control_workflows_post_exact_balanced_branch_aware_journals()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("policy-gap-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await InsertCustomerAsync(seedConnection, seedTransaction, customerId, Unique("CUS-POL"), "Policy Customer", Unique("POLICY CUSTOMER"), 10000);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId, Unique("Policy Supplier"), Unique("POLICY SUPPLIER"));
+        await seedTransaction.CommitAsync();
+
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connectionString).Options;
+        await using var context = new PharmacyDbContext(options);
+        var posting = JournalPostingFor(context);
+        var customerService = new CustomerService(new CustomerRepository(context), posting, TimeProvider.System);
+        var supplierService = new SupplierService(new SupplierRepository(context), posting, TimeProvider.System);
+        var financeService = new FinanceService(new FinanceRepository(context), posting, TimeProvider.System);
+        var shiftService = new CashierShiftService(new CashierShiftRepository(context), posting, TimeProvider.System);
+
+        await customerService.AdjustBalanceAsync(actorId, new(customerId, branchId, CustomerAdjustmentType.Debit, 250m, "debit correction", null));
+        await customerService.AdjustBalanceAsync(actorId, new(customerId, branchId, CustomerAdjustmentType.Credit, 40m, "credit correction", null));
+        await supplierService.AdjustBalanceAsync(actorId, new(supplierId, branchId, SupplierAdjustmentType.Debit, 300m, "debit correction", null));
+        await supplierService.AdjustBalanceAsync(actorId, new(supplierId, branchId, SupplierAdjustmentType.Credit, 50m, "credit correction", null));
+
+        var account = await financeService.CreateAccountAsync(actorId, new(branchId, Unique("Policy Cash"), FinancialAccountType.Cash, 1000m, null));
+        var occurredAt = DateTime.UtcNow;
+        await financeService.PostAdjustmentAsync(actorId, new(branchId, account.Id, FinancialAdjustmentType.Debit, 125m, occurredAt, "cash decrease"));
+        await financeService.PostAdjustmentAsync(actorId, new(branchId, account.Id, FinancialAdjustmentType.Credit, 75m, occurredAt, "cash increase"));
+
+        var shift = await shiftService.OpenShiftAsync(actorId, new(branchId, 500m, "Till policy", null));
+        await shiftService.AddDrawerEntryAsync(actorId, shift.Id, new(CashierShiftDrawerEntryType.CashIn, 60m, "additional float"));
+        await shiftService.AddDrawerEntryAsync(actorId, shift.Id, new(CashierShiftDrawerEntryType.CashOut, 20m, "cash removal"));
+        var closedShift = await shiftService.CloseShiftAsync(actorId, shift.Id, new(525m, "short by fifteen"));
+        Assert.Equal(540m, closedShift.ExpectedCash);
+        Assert.Equal(-15m, closedShift.CashVariance);
+        Assert.False(await context.JournalEntries.AnyAsync(x => x.SourceType == JournalSourceType.CashierShiftVariance && x.SourceId == shift.Id));
+        await shiftService.ReconcileShiftAsync(actorId, shift.Id, new("approved shortage"));
+
+        context.ChangeTracker.Clear();
+        var entries = await context.JournalEntries.AsNoTracking().Include(x => x.Lines)
+            .Where(x => x.BranchId == branchId && x.SourceType >= JournalSourceType.CustomerAdjustment)
+            .OrderBy(x => x.EntryNumber).ToListAsync();
+        Assert.Equal(9, entries.Count);
+        Assert.All(entries, entry =>
+        {
+            Assert.Equal(branchId, entry.BranchId);
+            Assert.Equal(entry.Lines.Sum(x => x.Debit), entry.Lines.Sum(x => x.Credit));
+            Assert.True(entry.Lines.Sum(x => x.Debit) > 0);
+        });
+        Assert.Equal(entries.Count, entries.Select(x => (x.SourceType, x.SourceId)).Distinct().Count());
+
+        var mappings = await context.AccountMappings.AsNoTracking().ToDictionaryAsync(x => x.MappingKey, x => x.ChartOfAccountId);
+        JournalEntry Entry(JournalSourceType type, decimal amount, AccountMappingKey accountKey, bool debit) =>
+            Assert.Single(entries, entry => entry.SourceType == type && entry.Lines.Any(line =>
+                line.ChartOfAccountId == mappings[accountKey] && (debit ? line.Debit : line.Credit) == amount));
+        void Line(JournalEntry entry, AccountMappingKey key, decimal debit, decimal credit)
+        {
+            var line = Assert.Single(entry.Lines, x => x.ChartOfAccountId == mappings[key]);
+            Assert.Equal(debit, line.Debit);
+            Assert.Equal(credit, line.Credit);
+        }
+
+        var customerDebit = Entry(JournalSourceType.CustomerAdjustment, 250m, AccountMappingKey.AccountsReceivable, true);
+        Line(customerDebit, AccountMappingKey.AccountsReceivableAdjustmentSuspense, 0, 250m);
+        var customerCredit = Entry(JournalSourceType.CustomerAdjustment, 40m, AccountMappingKey.AccountsReceivable, false);
+        Line(customerCredit, AccountMappingKey.AccountsReceivableAdjustmentSuspense, 40m, 0);
+        var supplierDebit = Entry(JournalSourceType.SupplierAdjustment, 300m, AccountMappingKey.AccountsPayable, false);
+        Line(supplierDebit, AccountMappingKey.AccountsPayableAdjustmentSuspense, 300m, 0);
+        var supplierCredit = Entry(JournalSourceType.SupplierAdjustment, 50m, AccountMappingKey.AccountsPayable, true);
+        Line(supplierCredit, AccountMappingKey.AccountsPayableAdjustmentSuspense, 0, 50m);
+        var cashDecrease = Entry(JournalSourceType.FinancialAccountAdjustment, 125m, AccountMappingKey.Cash, false);
+        Line(cashDecrease, AccountMappingKey.CashBankAdjustmentSuspense, 125m, 0);
+        var cashIncrease = Entry(JournalSourceType.FinancialAccountAdjustment, 75m, AccountMappingKey.Cash, true);
+        Line(cashIncrease, AccountMappingKey.CashBankAdjustmentSuspense, 0, 75m);
+        var drawerIn = Entry(JournalSourceType.CashierDrawerEntry, 60m, AccountMappingKey.Cash, true);
+        Line(drawerIn, AccountMappingKey.DrawerClearing, 0, 60m);
+        var drawerOut = Entry(JournalSourceType.CashierDrawerEntry, 20m, AccountMappingKey.Cash, false);
+        Line(drawerOut, AccountMappingKey.DrawerClearing, 20m, 0);
+        var shortage = Entry(JournalSourceType.CashierShiftVariance, 15m, AccountMappingKey.Cash, false);
+        Line(shortage, AccountMappingKey.CashOverShort, 15m, 0);
+
+        var trialBalance = await new AccountingService(new AccountingRepository(context), TimeProvider.System)
+            .GetTrialBalanceAsync(actorId, DateTime.UtcNow.AddMinutes(1), branchId);
+        Assert.Equal(trialBalance.TotalDebit, trialBalance.TotalCredit);
     }
 
     [PostgreSqlFact]

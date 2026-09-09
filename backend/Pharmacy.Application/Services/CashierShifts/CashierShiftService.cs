@@ -4,11 +4,12 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.CashierShifts;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.CashierShifts;
 
-public sealed class CashierShiftService(ICashierShiftRepository repository, TimeProvider timeProvider) : ICashierShiftService
+public sealed class CashierShiftService(ICashierShiftRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : ICashierShiftService
 {
     public async Task<CashierShiftDto> OpenShiftAsync(Guid actorId, OpenCashierShiftRequest request, CancellationToken cancellationToken = default)
     {
@@ -66,7 +67,7 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, Time
                 CreatedByUserId = actorId
             };
             await repository.AddDrawerEntryAsync(entry, ct);
-            shift.DrawerEntries.Add(entry);
+            await PostDrawerEntryJournalAsync(shift, entry, ct);
             await Audit(actorId, "CashierShiftDrawerEntryAdded", "CashierShift", shift.Id, new { entry.EntryType, entry.Amount, entry.Reason }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -101,7 +102,6 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, Time
             {
                 var summary = new CashierShiftPaymentSummary { CashierShiftId = shift.Id, PaymentMethod = method, SalesAmount = amounts.Sales, RefundsAmount = amounts.Refunds };
                 await repository.AddPaymentSummaryAsync(summary, ct);
-                shift.PaymentSummaries.Add(summary);
             }
 
             shift.Status = CashierShiftStatus.Closed;
@@ -134,6 +134,7 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, Time
             shift.ReconciledByUserId = actorId;
             shift.ReconciledAtUtc = UtcNow();
             shift.ReconciliationNotes = Clean(request.ReconciliationNotes);
+            await PostShiftVarianceJournalAsync(shift, actorId, ct);
             await Audit(actorId, "CashierShiftReconciled", "CashierShift", shift.Id, new { shift.CashVariance, request.ReconciliationNotes }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -227,6 +228,43 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, Time
             breakdown.Sum(x => x.SalesAmount), breakdown.Sum(x => x.RefundsAmount), cashSales, cashRefunds, customerCash,
             cashPaidOut, manualIn, manualOut, breakdown,
             shift.DrawerEntries.OrderBy(x => x.CreatedAt).Select(x => new CashierShiftDrawerEntryDto(x.Id, x.EntryType, x.Amount, x.Reason, x.CreatedByUser?.FullName ?? string.Empty, x.CreatedAt)).ToList());
+    }
+
+    private async Task PostDrawerEntryJournalAsync(CashierShift shift, CashierShiftDrawerEntry entry, CancellationToken ct)
+    {
+        var lines = entry.EntryType == CashierShiftDrawerEntryType.CashIn
+            ? new List<JournalLineInput>
+            {
+                new(AccountMappingKey.Cash, entry.Amount, 0),
+                new(AccountMappingKey.DrawerClearing, 0, entry.Amount)
+            }
+            : new List<JournalLineInput>
+            {
+                new(AccountMappingKey.DrawerClearing, entry.Amount, 0),
+                new(AccountMappingKey.Cash, 0, entry.Amount)
+            };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashierDrawerEntry, entry.Id, shift.BranchId, entry.CreatedAt,
+            entry.EntryType.ToString(), entry.Reason, entry.CreatedByUserId, lines), ct);
+    }
+
+    private async Task PostShiftVarianceJournalAsync(CashierShift shift, Guid actorId, CancellationToken ct)
+    {
+        var variance = shift.CashVariance ?? 0;
+        if (variance == 0) return;
+        var amount = Math.Abs(variance);
+        var lines = variance > 0
+            ? new List<JournalLineInput>
+            {
+                new(AccountMappingKey.Cash, amount, 0),
+                new(AccountMappingKey.CashOverShort, 0, amount)
+            }
+            : new List<JournalLineInput>
+            {
+                new(AccountMappingKey.CashOverShort, amount, 0),
+                new(AccountMappingKey.Cash, 0, amount)
+            };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashierShiftVariance, shift.Id, shift.BranchId,
+            shift.ReconciledAtUtc!.Value, "Shift reconciliation", $"Cash variance for cashier shift {shift.Id}", actorId, lines), ct);
     }
 
     private async Task<CashierShift> RequiredShift(Guid id, CancellationToken ct) =>

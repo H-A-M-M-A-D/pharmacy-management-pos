@@ -89,13 +89,20 @@ public sealed class CustomerManagementTests
         Assert.Equal(-3500, f.Balance);
         Assert.Single(f.Payments);
 
-        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(3, f.Journal.Posted.Count);
+        var journal = Assert.Single(f.Journal.Posted, x => x.SourceType == JournalSourceType.CustomerPayment);
         Assert.Equal(JournalSourceType.CustomerPayment, journal.SourceType);
         Assert.Equal(f.Payments.Single().Id, journal.SourceId);
         Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Debit);
         var receivable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivable);
         Assert.Equal(4000, receivable.Credit);
         Assert.Equal(f.Customer!.Id, receivable.CustomerId);
+        var debitAdjustment = f.Journal.Posted.Single(x => x.SourceType == JournalSourceType.CustomerAdjustment &&
+            x.Lines.Any(line => line.Account == AccountMappingKey.AccountsReceivable && line.Debit == 2000));
+        Assert.Equal(2000, debitAdjustment.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivableAdjustmentSuspense).Credit);
+        var creditAdjustment = f.Journal.Posted.Single(x => x.SourceType == JournalSourceType.CustomerAdjustment &&
+            x.Lines.Any(line => line.Account == AccountMappingKey.AccountsReceivable && line.Credit == 1500));
+        Assert.Equal(1500, creditAdjustment.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivableAdjustmentSuspense).Debit);
     }
 
     [Fact]

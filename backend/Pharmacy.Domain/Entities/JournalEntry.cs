@@ -60,5 +60,10 @@ public enum JournalSourceType
     StockWriteOff = 10,
     StockAdjustment = 11,
     OpeningBalance = 12,
-    ManualVoucher = 13
+    ManualVoucher = 13,
+    CustomerAdjustment = 14,
+    SupplierAdjustment = 15,
+    FinancialAccountAdjustment = 16,
+    CashierDrawerEntry = 17,
+    CashierShiftVariance = 18
 }

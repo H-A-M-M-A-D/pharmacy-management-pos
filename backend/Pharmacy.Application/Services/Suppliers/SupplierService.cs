@@ -189,7 +189,7 @@ public sealed class SupplierService(ISupplierRepository repository, IJournalPost
     {
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            await repository.AddLedgerEntryAsync(new SupplierLedgerEntry
+            var entry = new SupplierLedgerEntry
             {
                 SupplierId = supplierId,
                 BranchId = branchId,
@@ -202,7 +202,9 @@ public sealed class SupplierService(ISupplierRepository repository, IJournalPost
                 Notes = Clean(notes),
                 CreatedByUserId = actorId,
                 FinancialAccountId = financialAccountId
-            }, ct);
+            };
+            await repository.AddLedgerEntryAsync(entry, ct);
+            await PostSupplierAdjustmentJournalAsync(entry, ct);
             await Audit(actorId, auditAction, "Supplier", supplierId, null, new { supplierId, branchId, type, amount, date }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -213,6 +215,24 @@ public sealed class SupplierService(ISupplierRepository repository, IJournalPost
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.SupplierPayment, entry.Id, request.BranchId, timeProvider.GetUtcNow().UtcDateTime,
             entry.ReferenceNumber, $"Supplier payment to {request.SupplierId}", actor.Id,
             [new(AccountMappingKey.AccountsPayable, request.Amount, 0, SupplierId: request.SupplierId), new(PaymentAccount(request.PaymentMethod), 0, request.Amount)]), ct);
+    }
+
+    private async Task PostSupplierAdjustmentJournalAsync(SupplierLedgerEntry entry, CancellationToken ct)
+    {
+        var amount = Math.Abs(entry.Amount);
+        var lines = entry.Amount > 0
+            ? new List<JournalLineInput>
+            {
+                new(AccountMappingKey.AccountsPayableAdjustmentSuspense, amount, 0),
+                new(AccountMappingKey.AccountsPayable, 0, amount, SupplierId: entry.SupplierId)
+            }
+            : new List<JournalLineInput>
+            {
+                new(AccountMappingKey.AccountsPayable, amount, 0, SupplierId: entry.SupplierId),
+                new(AccountMappingKey.AccountsPayableAdjustmentSuspense, 0, amount)
+            };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.SupplierAdjustment, entry.Id, entry.BranchId, timeProvider.GetUtcNow().UtcDateTime,
+            entry.ReferenceType, entry.Notes ?? "Supplier balance adjustment", entry.CreatedByUserId ?? throw new InvalidOperationException("Adjustment creator is required."), lines), ct);
     }
 
     private async Task PostSupplierOpeningBalanceJournalAsync(User actor, Supplier supplier, SupplierLedgerEntry entry, CancellationToken ct)
