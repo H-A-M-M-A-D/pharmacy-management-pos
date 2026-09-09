@@ -372,6 +372,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('SC-2026-000001'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('open_stock_count_session-1')));
     await tester.tap(find.byKey(const Key('open_stock_count_session-1')));
     await tester.pumpAndSettle();
     expect(find.text('Start Counting'), findsOneWidget);
@@ -419,6 +420,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('close_cashier_shift')), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('cashier_shift_cash_in')));
     await tester.tap(find.byKey(const Key('cashier_shift_cash_in')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('drawer_entry_amount')), '50');
@@ -427,13 +429,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('float top-up'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('close_cashier_shift')));
     await tester.tap(find.byKey(const Key('close_cashier_shift')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('close_shift_actual_cash')), '100');
     await tester.tap(find.byKey(const Key('save_close_shift')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('reconcile_cashier_shift')), findsOneWidget);
 
+    // A closed shift is no longer "my open shift" (matches the real backend's
+    // GetOpenShiftForCashierAsync, which only ever returns open shifts), so
+    // the My Shift tab correctly drops back to its empty state here.
+    // Reconciliation happens from Shift History > View, per the production flow.
+    expect(find.text('You do not have an open cashier shift.'), findsOneWidget);
+
+    await tester.tap(find.text('Shift History'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('open_cashier_shift_shift-1')));
+    await tester.tap(find.byKey(const Key('open_cashier_shift_shift-1')));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const Key('reconcile_cashier_shift')));
     await tester.tap(find.byKey(const Key('reconcile_cashier_shift')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('confirm_reconcile_shift')));
@@ -1268,7 +1283,34 @@ class FakeApi implements PharmacyApi {
     this.purchaseError = false,
     this.reportError = false,
     this.reportDelay = Duration.zero,
-  });
+  }) {
+    _stockCountSession = StockCountSession(
+      id: 'session-1',
+      countNumber: 'SC-2026-000001',
+      branchId: user.branch.id,
+      branchName: user.branch.name,
+      countDate: DateTime(2026, 9, 9),
+      status: 'Draft',
+      scope: 'Full',
+      createdBy: user.fullName,
+      totalItems: 1,
+      countedItems: 0,
+      varianceItems: 0,
+      items: [
+        StockCountLine(
+          id: 'line-1',
+          productId: 'product-1',
+          productName: 'Panadol Extra',
+          sku: 'MED-001',
+          productBatchId: 'batch-1',
+          batchNumber: 'B-001',
+          expiryDate: _lineExpiry,
+          systemQuantity: 10,
+          unitCostSnapshot: 8,
+        ),
+      ],
+    );
+  }
 
   CurrentUser user;
   final bool loginError;
@@ -1837,32 +1879,7 @@ class FakeApi implements PharmacyApi {
 
   static final DateTime _lineExpiry = DateTime(2026, 10, 1);
 
-  StockCountSession _stockCountSession = StockCountSession(
-    id: 'session-1',
-    countNumber: 'SC-2026-000001',
-    branchId: user.branch.id,
-    branchName: user.branch.name,
-    countDate: DateTime(2026, 9, 9),
-    status: 'Draft',
-    scope: 'Full',
-    createdBy: user.fullName,
-    totalItems: 1,
-    countedItems: 0,
-    varianceItems: 0,
-    items: [
-      StockCountLine(
-        id: 'line-1',
-        productId: 'product-1',
-        productName: 'Panadol Extra',
-        sku: 'MED-001',
-        productBatchId: 'batch-1',
-        batchNumber: 'B-001',
-        expiryDate: _lineExpiry,
-        systemQuantity: 10,
-        unitCostSnapshot: 8,
-      ),
-    ],
-  );
+  late StockCountSession _stockCountSession;
 
   @override
   Future<PagedStockCountSessions> listStockCountSessions(

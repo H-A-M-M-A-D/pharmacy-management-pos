@@ -60,7 +60,7 @@ class _AccountsDashboardState extends State<AccountsDashboard> {
 }
 class _Metric extends StatelessWidget {
   const _Metric(this.label, this.value, this.icon); final String label; final double value; final IconData icon;
-  @override Widget build(BuildContext context) => SizedBox(width: 210, height: 112, child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Icon(icon, size: 20), Text(label), Text(money(value), style: Theme.of(context).textTheme.titleMedium)]))));
+  @override Widget build(BuildContext context) => SizedBox(width: 210, child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, size: 20), const SizedBox(height: 10), Text(label), const SizedBox(height: 4), Text(money(value), style: Theme.of(context).textTheme.titleMedium)]))));
 }
 
 class GeneralLedgerView extends StatefulWidget {

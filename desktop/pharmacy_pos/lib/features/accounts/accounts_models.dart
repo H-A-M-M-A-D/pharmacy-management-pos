@@ -106,7 +106,8 @@ class StatementRow {
   final String code, name;
   final double amount;
   factory StatementRow.fromJson(Map<String, dynamic> json) => StatementRow(
-    code: json['accountCode'] as String? ?? '', name: json['accountName'] as String? ?? '', amount: amount(json['amount']),
+    code: json['accountCode'] as String? ?? '', name: json['accountName'] as String? ?? '',
+    amount: (json['amount'] as num?)?.toDouble() ?? 0,
   );
 }
 

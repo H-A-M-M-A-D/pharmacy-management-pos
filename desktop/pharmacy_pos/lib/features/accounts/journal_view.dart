@@ -162,12 +162,24 @@ class _ManualJournalDialogState extends State<_ManualJournalDialog> {
   Future<void> _post() async {
     final meaningful = _lines.where((x) => (double.tryParse(x.debit.text) ?? 0) > 0 || (double.tryParse(x.credit.text) ?? 0) > 0).toList();
     String? validation;
-    if (_description.text.trim().isEmpty) validation = 'Description is required.';
-    else if (meaningful.length < 2) validation = 'At least two meaningful lines are required.';
-    else if (meaningful.any((x) => x.accountId == null)) validation = 'Select an account for every line.';
-    else if (meaningful.any((x) { final d = double.tryParse(x.debit.text) ?? 0, c = double.tryParse(x.credit.text) ?? 0; return d < 0 || c < 0 || (d > 0 && c > 0); })) validation = 'Each line must contain one non-negative debit or credit.';
-    else if (debit <= 0 || (debit - credit).abs() >= .005) validation = 'Total debit must exactly equal total credit.';
-    if (validation != null) { setState(() => _error = validation); return; }
+    if (_description.text.trim().isEmpty) {
+      validation = 'Description is required.';
+    } else if (meaningful.length < 2) {
+      validation = 'At least two meaningful lines are required.';
+    } else if (meaningful.any((x) => x.accountId == null)) {
+      validation = 'Select an account for every line.';
+    } else if (meaningful.any((x) {
+      final d = double.tryParse(x.debit.text) ?? 0, c = double.tryParse(x.credit.text) ?? 0;
+      return d < 0 || c < 0 || (d > 0 && c > 0);
+    })) {
+      validation = 'Each line must contain one non-negative debit or credit.';
+    } else if (debit <= 0 || (debit - credit).abs() >= .005) {
+      validation = 'Total debit must exactly equal total credit.';
+    }
+    if (validation != null) {
+      setState(() => _error = validation);
+      return;
+    }
     final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: const Text('Post this journal?'), content: Text('Debit ${money(debit)} and credit ${money(credit)}. This cannot be edited or deleted after posting.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Back')), FilledButton(key: const Key('confirm_manual_journal'), onPressed: () => Navigator.pop(context, true), child: const Text('Post permanently'))]));
     if (confirmed != true) return;
     setState(() { _saving = true; _error = null; });
