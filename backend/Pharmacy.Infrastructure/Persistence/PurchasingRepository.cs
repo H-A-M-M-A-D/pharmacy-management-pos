@@ -215,7 +215,27 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
     {
         await using var tx = await context.Database.BeginTransactionAsync(isolationLevel, cancellationToken);
         try { await operation(cancellationToken); await tx.CommitAsync(cancellationToken); }
+        catch (Exception ex) when (IsSerializationConflict(ex))
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw new ResourceConflictException("This purchase return could not be completed because the same stock was changed by another operation at the same time. Please retry.");
+        }
         catch { await tx.RollbackAsync(cancellationToken); throw; }
+    }
+
+    // Under IsolationLevel.Serializable, a genuine concurrent-update conflict surfaces from
+    // Postgres as SqlState 40001/40P01, but EF Core's default (non-retrying) execution strategy
+    // recognizes that as transient and rewraps it one level deeper in InvalidOperationException
+    // before it reaches here - so the PostgresException is not always DbUpdateException's direct
+    // InnerException. Walk the whole chain instead of checking one fixed level.
+    private static bool IsSerializationConflict(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+                return true;
+        }
+        return false;
     }
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)

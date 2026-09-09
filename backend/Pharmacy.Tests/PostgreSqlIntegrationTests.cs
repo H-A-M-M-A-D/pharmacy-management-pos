@@ -309,6 +309,99 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
+    public async Task Purchase_return_concurrent_requests_against_the_same_batch_resolve_safely_without_unhandled_500()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction,
+            "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='PurchaseManager';");
+
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId,
+            Unique("pr-conc-supplier"), Unique("PR-CONC-SUPPLIER"));
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("PR-CONC"), null, productId);
+        var username = Unique("pr-conc-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username,
+            username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        // Exactly one final returnable quantity (10 paid, 0 bonus) so two competing
+        // full-quantity returns against it cannot both succeed.
+        var receiptDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var receiptRequest = new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-CONC"), receiptDate, null,
+            [new GoodsReceiptItemRequest(productId, null, "B-PR-CONC", null, receiptDate.AddDays(365), 10, 0, 50m, 60m, 0, 0)]);
+        GoodsReceiptDetailsDto receipt;
+        await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            receipt = await service.PostGoodsReceiptAsync(actorId, receiptRequest);
+        }
+        var itemId = receipt.Items.Single().Id;
+        var raceRequest = new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null,
+            [new PurchaseReturnItemRequest(itemId, 10, 0)]);
+
+        // Each attempt gets its own DbContext/connection, mirroring two independent
+        // HTTP requests, and both are launched without awaiting between them so their
+        // Serializable transactions can genuinely overlap.
+        async Task<(PurchaseReturnDetailsDto? Result, Exception? Error)> AttemptAsync()
+        {
+            await using var raceContext = new PharmacyDbContext(Options(connectionString));
+            var service = new PurchasingService(new PurchasingRepository(raceContext), TimeProvider.System);
+            try { return (await service.PostPurchaseReturnAsync(actorId, receipt.Id, raceRequest), null); }
+            catch (Exception ex) { return (null, ex); }
+        }
+
+        var outcomes = await Task.WhenAll(Task.Run(AttemptAsync), Task.Run(AttemptAsync));
+
+        var winners = outcomes.Where(x => x.Result is not null).ToList();
+        var losers = outcomes.Where(x => x.Error is not null).ToList();
+        Assert.Single(winners);
+        Assert.Single(losers);
+
+        // Whether the loser lost a genuine Postgres 40001 race (now mapped by
+        // ExecuteInTransactionAsync) or simply observed the depleted quantity after the
+        // winner committed, it must always surface as the application's own safe
+        // conflict - never a raw/unhandled Postgres or EF exception (HTTP 500).
+        var loserError = Assert.IsType<ResourceConflictException>(losers[0].Error);
+        Assert.True(
+            loserError.Message.Contains("remain returnable", StringComparison.OrdinalIgnoreCase) ||
+            loserError.Message.Contains("changed by another operation", StringComparison.OrdinalIgnoreCase),
+            $"Unexpected conflict message: {loserError.Message}");
+
+        var winner = winners[0].Result!;
+        Assert.Equal(500m, winner.NetSupplierCredit);
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var batch = await verifyContext.ProductBatches.AsNoTracking().SingleAsync(x => x.ProductId == productId);
+        var inventory = await verifyContext.Inventory.AsNoTracking().SingleAsync(x => x.ProductId == productId);
+        Assert.Equal(0, batch.QuantityAvailable);
+        Assert.Equal(0, inventory.QuantityInStock);
+
+        Assert.Equal(1, await verifyContext.PurchaseReturns.CountAsync(x => x.OriginalGoodsReceiptId == receipt.Id));
+        Assert.Equal(1, await verifyContext.StockMovements.CountAsync(x =>
+            x.ProductId == productId && x.MovementType == StockMovementType.PurchaseReturn));
+        Assert.Equal(-10, await verifyContext.StockMovements.Where(x =>
+            x.ProductId == productId && x.MovementType == StockMovementType.PurchaseReturn).SumAsync(x => x.Quantity));
+        Assert.Equal(1, await verifyContext.SupplierLedgerEntries.CountAsync(x =>
+            x.SupplierId == supplierId && x.EntryType == SupplierLedgerEntryType.PurchaseReturn));
+        Assert.Equal(-500m, await verifyContext.SupplierLedgerEntries
+            .Where(x => x.ReferenceId == winner.Id).SumAsync(x => x.Amount));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x =>
+            x.EntityType == "PurchaseReturn" && x.EntityId == winner.Id && x.Action == "PurchaseReturnPosted"));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
     public async Task Sale_payments_generate_exact_financial_entries_without_mutating_live_tracker_enumeration()
     {
         await using var connection = await OpenConnectionAsync();
