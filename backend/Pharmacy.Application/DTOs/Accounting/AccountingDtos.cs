@@ -1,4 +1,5 @@
 using Pharmacy.Domain.Entities;
+using Pharmacy.Application.DTOs.Users;
 
 namespace Pharmacy.Application.DTOs.Accounting;
 
@@ -38,7 +39,30 @@ public sealed record JournalEntryListItemDto(
 
 public sealed record JournalEntryListQuery(
     int Page = 1, int PageSize = 25, Guid? BranchId = null, JournalSourceType? SourceType = null,
-    DateTime? FromUtc = null, DateTime? ToUtc = null, Guid? ChartOfAccountId = null);
+    DateTime? FromUtc = null, DateTime? ToUtc = null, Guid? ChartOfAccountId = null, string? Search = null);
 
-public sealed record TrialBalanceRowDto(Guid ChartOfAccountId, string AccountCode, string AccountName, AccountType AccountType, decimal Debit, decimal Credit);
+public sealed record TrialBalanceRowDto(Guid ChartOfAccountId, string AccountCode, string AccountName, AccountType AccountType, NormalBalance NormalBalance, decimal Debit, decimal Credit);
 public sealed record TrialBalanceDto(DateTime AsOfUtc, IReadOnlyList<TrialBalanceRowDto> Rows, decimal TotalDebit, decimal TotalCredit);
+
+public sealed record GeneralLedgerQuery(
+    Guid ChartOfAccountId, int Page = 1, int PageSize = 50, Guid? BranchId = null,
+    JournalSourceType? SourceType = null, DateTime? FromUtc = null, DateTime? ToUtc = null);
+public sealed record GeneralLedgerLineDto(
+    Guid JournalEntryId, string EntryNumber, DateTime EntryDateUtc, JournalSourceType SourceType,
+    string? Reference, string Description, decimal Debit, decimal Credit, decimal RunningBalance);
+public sealed record GeneralLedgerDto(
+    Guid ChartOfAccountId, string AccountCode, string AccountName, NormalBalance NormalBalance,
+    decimal OpeningBalance, decimal TotalDebit, decimal TotalCredit, decimal ClosingBalance,
+    PagedResult<GeneralLedgerLineDto> Entries);
+
+public sealed record FinancialStatementRowDto(Guid ChartOfAccountId, string AccountCode, string AccountName, decimal Amount);
+public sealed record ProfitAndLossDto(
+    DateTime FromUtc, DateTime ToUtc, IReadOnlyList<FinancialStatementRowDto> Revenue,
+    decimal NetRevenue, IReadOnlyList<FinancialStatementRowDto> CostOfGoodsSold, decimal TotalCostOfGoodsSold,
+    decimal GrossProfit, IReadOnlyList<FinancialStatementRowDto> OperatingExpenses,
+    decimal TotalOperatingExpenses, decimal NetProfit);
+public sealed record BalanceSheetDto(
+    DateTime AsOfUtc, IReadOnlyList<FinancialStatementRowDto> Assets, decimal TotalAssets,
+    IReadOnlyList<FinancialStatementRowDto> Liabilities, decimal TotalLiabilities,
+    IReadOnlyList<FinancialStatementRowDto> Equity, decimal AccountEquity,
+    decimal CurrentPeriodEarnings, decimal TotalEquity, bool IsBalanced);

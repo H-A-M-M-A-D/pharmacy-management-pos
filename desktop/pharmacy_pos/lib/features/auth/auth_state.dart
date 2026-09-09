@@ -142,6 +142,18 @@ class AuthState extends ChangeNotifier {
     String method = 'GET',
     Map<String, dynamic>? body,
   }) => _api.administration(_requiredToken, path, method: method, body: body);
+  Future<dynamic> accounting(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.accounting(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
   Future<void> signOutEverywhere() async {
     await administration('sessions/revoke', method: 'POST');
     await logout();
@@ -276,8 +288,8 @@ class AuthState extends ChangeNotifier {
   ) => _api.updateSupplier(_requiredToken, id, values);
   Future<void> setSupplierActive(String id, bool active) =>
       _api.setSupplierActive(_requiredToken, id, active);
-  Future<PagedSupplierLedger> supplierLedger(String id) =>
-      _api.supplierLedger(_requiredToken, id);
+  Future<PagedSupplierLedger> supplierLedger(String id, {DateTime? from, DateTime? to, String? branchId}) =>
+      _api.supplierLedger(_requiredToken, id, from: from, to: to, branchId: branchId);
   Future<void> recordSupplierPayment(String id, Map<String, dynamic> values) =>
       _api.recordSupplierPayment(_requiredToken, id, values);
   Future<void> adjustSupplierBalance(String id, Map<String, dynamic> values) =>
@@ -296,8 +308,8 @@ class AuthState extends ChangeNotifier {
   ) => _api.updateCustomer(_requiredToken, id, values);
   Future<void> setCustomerActive(String id, bool active) =>
       _api.setCustomerActive(_requiredToken, id, active);
-  Future<PagedCustomerLedger> customerLedger(String id) =>
-      _api.customerLedger(_requiredToken, id);
+  Future<PagedCustomerLedger> customerLedger(String id, {DateTime? from, DateTime? to, String? branchId}) =>
+      _api.customerLedger(_requiredToken, id, from: from, to: to, branchId: branchId);
   Future<void> recordCustomerPayment(String id, Map<String, dynamic> values) =>
       _api.recordCustomerPayment(_requiredToken, id, values);
   Future<void> adjustCustomerBalance(String id, Map<String, dynamic> values) =>

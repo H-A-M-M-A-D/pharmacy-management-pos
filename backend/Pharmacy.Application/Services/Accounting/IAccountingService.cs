@@ -19,4 +19,7 @@ public interface IAccountingService
     Task<JournalEntryDto> GetJournalEntryAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default);
     Task<PagedResult<JournalEntryListItemDto>> ListJournalEntriesAsync(Guid actorId, JournalEntryListQuery query, CancellationToken cancellationToken = default);
     Task<TrialBalanceDto> GetTrialBalanceAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<GeneralLedgerDto> GetGeneralLedgerAsync(Guid actorId, GeneralLedgerQuery query, CancellationToken cancellationToken = default);
+    Task<ProfitAndLossDto> GetProfitAndLossAsync(Guid actorId, DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<BalanceSheetDto> GetBalanceSheetAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
 }

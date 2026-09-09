@@ -1015,6 +1015,163 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     await tester.pumpAndSettle();
   });
+
+  testWidgets('accounts navigation follows accounting permissions', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Accounts'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'accounts.coa.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Accounts'), findsOneWidget);
+  });
+
+  testWidgets(
+    'chart of accounts renders accounts and validates new account form',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'accounts.coa.view', 'accounts.coa.manage'},
+      );
+      await _openAccounts(tester, fixture);
+
+      expect(find.text('Cash'), findsWidgets);
+      expect(find.text('Sales Revenue'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('coa_create')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('coa_save')));
+      await tester.pump();
+      expect(find.text('Required'), findsWidgets);
+    },
+  );
+
+  testWidgets('journal list renders posted entries', (tester) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'Journal / Vouchers');
+    expect(find.text('JE-2026-000001'), findsOneWidget);
+    expect(find.text('Sale'), findsOneWidget);
+  });
+
+  testWidgets('posted journal detail is read only', (tester) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'Journal / Vouchers');
+    expect(find.byKey(const Key('manual_journal_create')), findsNothing);
+
+    await tester.tap(find.text('JE-2026-000001'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('posted_journal_read_only')), findsOneWidget);
+    expect(
+      find.text('Posted journals are permanent and read-only.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('manual journal requires total debit to equal total credit', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'accounts.journal.view', 'accounts.journal.post'},
+    );
+    await _openAccountsTab(tester, fixture, 'Journal / Vouchers');
+
+    await tester.tap(find.byKey(const Key('manual_journal_create')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('manual_journal_description')),
+      'Test entry',
+    );
+    await tester.tap(find.byKey(const Key('manual_line_account_0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1010 · Cash').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('manual_line_debit_0')),
+      '100',
+    );
+
+    await tester.tap(find.byKey(const Key('manual_line_account_1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('4010 · Sales Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('manual_line_credit_1')),
+      '50',
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('manual_journal_post')));
+    await tester.pump();
+    expect(
+      find.text('Total debit must exactly equal total credit.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('general ledger loads account activity with running balance', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'General Ledger');
+    expect(find.text('PKR 500.00'), findsWidgets);
+  });
+
+  testWidgets('trial balance shows balanced totals with no warning', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'Trial Balance');
+
+    expect(find.text('Total Debit  PKR 500.00'), findsOneWidget);
+    expect(find.text('Total Credit  PKR 500.00'), findsOneWidget);
+    expect(find.byKey(const Key('trial_balance_warning')), findsNothing);
+  });
+
+  testWidgets('profit and loss renders revenue through net profit', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'Profit & Loss');
+    expect(find.byKey(const Key('profit_loss_sections')), findsOneWidget);
+    expect(find.text('Net Profit'), findsOneWidget);
+  });
+
+  testWidgets('balance sheet renders the accounting equation as balanced', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'accounts.journal.view'});
+    await _openAccountsTab(tester, fixture, 'Balance Sheet');
+
+    expect(find.text('Total Assets'), findsOneWidget);
+    expect(
+      find.text('Assets do not equal liabilities plus equity'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('receivables and payables render outstanding balances', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'customers.view', 'suppliers.view'},
+    );
+    await _openAccounts(tester, fixture);
+
+    expect(find.text('Ali Customer'), findsOneWidget);
+    expect(find.text('PKR 250.00'), findsOneWidget);
+
+    await tester.tap(find.text('Payables'));
+    await tester.pumpAndSettle();
+    expect(find.text('ABC Pharma'), findsOneWidget);
+    expect(find.text('PKR 10000.00'), findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -1025,6 +1182,30 @@ Future<void> _login(WidgetTester tester) async {
   );
   await tester.tap(find.byKey(const Key('login_submit')));
   await tester.pumpAndSettle();
+}
+
+Future<void> _openAccounts(WidgetTester tester, TestFixture fixture) async {
+  tester.view.physicalSize = const Size(1600, 1000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(fixture.app);
+  await tester.pumpAndSettle();
+  await _login(tester);
+  await tester.tap(find.text('Accounts'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openAccountsTab(
+  WidgetTester tester,
+  TestFixture fixture,
+  String tab,
+) async {
+  await _openAccounts(tester, fixture);
+  if (tab != 'Dashboard') {
+    await tester.tap(find.text(tab));
+    await tester.pumpAndSettle();
+  }
 }
 
 class TestFixture {
@@ -1272,7 +1453,13 @@ class FakeApi implements PharmacyApi {
   Future<void> setCustomerActive(String token, String id, bool active) async {}
 
   @override
-  Future<PagedCustomerLedger> customerLedger(String token, String id) async =>
+  Future<PagedCustomerLedger> customerLedger(
+    String token,
+    String id, {
+    DateTime? from,
+    DateTime? to,
+    String? branchId,
+  }) async =>
       PagedCustomerLedger(
         items: [
           CustomerLedgerItem(
@@ -2073,7 +2260,13 @@ class FakeApi implements PharmacyApi {
   Future<void> setSupplierActive(String token, String id, bool active) async {}
 
   @override
-  Future<PagedSupplierLedger> supplierLedger(String token, String id) async =>
+  Future<PagedSupplierLedger> supplierLedger(
+    String token,
+    String id, {
+    DateTime? from,
+    DateTime? to,
+    String? branchId,
+  }) async =>
       PagedSupplierLedger(
         items: [
           SupplierLedgerItem(
@@ -2677,6 +2870,228 @@ class FakeApi implements PharmacyApi {
       'timeZone': 'Asia/Karachi',
       'currency': 'PKR',
     };
+  }
+
+  Map<String, dynamic> get cashAccount => <String, dynamic>{
+    'id': 'account-cash',
+    'code': '1010',
+    'name': 'Cash',
+    'parentAccountId': null,
+    'parentAccountName': null,
+    'accountType': 'Asset',
+    'normalBalance': 'Debit',
+    'isPostingAccount': true,
+    'isActive': true,
+    'description': null,
+  };
+
+  Map<String, dynamic> get salesAccount => <String, dynamic>{
+    'id': 'account-sales',
+    'code': '4010',
+    'name': 'Sales Revenue',
+    'parentAccountId': null,
+    'parentAccountName': null,
+    'accountType': 'Income',
+    'normalBalance': 'Credit',
+    'isPostingAccount': true,
+    'isActive': true,
+    'description': null,
+  };
+
+  Map<String, dynamic> get journalLineOne => <String, dynamic>{
+    'id': 'line-1',
+    'chartOfAccountId': 'account-cash',
+    'accountCode': '1010',
+    'accountName': 'Cash',
+    'debit': 500,
+    'credit': 0,
+    'branchId': user.branch.id,
+    'customerName': null,
+    'supplierName': null,
+    'description': 'Cash received',
+  };
+
+  Map<String, dynamic> get journalLineTwo => <String, dynamic>{
+    'id': 'line-2',
+    'chartOfAccountId': 'account-sales',
+    'accountCode': '4010',
+    'accountName': 'Sales Revenue',
+    'debit': 0,
+    'credit': 500,
+    'branchId': user.branch.id,
+    'customerName': null,
+    'supplierName': null,
+    'description': 'Sale',
+  };
+
+  Map<String, dynamic> journalListItem({
+    String id = 'journal-1',
+    String entryNumber = 'JE-2026-000001',
+  }) => <String, dynamic>{
+    'id': id,
+    'entryNumber': entryNumber,
+    'entryDateUtc': '2026-09-01T00:00:00.000Z',
+    'sourceType': 'Sale',
+    'reference': 'INV-2026-000001',
+    'description': 'Sale posting',
+    'branchId': user.branch.id,
+    'branchName': user.branch.name,
+    'postedBy': user.fullName,
+    'totalDebit': 500,
+  };
+
+  Map<String, dynamic> journalDetails({
+    String id = 'journal-1',
+    String entryNumber = 'JE-2026-000001',
+  }) => <String, dynamic>{
+    'id': id,
+    'entryNumber': entryNumber,
+    'entryDateUtc': '2026-09-01T00:00:00.000Z',
+    'sourceType': 'Sale',
+    'sourceId': null,
+    'reference': 'INV-2026-000001',
+    'description': 'Sale posting',
+    'branchId': user.branch.id,
+    'branchName': user.branch.name,
+    'postedBy': user.fullName,
+    'postedAtUtc': '2026-09-01T00:05:00.000Z',
+    'status': 'Posted',
+    'totalDebit': 500,
+    'totalCredit': 500,
+    'lines': [journalLineOne, journalLineTwo],
+  };
+
+  @override
+  Future<dynamic> accounting(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async {
+    if (path == 'chart' && method == 'GET') {
+      return <Map<String, dynamic>>[cashAccount, salesAccount];
+    }
+    if (path == 'chart' && method == 'POST') {
+      return <String, dynamic>{...cashAccount, 'id': 'account-new', 'balance': 0};
+    }
+    if (path.startsWith('chart/') && path.endsWith('/activate')) return null;
+    if (path.startsWith('chart/') && path.endsWith('/deactivate')) return null;
+    if (path.startsWith('chart/') && method == 'PUT') {
+      return <String, dynamic>{...cashAccount, 'balance': 0};
+    }
+    if (path == 'mappings') {
+      return <Map<String, dynamic>>[
+        <String, dynamic>{
+          'mappingKey': 'Cash',
+          'chartOfAccountId': 'account-cash',
+          'chartOfAccountCode': '1010',
+          'chartOfAccountName': 'Cash',
+        },
+      ];
+    }
+    if (path == 'journal' && method == 'GET') {
+      return <String, dynamic>{
+        'items': [journalListItem()],
+        'page': 1,
+        'pageSize': 25,
+        'totalCount': 1,
+      };
+    }
+    if (path == 'journal' && method == 'POST') {
+      return journalDetails(id: 'journal-manual', entryNumber: 'JE-2026-000002');
+    }
+    if (path.startsWith('journal/')) return journalDetails();
+    if (path == 'trial-balance') {
+      return <String, dynamic>{
+        'asOfUtc': '2026-09-10T00:00:00.000Z',
+        'rows': [
+          <String, dynamic>{
+            'chartOfAccountId': 'account-cash',
+            'accountCode': '1010',
+            'accountName': 'Cash',
+            'accountType': 'Asset',
+            'normalBalance': 'Debit',
+            'debit': 500,
+            'credit': 0,
+          },
+          <String, dynamic>{
+            'chartOfAccountId': 'account-sales',
+            'accountCode': '4010',
+            'accountName': 'Sales Revenue',
+            'accountType': 'Income',
+            'normalBalance': 'Credit',
+            'debit': 0,
+            'credit': 500,
+          },
+        ],
+        'totalDebit': 500,
+        'totalCredit': 500,
+      };
+    }
+    if (path == 'general-ledger') {
+      return <String, dynamic>{
+        'chartOfAccountId': 'account-cash',
+        'accountCode': '1010',
+        'accountName': 'Cash',
+        'normalBalance': 'Debit',
+        'openingBalance': 0,
+        'totalDebit': 500,
+        'totalCredit': 0,
+        'closingBalance': 500,
+        'entries': <String, dynamic>{
+          'items': [
+            <String, dynamic>{
+              'journalEntryId': 'journal-1',
+              'entryNumber': 'JE-2026-000001',
+              'entryDateUtc': '2026-09-01T00:00:00.000Z',
+              'sourceType': 'Sale',
+              'reference': 'INV-2026-000001',
+              'description': 'Cash received',
+              'debit': 500,
+              'credit': 0,
+              'runningBalance': 500,
+            },
+          ],
+          'page': 1,
+          'pageSize': 50,
+          'totalCount': 1,
+        },
+      };
+    }
+    if (path == 'profit-loss') {
+      return <String, dynamic>{
+        'fromUtc': '2026-09-01T00:00:00.000Z',
+        'toUtc': '2026-09-10T00:00:00.000Z',
+        'revenue': [
+          <String, dynamic>{'accountCode': '4010', 'accountName': 'Sales Revenue', 'amount': 500},
+        ],
+        'netRevenue': 500,
+        'costOfGoodsSold': <dynamic>[],
+        'totalCostOfGoodsSold': 0,
+        'grossProfit': 500,
+        'operatingExpenses': <dynamic>[],
+        'totalOperatingExpenses': 0,
+        'netProfit': 500,
+      };
+    }
+    if (path == 'balance-sheet') {
+      return <String, dynamic>{
+        'asOfUtc': '2026-09-10T00:00:00.000Z',
+        'assets': [
+          <String, dynamic>{'accountCode': '1010', 'accountName': 'Cash', 'amount': 500},
+        ],
+        'totalAssets': 500,
+        'liabilities': <dynamic>[],
+        'totalLiabilities': 0,
+        'equity': <dynamic>[],
+        'accountEquity': 0,
+        'currentPeriodEarnings': 500,
+        'totalEquity': 500,
+        'isBalanced': true,
+      };
+    }
+    return null;
   }
 
   @override

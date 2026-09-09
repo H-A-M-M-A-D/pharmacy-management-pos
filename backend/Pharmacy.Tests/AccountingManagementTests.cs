@@ -131,6 +131,41 @@ public sealed class AccountingManagementTests
             f.Service.CreateAccountAsync(f.Actor.Id, new("9999", "x", null, AccountType.Asset, NormalBalance.Debit, true, null)));
     }
 
+    [Fact]
+    public async Task Profit_and_loss_and_balance_sheet_use_journal_classifications_and_exact_figures()
+    {
+        var f = new Fixture(PermissionCatalog.AccountsJournalView);
+        f.Activity.AddRange([
+            Row("4010", "Sales", AccountType.Income, NormalBalance.Credit, 0, 1000),
+            Row("4020", "Sales Returns", AccountType.Income, NormalBalance.Debit, 100, 0),
+            Row("5010", "Cost of Sales", AccountType.CostOfSales, NormalBalance.Debit, 400, 0),
+            Row("6010", "Rent", AccountType.Expense, NormalBalance.Debit, 150, 0)
+        ]);
+        f.Trial.AddRange([
+            Row("1010", "Cash", AccountType.Asset, NormalBalance.Debit, 1350, 0),
+            Row("2010", "Payables", AccountType.Liability, NormalBalance.Credit, 0, 500),
+            Row("3010", "Capital", AccountType.Equity, NormalBalance.Credit, 0, 500),
+            .. f.Activity
+        ]);
+
+        var profit = await f.Service.GetProfitAndLossAsync(f.Actor.Id, DateTime.UtcNow.AddDays(-30), DateTime.UtcNow, f.Branch.Id);
+        Assert.Equal(900, profit.NetRevenue);
+        Assert.Equal(400, profit.TotalCostOfGoodsSold);
+        Assert.Equal(500, profit.GrossProfit);
+        Assert.Equal(150, profit.TotalOperatingExpenses);
+        Assert.Equal(350, profit.NetProfit);
+
+        var balance = await f.Service.GetBalanceSheetAsync(f.Actor.Id, DateTime.UtcNow, f.Branch.Id);
+        Assert.Equal(1350, balance.TotalAssets);
+        Assert.Equal(500, balance.TotalLiabilities);
+        Assert.Equal(350, balance.CurrentPeriodEarnings);
+        Assert.Equal(850, balance.TotalEquity);
+        Assert.True(balance.IsBalanced);
+    }
+
+    private static TrialBalanceRowDto Row(string code, string name, AccountType type, NormalBalance normal, decimal debit, decimal credit) =>
+        new(Guid.NewGuid(), code, name, type, normal, debit, credit);
+
     private sealed class Fixture : IAccountingRepository
     {
         public readonly Branch Branch = new() { Code = "MAIN", Name = "Main" };
@@ -138,6 +173,8 @@ public sealed class AccountingManagementTests
         public readonly List<AccountMapping> Mappings = [];
         public readonly List<JournalEntry> JournalEntries = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly List<TrialBalanceRowDto> Activity = [];
+        public readonly List<TrialBalanceRowDto> Trial = [];
         public readonly ChartOfAccount HeaderAccount;
         public readonly ChartOfAccount CashAccount;
         public readonly ChartOfAccount SalesAccount;
@@ -185,7 +222,11 @@ public sealed class AccountingManagementTests
         public Task AddJournalEntryAsync(JournalEntry entry, CancellationToken cancellationToken = default) { JournalEntries.Add(entry); return Task.CompletedTask; }
         public Task<JournalEntry?> GetJournalEntryAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(JournalEntries.FirstOrDefault(x => x.Id == id));
         public Task<PagedResult<JournalEntryListItemDto>> ListJournalEntriesAsync(JournalEntryListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<JournalEntryListItemDto>([], 1, 25, 0));
-        public Task<IReadOnlyList<TrialBalanceRowDto>> GetTrialBalanceAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TrialBalanceRowDto>>([]);
+        public Task<IReadOnlyList<TrialBalanceRowDto>> GetTrialBalanceAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TrialBalanceRowDto>>(Trial);
+        public Task<IReadOnlyList<TrialBalanceRowDto>> GetAccountActivityAsync(DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TrialBalanceRowDto>>(Activity);
+        public Task<GeneralLedgerDto> GetGeneralLedgerAsync(GeneralLedgerQuery query, CancellationToken cancellationToken = default) => Task.FromResult(new GeneralLedgerDto(
+            query.ChartOfAccountId, CashAccount.Code, CashAccount.Name, CashAccount.NormalBalance, 0, 0, 0, 0,
+            new PagedResult<GeneralLedgerLineDto>([], query.Page, query.PageSize, 0)));
 
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);

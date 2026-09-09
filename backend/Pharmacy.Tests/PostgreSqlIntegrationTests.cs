@@ -1828,6 +1828,69 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
+    public async Task Accounting_read_models_return_exact_general_ledger_profit_and_balance_sheet_figures()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("statement-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connectionString).Options;
+        await using var context = new PharmacyDbContext(options);
+        var repository = new AccountingRepository(context);
+        var posting = new JournalPostingService(repository, TimeProvider.System);
+        var accounting = new AccountingService(repository, TimeProvider.System);
+        var openingAt = DateTime.UtcNow.AddDays(-10);
+        var from = openingAt.AddDays(1);
+
+        async Task Post(JournalSourceType type, DateTime at, params JournalLineInput[] lines) =>
+            await posting.PostAsync(new(type, Guid.NewGuid(), branchId, at, null, type.ToString(), actorId, lines));
+
+        await Post(JournalSourceType.OpeningBalance, openingAt,
+            new(AccountMappingKey.Cash, 1000, 0), new(AccountMappingKey.RetainedEarnings, 0, 1000));
+        await Post(JournalSourceType.Sale, from.AddDays(1),
+            new(AccountMappingKey.Cash, 500, 0), new(AccountMappingKey.SalesRevenue, 0, 500),
+            new(AccountMappingKey.CostOfGoodsSold, 300, 0), new(AccountMappingKey.Inventory, 0, 300));
+        await Post(JournalSourceType.Expense, from.AddDays(2),
+            new(AccountMappingKey.GeneralExpenseDefault, 50, 0), new(AccountMappingKey.Cash, 0, 50));
+        await Post(JournalSourceType.SalesReturn, from.AddDays(3),
+            new(AccountMappingKey.SalesReturnsContra, 100, 0), new(AccountMappingKey.Cash, 0, 100));
+        await repository.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var cashId = await context.AccountMappings.Where(x => x.MappingKey == AccountMappingKey.Cash).Select(x => x.ChartOfAccountId).SingleAsync();
+        var ledger = await accounting.GetGeneralLedgerAsync(actorId, new(cashId, 1, 2, branchId, null, from, from.AddDays(4)));
+        Assert.Equal(1000, ledger.OpeningBalance);
+        Assert.Equal(500, ledger.TotalDebit);
+        Assert.Equal(150, ledger.TotalCredit);
+        Assert.Equal(1350, ledger.ClosingBalance);
+        Assert.Equal(3, ledger.Entries.TotalCount);
+        Assert.Equal([1500m, 1450m], ledger.Entries.Items.Select(x => x.RunningBalance));
+
+        var profit = await accounting.GetProfitAndLossAsync(actorId, from, from.AddDays(4), branchId);
+        Assert.Equal(400, profit.NetRevenue);
+        Assert.Equal(300, profit.TotalCostOfGoodsSold);
+        Assert.Equal(100, profit.GrossProfit);
+        Assert.Equal(50, profit.TotalOperatingExpenses);
+        Assert.Equal(50, profit.NetProfit);
+
+        var balance = await accounting.GetBalanceSheetAsync(actorId, from.AddDays(4), branchId);
+        Assert.Equal(1050, balance.TotalAssets);
+        Assert.Equal(0, balance.TotalLiabilities);
+        Assert.Equal(1000, balance.AccountEquity);
+        Assert.Equal(50, balance.CurrentPeriodEarnings);
+        Assert.Equal(1050, balance.TotalEquity);
+        Assert.True(balance.IsBalanced);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
     public async Task Journal_entry_balance_is_enforced_by_the_real_dbcontext_pipeline()
     {
         await using var connection = await OpenConnectionAsync();

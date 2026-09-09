@@ -210,6 +210,54 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
         return new TrialBalanceDto(asOfUtc, rows, rows.Sum(x => x.Debit), rows.Sum(x => x.Credit));
     }
 
+    public async Task<GeneralLedgerDto> GetGeneralLedgerAsync(Guid actorId, GeneralLedgerQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        if (query.Page < 1 || query.PageSize is < 1 or > 100) throw new RequestValidationException("Page must be positive and page size must be between 1 and 100.");
+        if (query.FromUtc.HasValue && query.ToUtc.HasValue && query.FromUtc > query.ToUtc)
+            throw new RequestValidationException("From date cannot be after to date.");
+        await RequiredAccount(query.ChartOfAccountId, cancellationToken);
+        return await repository.GetGeneralLedgerAsync(query with { BranchId = Scope(actor, query.BranchId) }, cancellationToken);
+    }
+
+    public async Task<ProfitAndLossDto> GetProfitAndLossAsync(Guid actorId, DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        if (fromUtc > toUtc) throw new RequestValidationException("From date cannot be after to date.");
+        var rows = await repository.GetAccountActivityAsync(fromUtc, toUtc, Scope(actor, branchId), cancellationToken);
+        var revenue = StatementRows(rows.Where(x => x.AccountType == AccountType.Income));
+        var cost = StatementRows(rows.Where(x => x.AccountType == AccountType.CostOfSales));
+        var expenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense));
+        var netRevenue = revenue.Sum(x => x.Amount);
+        var totalCost = cost.Sum(x => x.Amount);
+        var grossProfit = netRevenue - totalCost;
+        var totalExpenses = expenses.Sum(x => x.Amount);
+        return new ProfitAndLossDto(fromUtc, toUtc, revenue, netRevenue, cost, totalCost, grossProfit, expenses, totalExpenses, grossProfit - totalExpenses);
+    }
+
+    public async Task<BalanceSheetDto> GetBalanceSheetAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        var rows = await repository.GetTrialBalanceAsync(asOfUtc, Scope(actor, branchId), cancellationToken);
+        var assets = StatementRows(rows.Where(x => x.AccountType == AccountType.Asset));
+        var liabilities = StatementRows(rows.Where(x => x.AccountType == AccountType.Liability));
+        var equity = StatementRows(rows.Where(x => x.AccountType == AccountType.Equity));
+        var earnings = StatementRows(rows.Where(x => x.AccountType is AccountType.Income or AccountType.CostOfSales or AccountType.Expense)).Sum(x =>
+            x.Amount * (rows.Single(row => row.ChartOfAccountId == x.ChartOfAccountId).AccountType == AccountType.Income ? 1 : -1));
+        var totalAssets = assets.Sum(x => x.Amount);
+        var totalLiabilities = liabilities.Sum(x => x.Amount);
+        var accountEquity = equity.Sum(x => x.Amount);
+        var totalEquity = accountEquity + earnings;
+        return new BalanceSheetDto(asOfUtc, assets, totalAssets, liabilities, totalLiabilities, equity, accountEquity,
+            earnings, totalEquity, decimal.Round(totalAssets - totalLiabilities - totalEquity, 2) == 0);
+    }
+
+    private static IReadOnlyList<FinancialStatementRowDto> StatementRows(IEnumerable<TrialBalanceRowDto> rows) =>
+        rows.Select(x => new FinancialStatementRowDto(x.ChartOfAccountId, x.AccountCode, x.AccountName,
+            x.AccountType is AccountType.Asset or AccountType.CostOfSales or AccountType.Expense
+                ? x.Debit - x.Credit : x.Credit - x.Debit))
+            .Where(x => x.Amount != 0).OrderBy(x => x.AccountCode).ToList();
+
     private async Task<ChartOfAccountDto> MapAccount(ChartOfAccount account, decimal balance, CancellationToken ct)
     {
         var parentName = account.ParentAccountId.HasValue

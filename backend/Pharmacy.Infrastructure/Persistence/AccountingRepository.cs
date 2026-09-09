@@ -75,6 +75,12 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
         if (query.FromUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc >= query.FromUtc);
         if (query.ToUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc <= query.ToUtc);
         if (query.ChartOfAccountId.HasValue) entries = entries.Where(x => x.Lines.Any(l => l.ChartOfAccountId == query.ChartOfAccountId));
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var search = query.Search.Trim();
+            entries = entries.Where(x => x.EntryNumber.Contains(search) ||
+                (x.Reference != null && x.Reference.Contains(search)) || x.Description.Contains(search));
+        }
         var total = await entries.CountAsync(cancellationToken);
         var items = await entries.OrderByDescending(x => x.EntryDateUtc).ThenByDescending(x => x.EntryNumber)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
@@ -89,12 +95,69 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
         var lines = context.JournalEntryLines.AsNoTracking().Include(x => x.ChartOfAccount)
             .Where(x => x.JournalEntry!.EntryDateUtc <= asOfUtc);
         if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
-        var grouped = await lines.GroupBy(x => new { x.ChartOfAccountId, x.ChartOfAccount!.Code, x.ChartOfAccount.Name, x.ChartOfAccount.AccountType })
-            .Select(g => new { g.Key.ChartOfAccountId, g.Key.Code, g.Key.Name, g.Key.AccountType, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) })
+        var grouped = await lines.GroupBy(x => new { x.ChartOfAccountId, x.ChartOfAccount!.Code, x.ChartOfAccount.Name, x.ChartOfAccount.AccountType, x.ChartOfAccount.NormalBalance })
+            .Select(g => new { g.Key.ChartOfAccountId, g.Key.Code, g.Key.Name, g.Key.AccountType, g.Key.NormalBalance, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) })
             .ToListAsync(cancellationToken);
         return grouped.Where(x => x.Debit != 0 || x.Credit != 0).OrderBy(x => x.Code)
-            .Select(x => new TrialBalanceRowDto(x.ChartOfAccountId, x.Code, x.Name, x.AccountType, x.Debit, x.Credit)).ToList();
+            .Select(x => new TrialBalanceRowDto(x.ChartOfAccountId, x.Code, x.Name, x.AccountType, x.NormalBalance, x.Debit, x.Credit)).ToList();
     }
+
+    public async Task<IReadOnlyList<TrialBalanceRowDto>> GetAccountActivityAsync(DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var lines = context.JournalEntryLines.AsNoTracking().Where(x => x.JournalEntry!.EntryDateUtc >= fromUtc && x.JournalEntry.EntryDateUtc <= toUtc);
+        if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
+        var grouped = await lines.GroupBy(x => new { x.ChartOfAccountId, x.ChartOfAccount!.Code, x.ChartOfAccount.Name, x.ChartOfAccount.AccountType, x.ChartOfAccount.NormalBalance })
+            .Select(g => new { g.Key.ChartOfAccountId, g.Key.Code, g.Key.Name, g.Key.AccountType, g.Key.NormalBalance, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) })
+            .ToListAsync(cancellationToken);
+        return grouped.Where(x => x.Debit != 0 || x.Credit != 0).OrderBy(x => x.Code)
+            .Select(x => new TrialBalanceRowDto(x.ChartOfAccountId, x.Code, x.Name, x.AccountType, x.NormalBalance, x.Debit, x.Credit)).ToList();
+    }
+
+    public async Task<GeneralLedgerDto> GetGeneralLedgerAsync(GeneralLedgerQuery query, CancellationToken cancellationToken = default)
+    {
+        var account = await context.ChartOfAccounts.AsNoTracking().SingleAsync(x => x.Id == query.ChartOfAccountId, cancellationToken);
+        var baseLines = context.JournalEntryLines.AsNoTracking()
+            .Where(x => x.ChartOfAccountId == query.ChartOfAccountId);
+        if (query.BranchId.HasValue) baseLines = baseLines.Where(x => x.BranchId == query.BranchId);
+
+        var openingDebit = query.FromUtc.HasValue
+            ? await baseLines.Where(x => x.JournalEntry!.EntryDateUtc < query.FromUtc.Value).SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0
+            : 0;
+        var openingCredit = query.FromUtc.HasValue
+            ? await baseLines.Where(x => x.JournalEntry!.EntryDateUtc < query.FromUtc.Value).SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0
+            : 0;
+        var opening = Balance(account.NormalBalance, openingDebit, openingCredit);
+
+        var period = baseLines;
+        if (query.FromUtc.HasValue) period = period.Where(x => x.JournalEntry!.EntryDateUtc >= query.FromUtc.Value);
+        if (query.ToUtc.HasValue) period = period.Where(x => x.JournalEntry!.EntryDateUtc <= query.ToUtc.Value);
+        if (query.SourceType.HasValue) period = period.Where(x => x.JournalEntry!.SourceType == query.SourceType.Value);
+        var total = await period.CountAsync(cancellationToken);
+        var totalDebit = await period.SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+        var totalCredit = await period.SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+        var skip = (query.Page - 1) * query.PageSize;
+        var ordered = period.OrderBy(x => x.JournalEntry!.EntryDateUtc).ThenBy(x => x.JournalEntry!.EntryNumber).ThenBy(x => x.Id);
+        var priorRows = await ordered.Take(skip).Select(x => new { x.Debit, x.Credit }).ToListAsync(cancellationToken);
+        var running = opening + priorRows.Sum(x => Delta(account.NormalBalance, x.Debit, x.Credit));
+        var pageRows = await ordered.Skip(skip).Take(query.PageSize).Select(x => new
+        {
+            x.JournalEntryId, x.JournalEntry!.EntryNumber, x.JournalEntry.EntryDateUtc, x.JournalEntry.SourceType,
+            x.JournalEntry.Reference, JournalDescription = x.JournalEntry.Description, LineDescription = x.Description, x.Debit, x.Credit
+        }).ToListAsync(cancellationToken);
+        var items = pageRows.Select(x =>
+        {
+            running += Delta(account.NormalBalance, x.Debit, x.Credit);
+            return new GeneralLedgerLineDto(x.JournalEntryId, x.EntryNumber, x.EntryDateUtc, x.SourceType, x.Reference,
+                x.LineDescription ?? x.JournalDescription, x.Debit, x.Credit, running);
+        }).ToList();
+        return new GeneralLedgerDto(account.Id, account.Code, account.Name, account.NormalBalance, opening, totalDebit, totalCredit,
+            opening + Delta(account.NormalBalance, totalDebit, totalCredit), new PagedResult<GeneralLedgerLineDto>(items, query.Page, query.PageSize, total));
+    }
+
+    private static decimal Balance(NormalBalance normalBalance, decimal debit, decimal credit) =>
+        normalBalance == NormalBalance.Debit ? debit - credit : credit - debit;
+    private static decimal Delta(NormalBalance normalBalance, decimal debit, decimal credit) =>
+        normalBalance == NormalBalance.Debit ? debit - credit : credit - debit;
 
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 

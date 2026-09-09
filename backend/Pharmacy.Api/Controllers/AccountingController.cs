@@ -55,5 +55,17 @@ public sealed class AccountingController(IAccountingService accounting) : Contro
     public Task<TrialBalanceDto> TrialBalance([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
         accounting.GetTrialBalanceAsync(UserId(), asOfUtc, branchId, ct);
 
+    [HttpGet("general-ledger"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<GeneralLedgerDto> GeneralLedger([FromQuery] GeneralLedgerQuery query, CancellationToken ct) =>
+        accounting.GetGeneralLedgerAsync(UserId(), query, ct);
+
+    [HttpGet("profit-loss"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<ProfitAndLossDto> ProfitAndLoss([FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetProfitAndLossAsync(UserId(), fromUtc, toUtc, branchId, ct);
+
+    [HttpGet("balance-sheet"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<BalanceSheetDto> BalanceSheet([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetBalanceSheetAsync(UserId(), asOfUtc, branchId, ct);
+
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

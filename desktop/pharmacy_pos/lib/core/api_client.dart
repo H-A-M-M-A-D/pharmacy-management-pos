@@ -166,7 +166,7 @@ abstract interface class PharmacyApi {
     Map<String, dynamic> values,
   );
   Future<void> setSupplierActive(String token, String id, bool active);
-  Future<PagedSupplierLedger> supplierLedger(String token, String id);
+  Future<PagedSupplierLedger> supplierLedger(String token, String id, {DateTime? from, DateTime? to, String? branchId});
   Future<void> recordSupplierPayment(
     String token,
     String id,
@@ -194,7 +194,7 @@ abstract interface class PharmacyApi {
     Map<String, dynamic> values,
   );
   Future<void> setCustomerActive(String token, String id, bool active);
-  Future<PagedCustomerLedger> customerLedger(String token, String id);
+  Future<PagedCustomerLedger> customerLedger(String token, String id, {DateTime? from, DateTime? to, String? branchId});
   Future<void> recordCustomerPayment(
     String token,
     String id,
@@ -309,6 +309,13 @@ abstract interface class PharmacyApi {
     String token,
     String path, {
     String method = 'GET',
+    Map<String, dynamic>? body,
+  });
+  Future<dynamic> accounting(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
     Map<String, dynamic>? body,
   });
   void close();
@@ -948,10 +955,13 @@ class ApiClient implements PharmacyApi {
       );
 
   @override
-  Future<PagedSupplierLedger> supplierLedger(String token, String id) async =>
-      PagedSupplierLedger.fromJson(
-        (await _request('GET', '/api/suppliers/$id/ledger', token: token))!,
-      );
+  Future<PagedSupplierLedger> supplierLedger(String token, String id, {DateTime? from, DateTime? to, String? branchId}) async {
+    final query = <String, String>{};
+    if (from != null) query['dateFrom'] = from.toIso8601String().substring(0, 10);
+    if (to != null) query['dateTo'] = to.toIso8601String().substring(0, 10);
+    if (branchId != null) query['branchId'] = branchId;
+    return PagedSupplierLedger.fromJson((await _request('GET', Uri(path: '/api/suppliers/$id/ledger', queryParameters: query).toString(), token: token))!);
+  }
 
   @override
   Future<void> recordSupplierPayment(
@@ -1044,10 +1054,13 @@ class ApiClient implements PharmacyApi {
       );
 
   @override
-  Future<PagedCustomerLedger> customerLedger(String token, String id) async =>
-      PagedCustomerLedger.fromJson(
-        (await _request('GET', '/api/customers/$id/ledger', token: token))!,
-      );
+  Future<PagedCustomerLedger> customerLedger(String token, String id, {DateTime? from, DateTime? to, String? branchId}) async {
+    final query = <String, String>{};
+    if (from != null) query['dateFrom'] = from.toIso8601String().substring(0, 10);
+    if (to != null) query['dateTo'] = to.toIso8601String().substring(0, 10);
+    if (branchId != null) query['branchId'] = branchId;
+    return PagedCustomerLedger.fromJson((await _request('GET', Uri(path: '/api/customers/$id/ledger', queryParameters: query).toString(), token: token))!);
+  }
 
   @override
   Future<void> recordCustomerPayment(
@@ -1527,6 +1540,20 @@ class ApiClient implements PharmacyApi {
     String method = 'GET',
     Map<String, dynamic>? body,
   }) => _request(method, '/api/admin/$path', token: token, body: body);
+
+  @override
+  Future<dynamic> accounting(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(path: '/api/accounts/$path', queryParameters: query).toString(),
+    token: token,
+    body: body,
+  );
 
   @override
   Future<List<int>> exportReport(
