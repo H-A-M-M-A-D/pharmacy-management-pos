@@ -108,6 +108,27 @@ public sealed class InventoryManagementTests
         await f.Service.ReconcileStockCountAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, f.Batch.Id, 12, AdjustmentReason.PhysicalCountCorrection, "count"));
         Assert.Equal(12, f.Batch.QuantityAvailable);
         Assert.Single(f.Movements, x => x.ReferenceType == "StockCount");
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.StockAdjustment, journal.SourceType);
+        Assert.Equal(16, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Debit);
+        Assert.Equal(16, journal.Lines.Single(x => x.Account == AccountMappingKey.InventoryAdjustmentGain).Credit);
+    }
+
+    [Fact]
+    public async Task Damaged_stock_posts_exact_inventory_loss_write_off()
+    {
+        var f = new Fixture(PermissionCatalog.InventoryAdjust);
+        f.ExistingBatch(10, f.Today.AddDays(20));
+
+        await f.Service.AdjustStockDecreaseAsync(f.Actor.Id,
+            new(f.Branch.Id, f.Product.Id, f.Batch!.Id, 3, AdjustmentReason.Damaged, "broken packs"));
+
+        Assert.Equal(7, f.Batch.QuantityAvailable);
+        Assert.Contains(f.Movements, x => x.MovementType == StockMovementType.Damaged && x.Quantity == -3);
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.StockWriteOff, journal.SourceType);
+        Assert.Equal(24, journal.Lines.Single(x => x.Account == AccountMappingKey.InventoryLossExpense).Debit);
+        Assert.Equal(24, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Credit);
     }
 
     [Fact]
@@ -175,6 +196,10 @@ public sealed class InventoryManagementTests
         Assert.Equal(5, second.QuantityAvailable);
         Assert.Contains(f.Movements, x => x.MovementType == StockMovementType.AdjustmentIncrease && x.Quantity == 2 && x.ReferenceType == "StockCount");
         Assert.DoesNotContain(f.Movements, x => x.ProductBatchId == second.Id);
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.StockAdjustment, journal.SourceType);
+        Assert.Equal(16, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Debit);
+        Assert.Equal(16, journal.Lines.Single(x => x.Account == AccountMappingKey.InventoryAdjustmentGain).Credit);
 
         await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.FinalizeStockCountSessionAsync(f.Actor.Id, created.Id));
         await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.CancelStockCountSessionAsync(f.Actor.Id, created.Id, new("changed my mind")));

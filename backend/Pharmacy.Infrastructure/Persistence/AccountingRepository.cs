@@ -50,8 +50,12 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
         return $"JV-{entryDateUtc.Year}-{next:000000}";
     }
 
-    public Task<bool> JournalEntryExistsForSourceAsync(JournalSourceType sourceType, Guid sourceId, CancellationToken cancellationToken = default) =>
-        context.JournalEntries.AnyAsync(x => x.SourceType == sourceType && x.SourceId == sourceId, cancellationToken);
+    public Task<bool> JournalEntryExistsForSourceAsync(JournalSourceType sourceType, Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        if (context.JournalEntries.Local.Any(x => x.SourceType == sourceType && x.SourceId == sourceId))
+            return Task.FromResult(true);
+        return context.JournalEntries.AnyAsync(x => x.SourceType == sourceType && x.SourceId == sourceId, cancellationToken);
+    }
 
     public async Task AddJournalEntryAsync(JournalEntry entry, CancellationToken cancellationToken = default) => await context.JournalEntries.AddAsync(entry, cancellationToken);
 

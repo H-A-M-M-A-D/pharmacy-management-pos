@@ -1612,6 +1612,114 @@ public sealed class PostgreSqlIntegrationTests
             SELECT count(*) FROM information_schema.table_constraints
             WHERE table_schema = 'public' AND constraint_name IN ('CK_JournalEntryLines_Amounts', 'CK_ChartOfAccounts_NormalBalance');
             """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*)
+            FROM pg_index x
+            JOIN pg_class i ON i.oid = x.indexrelid
+            WHERE i.relname = 'IX_JournalEntries_SourceType_SourceId'
+              AND x.indisunique
+              AND pg_get_expr(x.indpred, x.indrelid) IS NOT NULL;
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task PhaseJ_realistic_posting_cycle_produces_exact_balanced_trial_balance_and_idempotent_sources()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("phase-j-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await InsertCustomerAsync(seedConnection, seedTransaction, customerId, Unique("CUS-J"), "Phase J Customer", Unique("PHASE J CUSTOMER"), 10000);
+        await InsertSupplierAsync(seedConnection, seedTransaction, supplierId, Unique("Phase J Supplier"), Unique("PHASE J SUPPLIER"));
+        await seedTransaction.CommitAsync();
+
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connectionString).Options;
+        await using var context = new PharmacyDbContext(options);
+        var repository = new AccountingRepository(context);
+        var posting = new JournalPostingService(repository, TimeProvider.System);
+        var occurredAt = DateTime.UtcNow.AddMinutes(-1);
+
+        async Task Post(JournalSourceType sourceType, Guid sourceId, string reference, params JournalLineInput[] lines) =>
+            await posting.PostAsync(new(sourceType, sourceId, branchId, occurredAt, reference, reference, actorId, lines));
+
+        var openingId = Guid.NewGuid();
+        await Post(JournalSourceType.OpeningBalance, openingId, "Opening cash",
+            new(AccountMappingKey.Cash, 10000, 0), new(AccountMappingKey.RetainedEarnings, 0, 10000));
+        await Post(JournalSourceType.OpeningBalance, openingId, "Opening cash retry",
+            new(AccountMappingKey.Cash, 10000, 0), new(AccountMappingKey.RetainedEarnings, 0, 10000));
+        await Post(JournalSourceType.Purchase, Guid.NewGuid(), "GRN-EXACT",
+            new(AccountMappingKey.Inventory, 5000, 0), new(AccountMappingKey.AccountsPayable, 0, 5000, SupplierId: supplierId));
+        await Post(JournalSourceType.PurchaseReturn, Guid.NewGuid(), "PR-EXACT",
+            new(AccountMappingKey.AccountsPayable, 500, 0, SupplierId: supplierId), new(AccountMappingKey.Inventory, 0, 500));
+        await Post(JournalSourceType.Sale, Guid.NewGuid(), "INV-EXACT",
+            new(AccountMappingKey.Cash, 2000, 0), new(AccountMappingKey.AccountsReceivable, 1000, 0, CustomerId: customerId),
+            new(AccountMappingKey.SalesRevenue, 0, 3000), new(AccountMappingKey.CostOfGoodsSold, 1800, 0), new(AccountMappingKey.Inventory, 0, 1800));
+        await Post(JournalSourceType.SalesReturn, Guid.NewGuid(), "SR-EXACT",
+            new(AccountMappingKey.SalesReturnsContra, 600, 0), new(AccountMappingKey.Cash, 0, 400),
+            new(AccountMappingKey.AccountsReceivable, 0, 200, CustomerId: customerId),
+            new(AccountMappingKey.Inventory, 360, 0), new(AccountMappingKey.CostOfGoodsSold, 0, 360));
+        await Post(JournalSourceType.CustomerPayment, Guid.NewGuid(), "CR-EXACT",
+            new(AccountMappingKey.Bank, 700, 0), new(AccountMappingKey.AccountsReceivable, 0, 700, CustomerId: customerId));
+        await Post(JournalSourceType.SupplierPayment, Guid.NewGuid(), "SP-EXACT",
+            new(AccountMappingKey.AccountsPayable, 2000, 0, SupplierId: supplierId), new(AccountMappingKey.Bank, 0, 2000));
+        await Post(JournalSourceType.Expense, Guid.NewGuid(), "EXP-EXACT",
+            new(AccountMappingKey.GeneralExpenseDefault, 250, 0), new(AccountMappingKey.Cash, 0, 250));
+        await Post(JournalSourceType.OtherIncome, Guid.NewGuid(), "INC-EXACT",
+            new(AccountMappingKey.Cash, 100, 0), new(AccountMappingKey.OtherIncomeDefault, 0, 100));
+        await Post(JournalSourceType.CashTransfer, Guid.NewGuid(), "TRF-EXACT",
+            new(AccountMappingKey.Bank, 500, 0), new(AccountMappingKey.Cash, 0, 500));
+        await Post(JournalSourceType.StockAdjustment, Guid.NewGuid(), "COUNT-EXACT",
+            new(AccountMappingKey.Inventory, 80, 0), new(AccountMappingKey.InventoryAdjustmentGain, 0, 80));
+        await Post(JournalSourceType.StockWriteOff, Guid.NewGuid(), "WRITE-OFF-EXACT",
+            new(AccountMappingKey.InventoryLossExpense, 50, 0), new(AccountMappingKey.Inventory, 0, 50));
+        await repository.SaveChangesAsync();
+
+        context.ChangeTracker.Clear();
+        var accounting = new AccountingService(repository, TimeProvider.System);
+        var trialBalance = await accounting.GetTrialBalanceAsync(actorId, occurredAt.AddMinutes(2), branchId);
+
+        Assert.Equal(12, await context.JournalEntries.CountAsync(x => x.BranchId == branchId));
+        Assert.Equal(24940m, trialBalance.TotalDebit);
+        Assert.Equal(24940m, trialBalance.TotalCredit);
+        Assert.Equal(trialBalance.TotalDebit, trialBalance.TotalCredit);
+
+        void AssertRow(string code, decimal debit, decimal credit)
+        {
+            var row = Assert.Single(trialBalance.Rows, x => x.AccountCode == code);
+            Assert.Equal(debit, row.Debit);
+            Assert.Equal(credit, row.Credit);
+        }
+
+        AssertRow("1010", 12100, 1150);
+        AssertRow("1020", 1200, 2000);
+        AssertRow("1030", 1000, 900);
+        AssertRow("1040", 5440, 2350);
+        AssertRow("2010", 2500, 5000);
+        AssertRow("3020", 0, 10000);
+        AssertRow("4010", 0, 3000);
+        AssertRow("4020", 600, 0);
+        AssertRow("4090", 0, 100);
+        AssertRow("4091", 0, 80);
+        AssertRow("5010", 1800, 360);
+        AssertRow("6070", 50, 0);
+        AssertRow("6990", 250, 0);
+
+        var entries = await context.JournalEntries.AsNoTracking().Include(x => x.Lines).Where(x => x.BranchId == branchId).ToListAsync();
+        Assert.All(entries, entry =>
+        {
+            Assert.NotNull(entry.SourceId);
+            Assert.Equal(entry.Lines.Sum(x => x.Debit), entry.Lines.Sum(x => x.Credit));
+            Assert.All(entry.Lines, line => Assert.Equal(branchId, line.BranchId));
+        });
+        Assert.Equal(entries.Count, entries.Select(x => (x.SourceType, x.SourceId)).Distinct().Count());
     }
 
     [PostgreSqlFact]
@@ -2046,6 +2154,19 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Contains(journals, x => x.SourceType == JournalSourceType.OtherIncome && x.SourceId == income.Id);
         Assert.Contains(journals, x => x.SourceType == JournalSourceType.CashTransfer && x.SourceId == transfer.Id);
         Assert.All(journals, x => Assert.Equal(x.Lines.Sum(line => line.Debit), x.Lines.Sum(line => line.Credit)));
+        var mappings = await verifyContext.AccountMappings.AsNoTracking().ToDictionaryAsync(x => x.MappingKey, x => x.ChartOfAccountId);
+        var openingJournal = Assert.Single(journals, x => x.SourceType == JournalSourceType.OpeningBalance);
+        Assert.Equal(10000m, openingJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.Cash]).Debit);
+        Assert.Equal(10000m, openingJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.RetainedEarnings]).Credit);
+        var expenseJournal = Assert.Single(journals, x => x.SourceId == expenseOne.Id);
+        Assert.Equal(1200m, expenseJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.GeneralExpenseDefault]).Debit);
+        Assert.Equal(1200m, expenseJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.Cash]).Credit);
+        var incomeJournal = Assert.Single(journals, x => x.SourceId == income.Id);
+        Assert.Equal(800m, incomeJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.Cash]).Debit);
+        Assert.Equal(800m, incomeJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.OtherIncomeDefault]).Credit);
+        var transferJournal = Assert.Single(journals, x => x.SourceId == transfer.Id);
+        Assert.Equal(3000m, transferJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.Bank]).Debit);
+        Assert.Equal(3000m, transferJournal.Lines.Single(x => x.ChartOfAccountId == mappings[AccountMappingKey.Cash]).Credit);
 
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "Expense" && x.EntityId == expenseOne.Id && x.Action == "ExpensePosted"));
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "OtherIncome" && x.EntityId == income.Id && x.Action == "OtherIncomePosted"));

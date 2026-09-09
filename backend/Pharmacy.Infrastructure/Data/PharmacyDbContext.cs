@@ -942,7 +942,9 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
         entity.HasIndex(e => e.EntryNumber).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.EntryDateUtc });
-        entity.HasIndex(e => new { e.SourceType, e.SourceId });
+        entity.HasIndex(e => new { e.SourceType, e.SourceId })
+            .IsUnique()
+            .HasFilter("\"SourceId\" IS NOT NULL");
         entity.HasIndex(e => e.EntryDateUtc);
         entity.ToTable(table => table.HasCheckConstraint("CK_JournalEntries_Status", "\"Status\" = 1"));
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
