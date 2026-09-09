@@ -2023,6 +2023,69 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "FinancialTransfer" && x.EntityId == winner.Id && x.Action == "AccountTransferPosted"));
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Expense_category_mutations_are_audited_and_rejected_operations_create_no_false_audit()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("finance-cat-audit-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        ExpenseCategoryDto category;
+        await using (var createContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(createContext), TimeProvider.System);
+            category = await service.CreateCategoryAsync(actorId, new ExpenseCategoryRequest(Unique("Finance Cat Audit"), "Created for audit test"));
+        }
+        await using (var updateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(updateContext), TimeProvider.System);
+            await service.UpdateCategoryAsync(actorId, category.Id, new ExpenseCategoryRequest(category.Name + " Updated", "Updated for audit test"));
+        }
+        await using (var deactivateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(deactivateContext), TimeProvider.System);
+            await service.SetCategoryActiveAsync(actorId, category.Id, false);
+        }
+        await using (var activateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(activateContext), TimeProvider.System);
+            await service.SetCategoryActiveAsync(actorId, category.Id, true);
+        }
+
+        // Rejected operations: duplicate name on create, duplicate name on update, and an
+        // invalid (blank-name) update must never write a success audit entry.
+        await using (var dupCreateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(dupCreateContext), TimeProvider.System);
+            await Assert.ThrowsAsync<ResourceConflictException>(() =>
+                service.CreateCategoryAsync(actorId, new ExpenseCategoryRequest(category.Name + " Updated", "duplicate")));
+        }
+        await using (var invalidUpdateContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(invalidUpdateContext), TimeProvider.System);
+            await Assert.ThrowsAsync<RequestValidationException>(() =>
+                service.UpdateCategoryAsync(actorId, category.Id, new ExpenseCategoryRequest("   ", "blank name")));
+        }
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id && x.Action == "ExpenseCategoryCreated"));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id && x.Action == "ExpenseCategoryUpdated"));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id && x.Action == "ExpenseCategoryDeactivated"));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id && x.Action == "ExpenseCategoryActivated"));
+        Assert.Equal(4, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id));
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)

@@ -116,6 +116,7 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
             throw new ResourceConflictException("An expense category with this name already exists.");
         var category = new ExpenseCategory { Name = request.Name.Trim(), NormalizedName = normalized, Description = Clean(request.Description), IsActive = request.IsActive };
         await repository.AddCategoryAsync(category, cancellationToken);
+        await Audit(actorId, "ExpenseCategoryCreated", "ExpenseCategory", category.Id, new { category.Name, category.IsActive }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return MapCategory(category);
     }
@@ -127,7 +128,10 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
         var category = await repository.GetCategoryAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Expense category was not found.");
         var normalized = Normalize(request.Name);
         if (await repository.CategoryNameExistsAsync(normalized, id, cancellationToken)) throw new ResourceConflictException("An expense category with this name already exists.");
+        var old = new { category.Name, category.Description, category.IsActive };
         category.Name = request.Name.Trim(); category.NormalizedName = normalized; category.Description = Clean(request.Description); category.IsActive = request.IsActive; category.UpdatedAt = UtcNow();
+        await Audit(actorId, "ExpenseCategoryUpdated", "ExpenseCategory", category.Id,
+            new { Old = old, New = new { category.Name, category.Description, category.IsActive } }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return MapCategory(category);
     }
@@ -137,6 +141,8 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
         await Require(actorId, PermissionCatalog.AccountsManage, cancellationToken);
         var category = await repository.GetCategoryAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Expense category was not found.");
         category.IsActive = active; category.UpdatedAt = UtcNow();
+        await Audit(actorId, active ? "ExpenseCategoryActivated" : "ExpenseCategoryDeactivated",
+            "ExpenseCategory", id, new { category.Name }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
     }
 
