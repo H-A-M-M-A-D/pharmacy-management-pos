@@ -1872,6 +1872,157 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "FinancialTransfer" && x.EntityId == transfer.Id && x.Action == "AccountTransferPosted"));
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Finance_concurrent_expense_postings_against_the_same_account_resolve_safely_without_unhandled_500()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("finance-exp-conc-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        var categoryId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"ExpenseCategories\" ORDER BY \"Id\" LIMIT 1;");
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        FinancialAccountDto account;
+        await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            account = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Exp Conc"), FinancialAccountType.Cash, 1000m, null));
+        }
+
+        var occurredAt = DateTime.UtcNow;
+
+        // Each attempt gets its own DbContext/connection, mirroring two independent HTTP
+        // requests, and both are launched without awaiting between them so their
+        // Serializable transactions can genuinely overlap against the same account row.
+        async Task<(ExpenseDto? Result, Exception? Error)> AttemptAsync(string label)
+        {
+            await using var raceContext = new PharmacyDbContext(Options(connectionString));
+            var service = new FinanceService(new FinanceRepository(raceContext), TimeProvider.System);
+            try
+            {
+                return (await service.PostExpenseAsync(actorId,
+                    new PostExpenseRequest(branchId, categoryId, account.Id, occurredAt, 700m, $"Concurrent expense {label}", null, null, null)), null);
+            }
+            catch (Exception ex) { return (null, ex); }
+        }
+
+        var outcomes = await Task.WhenAll(Task.Run(() => AttemptAsync("A")), Task.Run(() => AttemptAsync("B")));
+
+        var winners = outcomes.Where(x => x.Result is not null).ToList();
+        var losers = outcomes.Where(x => x.Error is not null).ToList();
+        Assert.Single(winners);
+        Assert.Single(losers);
+
+        // Whether the loser lost a genuine Postgres 40001 race (now mapped by
+        // ExecuteInTransactionAsync) or simply observed the depleted balance after the
+        // winner committed, it must always surface as the application's own safe
+        // conflict - never a raw/unhandled Postgres or EF exception (HTTP 500).
+        var loserError = Assert.IsType<ResourceConflictException>(losers[0].Error);
+        Assert.True(
+            loserError.Message.Contains("insufficient funds", StringComparison.OrdinalIgnoreCase) ||
+            loserError.Message.Contains("changed by another operation", StringComparison.OrdinalIgnoreCase),
+            $"Unexpected conflict message: {loserError.Message}");
+
+        var winner = winners[0].Result!;
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var finalBalance = await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == account.Id).SumAsync(x => x.Amount);
+        Assert.Equal(300m, finalBalance);
+        Assert.True(finalBalance >= 0);
+        Assert.Equal(1, await verifyContext.Expenses.CountAsync(x => x.FinancialAccountId == account.Id));
+        Assert.Equal(1, await verifyContext.FinancialLedgerEntries.CountAsync(x => x.FinancialAccountId == account.Id && x.EntryType == FinancialLedgerEntryType.Expense));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "Expense" && x.EntityId == winner.Id && x.Action == "ExpensePosted"));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Finance_concurrent_transfers_from_the_same_source_account_resolve_safely_without_unhandled_500()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("finance-trf-conc-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        FinancialAccountDto source, destinationA, destinationB;
+        await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            source = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Trf Conc Source"), FinancialAccountType.Cash, 1000m, null));
+            destinationA = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Trf Conc Dest A"), FinancialAccountType.Cash, 0m, null));
+            destinationB = await service.CreateAccountAsync(actorId,
+                new FinancialAccountRequest(branchId, Unique("Finance Trf Conc Dest B"), FinancialAccountType.Cash, 0m, null));
+        }
+
+        var occurredAt = DateTime.UtcNow;
+
+        async Task<(FinancialTransferDto? Result, Exception? Error)> AttemptAsync(Guid destinationId, string label)
+        {
+            await using var raceContext = new PharmacyDbContext(Options(connectionString));
+            var service = new FinanceService(new FinanceRepository(raceContext), TimeProvider.System);
+            try
+            {
+                return (await service.PostTransferAsync(actorId,
+                    new PostTransferRequest(branchId, source.Id, destinationId, occurredAt, 700m, $"R4-TRF-CONC-{label}", null)), null);
+            }
+            catch (Exception ex) { return (null, ex); }
+        }
+
+        var outcomes = await Task.WhenAll(
+            Task.Run(() => AttemptAsync(destinationA.Id, "A")),
+            Task.Run(() => AttemptAsync(destinationB.Id, "B")));
+
+        var winners = outcomes.Where(x => x.Result is not null).ToList();
+        var losers = outcomes.Where(x => x.Error is not null).ToList();
+        Assert.Single(winners);
+        Assert.Single(losers);
+
+        // As with the expense race, a genuine 40001 (now mapped) and a plain
+        // insufficient-funds recheck after the winner commits are both acceptable safe
+        // outcomes - only a raw/unhandled exception (HTTP 500) would be a defect.
+        var loserError = Assert.IsType<ResourceConflictException>(losers[0].Error);
+        Assert.True(
+            loserError.Message.Contains("insufficient funds", StringComparison.OrdinalIgnoreCase) ||
+            loserError.Message.Contains("changed by another operation", StringComparison.OrdinalIgnoreCase),
+            $"Unexpected conflict message: {loserError.Message}");
+
+        var winner = winners[0].Result!;
+        var winningDestinationId = winner.DestinationAccountId;
+        var losingDestinationId = winningDestinationId == destinationA.Id ? destinationB.Id : destinationA.Id;
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var sourceBalance = await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == source.Id).SumAsync(x => x.Amount);
+        var winningDestinationBalance = await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == winningDestinationId).SumAsync(x => x.Amount);
+        var losingDestinationBalance = await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == losingDestinationId).SumAsync(x => x.Amount);
+        Assert.Equal(300m, sourceBalance);
+        Assert.True(sourceBalance >= 0);
+        Assert.Equal(700m, winningDestinationBalance);
+        Assert.Equal(0m, losingDestinationBalance);
+        Assert.Equal(1, await verifyContext.FinancialTransfers.CountAsync(x => x.SourceAccountId == source.Id));
+        Assert.Equal(1, await verifyContext.FinancialLedgerEntries.CountAsync(x => x.FinancialAccountId == source.Id && x.EntryType == FinancialLedgerEntryType.TransferOut));
+        Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "FinancialTransfer" && x.EntityId == winner.Id && x.Action == "AccountTransferPosted"));
+    }
+
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)
