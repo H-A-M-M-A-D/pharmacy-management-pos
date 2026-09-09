@@ -55,6 +55,15 @@ public class PharmacyDbContext : DbContext
     public DbSet<FinancialTransfer> FinancialTransfers { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
     public DbSet<BackupRecord> BackupRecords { get; set; } = null!;
+    public DbSet<StockCountSession> StockCountSessions { get; set; } = null!;
+    public DbSet<StockCountItem> StockCountItems { get; set; } = null!;
+    public DbSet<CashierShift> CashierShifts { get; set; } = null!;
+    public DbSet<CashierShiftDrawerEntry> CashierShiftDrawerEntries { get; set; } = null!;
+    public DbSet<CashierShiftPaymentSummary> CashierShiftPaymentSummaries { get; set; } = null!;
+    public DbSet<ChartOfAccount> ChartOfAccounts { get; set; } = null!;
+    public DbSet<AccountMapping> AccountMappings { get; set; } = null!;
+    public DbSet<JournalEntry> JournalEntries { get; set; } = null!;
+    public DbSet<JournalEntryLine> JournalEntryLines { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -65,6 +74,9 @@ public class PharmacyDbContext : DbContext
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         ValidateFinanceDocuments();
+        ValidateStockCountDocuments();
+        ValidateCashierShiftDocuments();
+        ValidateAccountingDocuments();
         ProtectAuditLog();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -78,8 +90,73 @@ public class PharmacyDbContext : DbContext
         ValidatePurchasingDocuments();
         ValidateSalesDocuments();
         ValidateFinanceDocuments();
+        ValidateStockCountDocuments();
+        ValidateCashierShiftDocuments();
+        ValidateAccountingDocuments();
         ProtectAuditLog();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateAccountingDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<ChartOfAccount>())
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Chart of accounts entries are permanent and can only be deactivated.");
+        foreach (var entry in ChangeTracker.Entries<JournalEntry>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Posted journal entries are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<JournalEntryLine>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Posted journal entry lines are permanent and cannot be updated or deleted.");
+
+        var addedLines = ChangeTracker.Entries<JournalEntryLine>().Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToList();
+        if (addedLines.Count == 0) return;
+        var addedEntries = ChangeTracker.Entries<JournalEntry>().Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToDictionary(x => x.Id);
+        foreach (var group in addedLines.GroupBy(x => x.JournalEntryId))
+        {
+            var totalDebit = group.Sum(x => x.Debit);
+            var totalCredit = group.Sum(x => x.Credit);
+            if (totalDebit != totalCredit)
+            {
+                var label = addedEntries.TryGetValue(group.Key, out var journalEntry) ? journalEntry.EntryNumber : group.Key.ToString();
+                throw new InvalidOperationException($"Journal entry {label} does not balance: total debit {totalDebit} does not equal total credit {totalCredit}.");
+            }
+        }
+    }
+
+    private void ValidateCashierShiftDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<CashierShift>())
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Cashier shift history is permanent and cannot be deleted.");
+            if (entry.State == EntityState.Modified && entry.OriginalValues.GetValue<CashierShiftStatus>(nameof(CashierShift.Status)) == CashierShiftStatus.Reconciled)
+                throw new InvalidOperationException("Reconciled cashier shifts are permanent and cannot be modified.");
+        }
+        foreach (var entry in ChangeTracker.Entries<CashierShiftDrawerEntry>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Cashier shift drawer entries are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<CashierShiftPaymentSummary>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Cashier shift payment summaries are permanent and cannot be updated or deleted.");
+    }
+
+    private void ValidateStockCountDocuments()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<StockCountSession>())
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Stock count session history is permanent and cannot be deleted.");
+            var originalStatus = entry.State == EntityState.Modified ? entry.OriginalValues.GetValue<StockCountStatus>(nameof(StockCountSession.Status)) : (StockCountStatus?)null;
+            if (originalStatus is StockCountStatus.Completed or StockCountStatus.Cancelled && entry.State == EntityState.Modified)
+                throw new InvalidOperationException("Completed or cancelled stock count sessions are permanent and cannot be modified.");
+        }
+        foreach (var entry in ChangeTracker.Entries<StockCountItem>())
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Stock count item history is permanent and cannot be deleted.");
+        }
     }
 
     private void ValidatePurchasingDocuments()
@@ -368,6 +445,15 @@ public class PharmacyDbContext : DbContext
         ConfigureProductBatch(modelBuilder);
         ConfigureInventory(modelBuilder);
         ConfigureStockMovement(modelBuilder);
+        ConfigureStockCountSession(modelBuilder);
+        ConfigureStockCountItem(modelBuilder);
+        ConfigureCashierShift(modelBuilder);
+        ConfigureCashierShiftDrawerEntry(modelBuilder);
+        ConfigureCashierShiftPaymentSummary(modelBuilder);
+        ConfigureChartOfAccount(modelBuilder);
+        ConfigureAccountMapping(modelBuilder);
+        ConfigureJournalEntry(modelBuilder);
+        ConfigureJournalEntryLine(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureSupplierLedgerEntry(modelBuilder);
         ConfigureCustomerLedgerEntry(modelBuilder);
@@ -714,6 +800,173 @@ public class PharmacyDbContext : DbContext
             .WithMany(u => u.StockMovements)
             .HasForeignKey(e => e.PerformedByUserId)
             .OnDelete(DeleteBehavior.SetNull);
+    }
+
+    private void ConfigureStockCountSession(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<StockCountSession>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.CountNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.CountDate).HasColumnType("date").IsRequired();
+
+        entity.HasIndex(e => e.CountNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.CountDate });
+        entity.HasIndex(e => e.Status);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_StockCountSessions_Status", "\"Status\" IN (1, 2, 3, 4)");
+            table.HasCheckConstraint("CK_StockCountSessions_Scope", "\"Scope\" IN (1, 2, 3, 4)");
+        });
+
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Category).WithMany().HasForeignKey(e => e.CategoryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.StartedByUser).WithMany().HasForeignKey(e => e.StartedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CompletedByUser).WithMany().HasForeignKey(e => e.CompletedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CancelledByUser).WithMany().HasForeignKey(e => e.CancelledByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureStockCountItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<StockCountItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.UnitCostSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).HasMaxLength(50);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+
+        entity.HasIndex(e => e.StockCountSessionId);
+        entity.HasIndex(e => new { e.StockCountSessionId, e.ProductBatchId }).IsUnique();
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_StockCountItems_SystemQuantity_NonNegative", "\"SystemQuantity\" >= 0");
+            table.HasCheckConstraint("CK_StockCountItems_CountedQuantity_NonNegative", "\"CountedQuantity\" IS NULL OR \"CountedQuantity\" >= 0");
+        });
+
+        entity.HasOne(e => e.StockCountSession).WithMany(s => s.Items).HasForeignKey(e => e.StockCountSessionId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ProductBatch).WithMany().HasForeignKey(e => e.ProductBatchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CountedByUser).WithMany().HasForeignKey(e => e.CountedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCashierShift(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CashierShift>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.TerminalName).HasMaxLength(100);
+        entity.Property(e => e.OpeningNotes).HasMaxLength(500);
+        entity.Property(e => e.ClosingNotes).HasMaxLength(500);
+        entity.Property(e => e.ReconciliationNotes).HasMaxLength(500);
+        entity.Property(e => e.OpeningCash).HasPrecision(18, 2);
+        entity.Property(e => e.ExpectedCash).HasPrecision(18, 2);
+        entity.Property(e => e.ActualCountedCash).HasPrecision(18, 2);
+        entity.Property(e => e.CashVariance).HasPrecision(18, 2);
+        entity.Property(e => e.CustomerCashReceivedSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.CashPaidOutSnapshot).HasPrecision(18, 2);
+
+        entity.HasIndex(e => new { e.CashierUserId, e.Status });
+        entity.HasIndex(e => new { e.BranchId, e.OpenedAtUtc });
+        entity.HasIndex(e => new { e.BranchId, e.ClosedAtUtc });
+        entity.HasIndex(e => e.Status);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_CashierShifts_Status", "\"Status\" IN (1, 2, 3)");
+            table.HasCheckConstraint("CK_CashierShifts_OpeningCash_NonNegative", "\"OpeningCash\" >= 0");
+            table.HasCheckConstraint("CK_CashierShifts_ActualCountedCash_NonNegative", "\"ActualCountedCash\" IS NULL OR \"ActualCountedCash\" >= 0");
+            table.HasCheckConstraint("CK_CashierShifts_Closed_Fields", "(\"Status\" = 1 AND \"ClosedAtUtc\" IS NULL) OR (\"Status\" <> 1 AND \"ClosedAtUtc\" IS NOT NULL AND \"ExpectedCash\" IS NOT NULL AND \"ActualCountedCash\" IS NOT NULL)");
+            table.HasCheckConstraint("CK_CashierShifts_Reconciled_Fields", "\"Status\" <> 3 OR (\"ReconciledByUserId\" IS NOT NULL AND \"ReconciledAtUtc\" IS NOT NULL)");
+        });
+
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReconciledByUser).WithMany().HasForeignKey(e => e.ReconciledByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCashierShiftDrawerEntry(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CashierShiftDrawerEntry>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(300);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.CashierShiftId);
+        entity.ToTable(table => table.HasCheckConstraint("CK_CashierShiftDrawerEntries_Amount_Positive", "\"Amount\" > 0"));
+        entity.HasOne(e => e.CashierShift).WithMany(s => s.DrawerEntries).HasForeignKey(e => e.CashierShiftId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCashierShiftPaymentSummary(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CashierShiftPaymentSummary>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.SalesAmount).HasPrecision(18, 2);
+        entity.Property(e => e.RefundsAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => new { e.CashierShiftId, e.PaymentMethod }).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_CashierShiftPaymentSummaries_NonNegative", "\"SalesAmount\" >= 0 AND \"RefundsAmount\" >= 0"));
+        entity.HasOne(e => e.CashierShift).WithMany(s => s.PaymentSummaries).HasForeignKey(e => e.CashierShiftId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private void ConfigureChartOfAccount(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<ChartOfAccount>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Code).IsRequired().HasMaxLength(20);
+        entity.Property(e => e.NormalizedCode).IsRequired().HasMaxLength(20);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.NormalizedCode).IsUnique();
+        entity.HasIndex(e => e.ParentAccountId);
+        entity.HasIndex(e => new { e.AccountType, e.IsActive });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ChartOfAccounts_AccountType", "\"AccountType\" IN (1, 2, 3, 4, 5, 6)");
+            table.HasCheckConstraint("CK_ChartOfAccounts_NormalBalance", "\"NormalBalance\" IN (1, 2)");
+        });
+        entity.HasOne(e => e.ParentAccount).WithMany(e => e.ChildAccounts).HasForeignKey(e => e.ParentAccountId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureAccountMapping(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<AccountMapping>();
+        entity.HasKey(e => e.Id);
+        entity.HasIndex(e => e.MappingKey).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 13"));
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureJournalEntry(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<JournalEntry>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.EntryNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Reference).HasMaxLength(100);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.HasIndex(e => e.EntryNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.EntryDateUtc });
+        entity.HasIndex(e => new { e.SourceType, e.SourceId });
+        entity.HasIndex(e => e.EntryDateUtc);
+        entity.ToTable(table => table.HasCheckConstraint("CK_JournalEntries_Status", "\"Status\" = 1"));
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PostedByUser).WithMany().HasForeignKey(e => e.PostedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureJournalEntryLine(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<JournalEntryLine>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Debit).HasPrecision(18, 2);
+        entity.Property(e => e.Credit).HasPrecision(18, 2);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.JournalEntryId);
+        entity.HasIndex(e => new { e.ChartOfAccountId, e.BranchId });
+        entity.HasIndex(e => e.CustomerId);
+        entity.HasIndex(e => e.SupplierId);
+        entity.ToTable(table => table.HasCheckConstraint("CK_JournalEntryLines_Amounts",
+            "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)"));
+        entity.HasOne(e => e.JournalEntry).WithMany(j => j.Lines).HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureAuditLog(ModelBuilder modelBuilder)

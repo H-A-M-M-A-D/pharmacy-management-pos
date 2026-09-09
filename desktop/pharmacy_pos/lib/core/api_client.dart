@@ -102,6 +102,55 @@ abstract interface class PharmacyApi {
   Future<List<ExpiryItem>> listExpiry(String token, {int? days});
   Future<PagedBatches> listBatches(String token, {String? search});
   Future<PagedMovements> listMovements(String token, {String? search});
+  Future<PagedStockCountSessions> listStockCountSessions(
+    String token, {
+    String? branchId,
+    String? status,
+  });
+  Future<StockCountSession> getStockCountSession(String token, String id);
+  Future<StockCountSession> createStockCountSession(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<StockCountSession> startStockCountSession(String token, String id);
+  Future<StockCountSession> submitStockCountEntries(
+    String token,
+    String id,
+    List<Map<String, dynamic>> entries,
+  );
+  Future<StockCountSession> finalizeStockCountSession(String token, String id);
+  Future<StockCountSession> cancelStockCountSession(
+    String token,
+    String id,
+    String reason,
+  );
+  Future<CashierShift?> myOpenCashierShift(String token);
+  Future<CashierShift> openCashierShift(String token, Map<String, dynamic> values);
+  Future<CashierShift> addCashierShiftDrawerEntry(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<CashierShift> closeCashierShift(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<CashierShift> reconcileCashierShift(
+    String token,
+    String id,
+    String? notes,
+  );
+  Future<CashierShift> cashierShiftDetails(String token, String id);
+  Future<PagedCashierShifts> listCashierShifts(
+    String token, {
+    String? status,
+  });
+  Future<DailyClosingSummary> dailyCashierClosingSummary(
+    String token,
+    String branchId,
+    DateTime date,
+  );
   Future<PagedSuppliers> listSuppliers(
     String token, {
     String? search,
@@ -643,6 +692,213 @@ class ApiClient implements PharmacyApi {
       (await _request(
         'GET',
         Uri(path: '/api/stock-movements', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<PagedStockCountSessions> listStockCountSessions(
+    String token, {
+    String? branchId,
+    String? status,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '50'};
+    if (branchId != null) q['branchId'] = branchId;
+    if (status != null) q['status'] = status;
+    return PagedStockCountSessions.fromJson(
+      (await _request(
+        'GET',
+        Uri(
+          path: '/api/inventory/stock-count/sessions',
+          queryParameters: q,
+        ).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<StockCountSession> getStockCountSession(
+    String token,
+    String id,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'GET',
+      '/api/inventory/stock-count/sessions/$id',
+      token: token,
+    ))!,
+  );
+
+  @override
+  Future<StockCountSession> createStockCountSession(
+    String token,
+    Map<String, dynamic> values,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/inventory/stock-count/sessions',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<StockCountSession> startStockCountSession(
+    String token,
+    String id,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/inventory/stock-count/sessions/$id/start',
+      token: token,
+    ))!,
+  );
+
+  @override
+  Future<StockCountSession> submitStockCountEntries(
+    String token,
+    String id,
+    List<Map<String, dynamic>> entries,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/inventory/stock-count/sessions/$id/entries',
+      token: token,
+      body: {'entries': entries},
+    ))!,
+  );
+
+  @override
+  Future<StockCountSession> finalizeStockCountSession(
+    String token,
+    String id,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/inventory/stock-count/sessions/$id/finalize',
+      token: token,
+    ))!,
+  );
+
+  @override
+  Future<StockCountSession> cancelStockCountSession(
+    String token,
+    String id,
+    String reason,
+  ) async => StockCountSession.fromJson(
+    (await _request(
+      'POST',
+      '/api/inventory/stock-count/sessions/$id/cancel',
+      token: token,
+      body: {'reason': reason},
+    ))!,
+  );
+
+  @override
+  Future<CashierShift?> myOpenCashierShift(String token) async {
+    final data = await _request(
+      'GET',
+      '/api/cashier-shifts/my-open',
+      token: token,
+    );
+    return data == null ? null : CashierShift.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CashierShift> openCashierShift(
+    String token,
+    Map<String, dynamic> values,
+  ) async => CashierShift.fromJson(
+    (await _request(
+      'POST',
+      '/api/cashier-shifts',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<CashierShift> addCashierShiftDrawerEntry(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => CashierShift.fromJson(
+    (await _request(
+      'POST',
+      '/api/cashier-shifts/$id/drawer-entries',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<CashierShift> closeCashierShift(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => CashierShift.fromJson(
+    (await _request(
+      'POST',
+      '/api/cashier-shifts/$id/close',
+      token: token,
+      body: values,
+    ))!,
+  );
+
+  @override
+  Future<CashierShift> reconcileCashierShift(
+    String token,
+    String id,
+    String? notes,
+  ) async => CashierShift.fromJson(
+    (await _request(
+      'POST',
+      '/api/cashier-shifts/$id/reconcile',
+      token: token,
+      body: {'reconciliationNotes': notes},
+    ))!,
+  );
+
+  @override
+  Future<CashierShift> cashierShiftDetails(String token, String id) async =>
+      CashierShift.fromJson(
+        (await _request('GET', '/api/cashier-shifts/$id', token: token))!,
+      );
+
+  @override
+  Future<PagedCashierShifts> listCashierShifts(
+    String token, {
+    String? status,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '50'};
+    if (status != null) q['status'] = status;
+    return PagedCashierShifts.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/cashier-shifts', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<DailyClosingSummary> dailyCashierClosingSummary(
+    String token,
+    String branchId,
+    DateTime date,
+  ) async {
+    final q = {
+      'branchId': branchId,
+      'date': date.toIso8601String().substring(0, 10),
+    };
+    return DailyClosingSummary.fromJson(
+      (await _request(
+        'GET',
+        Uri(
+          path: '/api/cashier-shifts/daily-summary',
+          queryParameters: q,
+        ).toString(),
         token: token,
       ))!,
     );

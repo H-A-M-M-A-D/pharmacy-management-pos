@@ -9,6 +9,7 @@ import '../finance/finance_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../purchasing/purchasing_screen.dart';
 import '../reports/reports_screen.dart';
+import '../sales/cashier_shift_screen.dart';
 import '../sales/pos_screen.dart';
 import '../suppliers/suppliers_screen.dart';
 import '../users/users_screen.dart';
@@ -42,6 +43,10 @@ class _AppShellState extends State<AppShell> {
     final canViewSales =
         widget.authState.can('sales.view') ||
         widget.authState.can('sales.create');
+    final canViewCashierShift = const [
+      'cashier_shift.open',
+      'cashier_shift.view',
+    ].any(widget.authState.can);
     final canViewFinance =
         widget.authState.can('accounts.view') ||
         widget.authState.can('expenses.view') ||
@@ -121,6 +126,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.point_of_sale),
           label: Text('Sales'),
         ),
+      if (canViewCashierShift)
+        const NavigationRailDestination(
+          icon: Icon(Icons.savings_outlined),
+          selectedIcon: Icon(Icons.savings),
+          label: Text('Cashier Shift'),
+        ),
       if (canViewFinance)
         const NavigationRailDestination(
           icon: Icon(Icons.account_balance_wallet_outlined),
@@ -164,6 +175,7 @@ class _AppShellState extends State<AppShell> {
       if (canViewCustomers) CustomersScreen(authState: widget.authState),
       if (canViewPurchasing) PurchasingScreen(authState: widget.authState),
       if (canViewSales) PosScreen(authState: widget.authState),
+      if (canViewCashierShift) CashierShiftScreen(authState: widget.authState),
       if (canViewFinance) FinanceScreen(authState: widget.authState),
       if (canViewReports) ReportsScreen(authState: widget.authState),
       if (canViewAdministration)

@@ -5,11 +5,12 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Suppliers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Suppliers;
 
-public sealed class SupplierService(ISupplierRepository repository, TimeProvider timeProvider) : ISupplierService
+public sealed class SupplierService(ISupplierRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : ISupplierService
 {
     public async Task<PagedResult<SupplierListItemDto>> ListSuppliersAsync(Guid actorId, SupplierListQuery query, CancellationToken cancellationToken = default)
     {
@@ -60,7 +61,7 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
             await Audit(actorId, "SupplierCreated", "Supplier", supplier.Id, null, Values(supplier), ct);
             if (request.OpeningBalance != 0)
             {
-                await repository.AddLedgerEntryAsync(new SupplierLedgerEntry
+                var opening = new SupplierLedgerEntry
                 {
                     SupplierId = supplier.Id,
                     BranchId = actor.BranchId,
@@ -70,7 +71,9 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
                     ReferenceType = "SupplierOpeningBalance",
                     Notes = "Opening balance",
                     CreatedByUserId = actorId
-                }, ct);
+                };
+                await repository.AddLedgerEntryAsync(opening, ct);
+                await PostSupplierOpeningBalanceJournalAsync(actor, supplier, opening, ct);
                 await Audit(actorId, "SupplierOpeningBalanceRecorded", "Supplier", supplier.Id, null, new { supplier.Id, request.OpeningBalance, BranchId = actor.BranchId }, ct);
             }
             await repository.SaveChangesAsync(ct);
@@ -143,8 +146,27 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
         if (await repository.GetBranchAsync(request.BranchId, cancellationToken) is not { IsActive: true })
             throw new RequestValidationException("Branch is invalid or inactive.");
         await RequiredSupplier(request.SupplierId, cancellationToken);
-        await AddLedger(actorId, request.SupplierId, request.BranchId, SupplierLedgerEntryType.Payment, -request.Amount,
-            request.PaymentDate, request.PaymentMethod.ToString(), request.ReferenceNumber, "SupplierPayment", request.Notes, "SupplierPaymentRecorded", cancellationToken, request.FinancialAccountId);
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var entry = new SupplierLedgerEntry
+            {
+                SupplierId = request.SupplierId,
+                BranchId = request.BranchId,
+                EntryType = SupplierLedgerEntryType.Payment,
+                Amount = -request.Amount,
+                EntryDate = request.PaymentDate,
+                PaymentMethod = request.PaymentMethod.ToString(),
+                ReferenceNumber = Clean(request.ReferenceNumber),
+                ReferenceType = "SupplierPayment",
+                Notes = Clean(request.Notes),
+                CreatedByUserId = actorId,
+                FinancialAccountId = request.FinancialAccountId
+            };
+            await repository.AddLedgerEntryAsync(entry, ct);
+            await PostSupplierPaymentJournalAsync(actor, request, entry, ct);
+            await Audit(actorId, "SupplierPaymentRecorded", "Supplier", request.SupplierId, null, new { request.SupplierId, request.BranchId, SupplierLedgerEntryType.Payment, Amount = -request.Amount, request.PaymentDate }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
         return (await repository.GetSupplierDetailsAsync(request.SupplierId, actor.BranchId, CanSelectBranch(actor), cancellationToken))!;
     }
 
@@ -185,6 +207,25 @@ public sealed class SupplierService(ISupplierRepository repository, TimeProvider
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
     }
+
+    private async Task PostSupplierPaymentJournalAsync(User actor, SupplierPaymentRequest request, SupplierLedgerEntry entry, CancellationToken ct)
+    {
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.SupplierPayment, entry.Id, request.BranchId, timeProvider.GetUtcNow().UtcDateTime,
+            entry.ReferenceNumber, $"Supplier payment to {request.SupplierId}", actor.Id,
+            [new(AccountMappingKey.AccountsPayable, request.Amount, 0, SupplierId: request.SupplierId), new(PaymentAccount(request.PaymentMethod), 0, request.Amount)]), ct);
+    }
+
+    private async Task PostSupplierOpeningBalanceJournalAsync(User actor, Supplier supplier, SupplierLedgerEntry entry, CancellationToken ct)
+    {
+        var amount = Math.Abs(supplier.OpeningBalance);
+        var lines = supplier.OpeningBalance > 0
+            ? new List<JournalLineInput> { new(AccountMappingKey.RetainedEarnings, amount, 0), new(AccountMappingKey.AccountsPayable, 0, amount, SupplierId: supplier.Id) }
+            : new List<JournalLineInput> { new(AccountMappingKey.AccountsPayable, amount, 0, SupplierId: supplier.Id), new(AccountMappingKey.RetainedEarnings, 0, amount) };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OpeningBalance, entry.Id, entry.BranchId, timeProvider.GetUtcNow().UtcDateTime,
+            "Opening balance", $"Opening balance for {supplier.Name}", actor.Id, lines), ct);
+    }
+
+    private static AccountMappingKey PaymentAccount(SupplierPaymentMethod method) => method == SupplierPaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
     private async Task<User> Require(Guid actorId, string permission, CancellationToken cancellationToken)
     {

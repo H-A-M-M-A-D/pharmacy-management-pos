@@ -4,6 +4,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Inventory;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Inventory;
@@ -11,6 +12,7 @@ namespace Pharmacy.Application.Services.Inventory;
 public sealed class InventoryService(
     IInventoryRepository repository,
     IFefoAllocationService fefo,
+    IJournalPostingService journalPosting,
     TimeProvider timeProvider) : IInventoryService
 {
     public async Task<PagedResult<InventoryListItemDto>> ListInventoryAsync(Guid actorId, InventoryListQuery query, CancellationToken cancellationToken = default)
@@ -93,7 +95,8 @@ public sealed class InventoryService(
                 throw new RequestValidationException("Opening stock cannot be added to an expired or disposed batch.");
             }
 
-            await ApplyDelta(batch, await InventoryFor(batch, product, ct), StockMovementType.OpeningStock, request.Quantity, actorId, "OpeningStock", request.Notes, ct);
+            var movement = await ApplyDelta(batch, await InventoryFor(batch, product, ct), StockMovementType.OpeningStock, request.Quantity, actorId, "OpeningStock", request.Notes, ct);
+            await PostInventoryJournalAsync(movement, batch, JournalSourceType.OpeningBalance, actorId, ct);
             await Audit(actorId, "OpeningStockAdded", "ProductBatch", batch.Id, null, new { batch.ProductId, batch.BranchId, Quantity = request.Quantity, batch.QuantityAvailable }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -124,7 +127,8 @@ public sealed class InventoryService(
             if (variance != 0)
             {
                 var movementType = variance > 0 ? StockMovementType.AdjustmentIncrease : StockMovementType.AdjustmentDecrease;
-                await ApplyDelta(batch, inventory, movementType, Math.Abs(variance), actorId, "StockCount", request.Notes, ct);
+                var movement = await ApplyDelta(batch, inventory, movementType, Math.Abs(variance), actorId, "StockCount", request.Notes, ct);
+                await PostInventoryJournalAsync(movement, batch, JournalSourceType.StockAdjustment, actorId, ct);
             }
             inventory.LastCountedAt = timeProvider.GetUtcNow().UtcDateTime;
             await Audit(actorId, "StockCountReconciled", "ProductBatch", batch.Id, new { SystemQuantity = batch.QuantityAvailable - variance }, new { request.PhysicalQuantity, Variance = variance, request.Reason }, ct);
@@ -147,7 +151,8 @@ public sealed class InventoryService(
             if (batch.ExpiryDate >= BusinessDate()) throw new RequestValidationException("Only expired batches can be disposed through expired-stock disposal.");
             var inventory = await RequiredInventory(batch, ct);
             EnsureAvailable(batch, request.Quantity);
-            await ApplyDelta(batch, inventory, StockMovementType.Expired, request.Quantity, actorId, "ExpiredStockDisposal", request.Reason, ct);
+            var movement = await ApplyDelta(batch, inventory, StockMovementType.Expired, request.Quantity, actorId, "ExpiredStockDisposal", request.Reason, ct);
+            await PostInventoryJournalAsync(movement, batch, JournalSourceType.StockWriteOff, actorId, ct);
             if (batch.QuantityAvailable == 0) batch.IsDisposed = true;
             await Audit(actorId, "ExpiredStockDisposed", "ProductBatch", batch.Id, null, new { batch.ProductId, batch.BranchId, request.Quantity, batch.QuantityAvailable, request.Reason }, ct);
             await repository.SaveChangesAsync(ct);
@@ -178,6 +183,177 @@ public sealed class InventoryService(
         return await repository.GetOptionsAsync(productSearch, actor.BranchId, CanSelectBranch(actor), cancellationToken);
     }
 
+    public async Task<StockCountSessionDto> CreateStockCountSessionAsync(Guid actorId, CreateStockCountSessionRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCount, cancellationToken);
+        EnsureBranchAccess(actor, request.BranchId);
+        var businessDate = BusinessDate();
+        if (request.CountDate > businessDate) throw new RequestValidationException("Count date cannot be in the future.");
+        if (request.Scope == StockCountScope.Category && request.CategoryId is null)
+            throw new RequestValidationException("Category is required for a category-based stock count.");
+        if (request.Scope == StockCountScope.SelectedProducts && (request.ProductIds is null || request.ProductIds.Count == 0))
+            throw new RequestValidationException("At least one product is required for a selected-products stock count.");
+        if (request.Scope == StockCountScope.SelectedBatches && (request.ProductBatchIds is null || request.ProductBatchIds.Count == 0))
+            throw new RequestValidationException("At least one batch is required for a selected-batches stock count.");
+
+        StockCountSession? session = null;
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var batches = await repository.GetEligibleBatchesForCountAsync(request.BranchId, request.Scope, request.CategoryId, request.ProductIds, request.ProductBatchIds, ct);
+            if (batches.Count == 0) throw new RequestValidationException("No eligible batches were found for the requested stock count scope.");
+            session = new StockCountSession
+            {
+                CountNumber = await repository.NextStockCountNumberAsync(request.CountDate, ct),
+                BranchId = request.BranchId,
+                CountDate = request.CountDate,
+                Status = StockCountStatus.Draft,
+                Scope = request.Scope,
+                CategoryId = request.CategoryId,
+                Notes = request.Notes,
+                CreatedByUserId = actorId,
+                Items = batches.Select(batch => new StockCountItem
+                {
+                    ProductId = batch.ProductId,
+                    ProductBatchId = batch.Id,
+                    SystemQuantity = batch.QuantityAvailable,
+                    UnitCostSnapshot = batch.PurchasePrice
+                }).ToList()
+            };
+            await repository.AddStockCountSessionAsync(session, ct);
+            await Audit(actorId, "StockCountSessionCreated", "StockCountSession", session.Id, null, new { session.CountNumber, session.BranchId, session.Scope, ItemCount = session.Items.Count }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetStockCountSessionDetailsAsync(session!.Id, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+    }
+
+    public async Task<StockCountSessionDto> StartStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCount, cancellationToken);
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var session = await RequiredSession(sessionId, ct);
+            EnsureBranchAccess(actor, session.BranchId);
+            if (session.Status != StockCountStatus.Draft) throw new RequestValidationException("Only draft stock count sessions can be started.");
+            session.Status = StockCountStatus.InProgress;
+            session.StartedByUserId = actorId;
+            session.StartedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            session.UpdatedAt = session.StartedAtUtc.Value;
+            await Audit(actorId, "StockCountSessionStarted", "StockCountSession", session.Id, null, new { session.CountNumber }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+    }
+
+    public async Task<StockCountSessionDto> SubmitStockCountEntriesAsync(Guid actorId, Guid sessionId, SubmitStockCountEntriesRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCount, cancellationToken);
+        if (request.Entries.Count == 0) throw new RequestValidationException("At least one count entry is required.");
+        if (request.Entries.Any(x => x.CountedQuantity < 0)) throw new RequestValidationException("Counted quantity cannot be negative.");
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var session = await RequiredSession(sessionId, ct);
+            EnsureBranchAccess(actor, session.BranchId);
+            if (session.Status != StockCountStatus.InProgress) throw new RequestValidationException("Stock counts can only be entered while the session is in progress.");
+            var now = timeProvider.GetUtcNow().UtcDateTime;
+            foreach (var entry in request.Entries)
+            {
+                var item = session.Items.FirstOrDefault(x => x.Id == entry.StockCountItemId)
+                    ?? throw new RequestValidationException("One or more count entries do not belong to this session.");
+                item.CountedQuantity = entry.CountedQuantity;
+                item.Reason = entry.Reason?.ToString();
+                item.Notes = entry.Notes;
+                item.CountedByUserId = actorId;
+                item.CountedAtUtc = now;
+                item.UpdatedAt = now;
+            }
+            session.UpdatedAt = now;
+            await Audit(actorId, "StockCountEntriesSubmitted", "StockCountSession", session.Id, null, new { session.CountNumber, Entries = request.Entries.Count }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+    }
+
+    public async Task<StockCountSessionDto> FinalizeStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCountFinalize, cancellationToken);
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var session = await RequiredSession(sessionId, ct);
+            EnsureBranchAccess(actor, session.BranchId);
+            if (session.Status != StockCountStatus.InProgress) throw new RequestValidationException("Only in-progress stock count sessions can be finalized.");
+            foreach (var item in session.Items)
+            {
+                if (!item.CountedQuantity.HasValue || item.CountedQuantity.Value == item.SystemQuantity) continue;
+                var batch = await RequiredBatch(item.ProductBatchId, ct);
+                if (batch.IsDisposed) continue;
+                var variance = item.CountedQuantity.Value - item.SystemQuantity;
+                var movementType = variance > 0 ? StockMovementType.AdjustmentIncrease : StockMovementType.AdjustmentDecrease;
+                var inventory = await RequiredInventory(batch, ct);
+                var movement = await ApplyDelta(batch, inventory, movementType, Math.Abs(variance), actorId, "StockCount", $"Stock count {session.CountNumber}", ct);
+                await PostInventoryJournalAsync(movement, batch, JournalSourceType.StockAdjustment, actorId, ct);
+            }
+            session.Status = StockCountStatus.Completed;
+            session.CompletedByUserId = actorId;
+            session.CompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            session.UpdatedAt = session.CompletedAtUtc.Value;
+            await Audit(actorId, "StockCountSessionFinalized", "StockCountSession", session.Id, null,
+                new { session.CountNumber, TotalItems = session.Items.Count, CountedItems = session.Items.Count(x => x.CountedQuantity.HasValue),
+                    VarianceItems = session.Items.Count(x => x.CountedQuantity.HasValue && x.CountedQuantity != x.SystemQuantity) }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+    }
+
+    public async Task<StockCountSessionDto> CancelStockCountSessionAsync(Guid actorId, Guid sessionId, CancelStockCountSessionRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCount, cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new RequestValidationException("Cancellation reason is required.");
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var session = await RequiredSession(sessionId, ct);
+            EnsureBranchAccess(actor, session.BranchId);
+            if (session.Status is StockCountStatus.Completed or StockCountStatus.Cancelled)
+                throw new RequestValidationException("Only draft or in-progress stock count sessions can be cancelled.");
+            session.Status = StockCountStatus.Cancelled;
+            session.CancelledByUserId = actorId;
+            session.CancelledAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            session.UpdatedAt = session.CancelledAtUtc.Value;
+            await Audit(actorId, "StockCountSessionCancelled", "StockCountSession", session.Id, null, new { session.CountNumber, request.Reason }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+    }
+
+    public async Task<StockCountSessionDto> GetStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCountView, cancellationToken);
+        var dto = await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+        EnsureBranchAccess(actor, dto.BranchId);
+        return dto;
+    }
+
+    public async Task<PagedResult<StockCountSessionListItemDto>> ListStockCountSessionsAsync(Guid actorId, StockCountSessionListQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCountView, cancellationToken);
+        ValidatePage(query.Page, query.PageSize);
+        var scope = Scope(actor, query.BranchId);
+        return await repository.ListStockCountSessionsAsync(query with { BranchId = scope.BranchId }, actor.BranchId, scope.CanSelectBranch, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<StockCountItemDto>> GetStockCountDiscrepanciesAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.InventoryStockCountView, cancellationToken);
+        var dto = await repository.GetStockCountSessionDetailsAsync(sessionId, cancellationToken) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+        EnsureBranchAccess(actor, dto.BranchId);
+        return dto.Items.Where(x => x.Variance is not null and not 0).OrderByDescending(x => Math.Abs(x.VarianceValue ?? 0)).ToList();
+    }
+
+    private async Task<StockCountSession> RequiredSession(Guid sessionId, CancellationToken ct) =>
+        await repository.GetStockCountSessionForUpdateAsync(sessionId, ct) ?? throw new ResourceNotFoundException("Stock count session was not found.");
+
+    private const int LargeAdjustmentAbsoluteThreshold = 100;
+    private const decimal LargeAdjustmentRelativeThreshold = 0.5m;
+
     private async Task<InventoryDetailsDto> Adjust(Guid actorId, StockAdjustmentRequest request, StockMovementType movementType, string auditAction, CancellationToken cancellationToken)
     {
         var actor = await Require(actorId, PermissionCatalog.InventoryAdjust, cancellationToken);
@@ -189,13 +365,27 @@ public sealed class InventoryService(
             EnsureBatchMatches(batch, request.BranchId, request.ProductId);
             var inventory = await RequiredInventory(batch, ct);
             if (movementType is StockMovementType.AdjustmentDecrease or StockMovementType.Damaged) EnsureAvailable(batch, request.Quantity);
-            await ApplyDelta(batch, inventory, movementType, request.Quantity, actorId, movementType == StockMovementType.Damaged ? "DamagedStock" : "StockAdjustment", request.Notes ?? request.Reason.ToString(), ct);
-            await Audit(actorId, auditAction, "ProductBatch", batch.Id, null, new { batch.ProductId, batch.BranchId, request.Quantity, request.Reason, batch.QuantityAvailable }, ct);
+            var priorAvailable = batch.QuantityAvailable;
+            var significant = IsSignificantAdjustment(request.Quantity, priorAvailable);
+            var movement = await ApplyDelta(batch, inventory, movementType, request.Quantity, actorId, movementType == StockMovementType.Damaged ? "DamagedStock" : "StockAdjustment", request.Notes ?? request.Reason.ToString(), ct);
+            await PostInventoryJournalAsync(movement, batch,
+                movementType == StockMovementType.Damaged ? JournalSourceType.StockWriteOff : JournalSourceType.StockAdjustment, actorId, ct);
+            await Audit(actorId, significant ? $"{auditAction}Significant" : auditAction, "ProductBatch", batch.Id,
+                new { QuantityBeforeAdjustment = priorAvailable },
+                new { batch.ProductId, batch.BranchId, request.Quantity, request.Reason, batch.QuantityAvailable, Significant = significant }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
         return await repository.GetInventoryDetailsAsync(request.BranchId, request.ProductId, BusinessDate(), cancellationToken)
             ?? throw new ResourceNotFoundException("Inventory was not found.");
     }
+
+    /// <summary>
+    /// A manual stock adjustment is flagged significant (and gets a distinct audit action so it stands
+    /// out in the audit log) when it moves a large absolute quantity or a large share of the batch's
+    /// current stock, regardless of direction.
+    /// </summary>
+    private static bool IsSignificantAdjustment(int quantity, int priorAvailable) =>
+        quantity >= LargeAdjustmentAbsoluteThreshold || (priorAvailable > 0 && quantity >= priorAvailable * LargeAdjustmentRelativeThreshold);
 
     private async Task<User> Require(Guid actorId, string permission, CancellationToken cancellationToken)
     {
@@ -259,7 +449,7 @@ public sealed class InventoryService(
         return inventory;
     }
 
-    private async Task ApplyDelta(ProductBatch batch, Pharmacy.Domain.Entities.Inventory inventory, StockMovementType movementType, int absoluteQuantity, Guid actorId, string referenceType, string? notes, CancellationToken ct)
+    private async Task<StockMovement> ApplyDelta(ProductBatch batch, Pharmacy.Domain.Entities.Inventory inventory, StockMovementType movementType, int absoluteQuantity, Guid actorId, string referenceType, string? notes, CancellationToken ct)
     {
         var signed = movementType is StockMovementType.OpeningStock or StockMovementType.Purchase or StockMovementType.SaleReturn or StockMovementType.TransferIn or StockMovementType.AdjustmentIncrease
             ? absoluteQuantity : -absoluteQuantity;
@@ -271,7 +461,7 @@ public sealed class InventoryService(
         batch.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         inventory.QuantityInStock += signed;
         inventory.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await repository.AddMovementAsync(new StockMovement
+        var movement = new StockMovement
         {
             MovementType = movementType,
             BranchId = batch.BranchId,
@@ -281,7 +471,24 @@ public sealed class InventoryService(
             ReferenceType = referenceType,
             Notes = notes,
             PerformedByUserId = actorId
-        }, ct);
+        };
+        await repository.AddMovementAsync(movement, ct);
+        return movement;
+    }
+
+    private async Task PostInventoryJournalAsync(StockMovement movement, ProductBatch batch, JournalSourceType sourceType, Guid actorId, CancellationToken ct)
+    {
+        var amount = decimal.Round(Math.Abs(movement.Quantity) * batch.PurchasePrice, 2, MidpointRounding.AwayFromZero);
+        if (amount == 0) return;
+        var increase = movement.Quantity > 0;
+        var counterpart = sourceType == JournalSourceType.OpeningBalance
+            ? AccountMappingKey.RetainedEarnings
+            : increase ? AccountMappingKey.InventoryAdjustmentGain : AccountMappingKey.InventoryLossExpense;
+        var lines = increase
+            ? new List<JournalLineInput> { new(AccountMappingKey.Inventory, amount, 0), new(counterpart, 0, amount) }
+            : new List<JournalLineInput> { new(counterpart, amount, 0), new(AccountMappingKey.Inventory, 0, amount) };
+        await journalPosting.PostAsync(new JournalPostingRequest(sourceType, movement.Id, movement.BranchId, timeProvider.GetUtcNow().UtcDateTime,
+            movement.ReferenceType, movement.Notes ?? $"{movement.MovementType} inventory posting", actorId, lines), ct);
     }
 
     private static void EnsureBatchMatches(ProductBatch batch, Guid branchId, Guid productId)

@@ -190,6 +190,81 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         }
     }
 
+    public async Task<string> NextStockCountNumberAsync(DateOnly countDate, CancellationToken cancellationToken = default)
+    {
+        var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"StockCountNumberSequence\"'::regclass) AS \"Value\"").SingleAsync(cancellationToken);
+        return $"SC-{countDate.Year}-{next:000000}";
+    }
+
+    public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, StockCountScope scope, Guid? categoryId,
+        IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default)
+    {
+        var query = context.ProductBatches.AsNoTracking().Include(x => x.Product)
+            .Where(x => x.BranchId == branchId && !x.IsDisposed);
+        query = scope switch
+        {
+            StockCountScope.Full => query.Where(x => x.QuantityAvailable > 0),
+            StockCountScope.Category => query.Where(x => x.QuantityAvailable > 0 && x.Product!.CategoryId == categoryId),
+            StockCountScope.SelectedProducts => query.Where(x => productIds != null && productIds.Contains(x.ProductId)),
+            StockCountScope.SelectedBatches => query.Where(x => productBatchIds != null && productBatchIds.Contains(x.Id)),
+            _ => query
+        };
+        return await query.OrderBy(x => x.Product!.Name).ThenBy(x => x.ExpiryDate).ToListAsync(cancellationToken);
+    }
+
+    public async Task AddStockCountSessionAsync(StockCountSession session, CancellationToken cancellationToken = default) =>
+        await context.StockCountSessions.AddAsync(session, cancellationToken);
+
+    public Task<StockCountSession?> GetStockCountSessionForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.StockCountSessions
+            .Include(x => x.Items).ThenInclude(x => x.ProductBatch)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public async Task<StockCountSessionDto?> GetStockCountSessionDetailsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var session = await StockCountSessionQuery().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        return session is null ? null : MapSessionDto(session);
+    }
+
+    public async Task<PagedResult<StockCountSessionListItemDto>> ListStockCountSessionsAsync(StockCountSessionListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
+    {
+        var sessions = StockCountSessionQuery();
+        if (!canSelectBranch && actorBranchId.HasValue) sessions = sessions.Where(x => x.BranchId == actorBranchId);
+        if (query.BranchId.HasValue) sessions = sessions.Where(x => x.BranchId == query.BranchId);
+        if (query.Status.HasValue) sessions = sessions.Where(x => x.Status == query.Status);
+        if (query.From.HasValue) sessions = sessions.Where(x => x.CountDate >= query.From);
+        if (query.To.HasValue) sessions = sessions.Where(x => x.CountDate <= query.To);
+        var total = await sessions.CountAsync(cancellationToken);
+        var items = await sessions.OrderByDescending(x => x.CreatedAt).Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
+            .Select(x => new StockCountSessionListItemDto(x.Id, x.CountNumber, x.BranchId, x.Branch!.Name, x.CountDate, x.Status, x.Scope,
+                x.Category == null ? null : x.Category.Name, x.Items.Count, x.Items.Count(i => i.CountedQuantity != null),
+                x.Items.Count(i => i.CountedQuantity != null && i.CountedQuantity != i.SystemQuantity),
+                x.CreatedByUser!.FullName, x.CreatedAt, x.CompletedAtUtc))
+            .ToListAsync(cancellationToken);
+        return new(items, query.Page, query.PageSize, total);
+    }
+
+    private IQueryable<StockCountSession> StockCountSessionQuery() =>
+        context.StockCountSessions.AsNoTracking()
+            .Include(x => x.Branch).Include(x => x.Category)
+            .Include(x => x.CreatedByUser).Include(x => x.StartedByUser).Include(x => x.CompletedByUser).Include(x => x.CancelledByUser)
+            .Include(x => x.Items).ThenInclude(x => x.Product)
+            .Include(x => x.Items).ThenInclude(x => x.ProductBatch)
+            .Include(x => x.Items).ThenInclude(x => x.CountedByUser);
+
+    private static StockCountSessionDto MapSessionDto(StockCountSession x)
+    {
+        var items = x.Items.OrderBy(i => i.Product!.Name).ThenBy(i => i.ProductBatch!.ExpiryDate).Select(i => new StockCountItemDto(
+            i.Id, i.ProductId, i.Product!.Name, i.Product.SKU, i.ProductBatchId, i.ProductBatch!.BatchNumber, i.ProductBatch.ExpiryDate,
+            i.SystemQuantity, i.CountedQuantity, i.CountedQuantity.HasValue ? i.CountedQuantity - i.SystemQuantity : null,
+            i.UnitCostSnapshot, i.CountedQuantity.HasValue ? (i.CountedQuantity.Value - i.SystemQuantity) * i.UnitCostSnapshot : null,
+            i.Reason, i.Notes, i.CountedByUser == null ? null : i.CountedByUser.FullName, i.CountedAtUtc)).ToList();
+        return new StockCountSessionDto(x.Id, x.CountNumber, x.BranchId, x.Branch!.Name, x.CountDate, x.Status, x.Scope, x.CategoryId,
+            x.Category?.Name, x.Notes, x.CreatedByUser!.FullName, x.StartedByUser?.FullName, x.StartedAtUtc,
+            x.CompletedByUser?.FullName, x.CompletedAtUtc, x.CancelledByUser?.FullName, x.CancelledAtUtc,
+            items.Count, items.Count(i => i.CountedQuantity != null), items.Count(i => i.Variance is not null and not 0), items);
+    }
+
     private IQueryable<ProductBatch> BatchQuery(Guid? branchId, Guid? actorBranchId, bool canSelectBranch, DateOnly businessDate)
     {
         var query = context.ProductBatches.AsNoTracking()

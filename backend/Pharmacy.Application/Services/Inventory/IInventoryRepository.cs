@@ -28,4 +28,12 @@ public interface IInventoryRepository
     Task<InventoryOptionsDto> GetOptionsAsync(string? productSearch, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    Task<string> NextStockCountNumberAsync(DateOnly countDate, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, StockCountScope scope, Guid? categoryId,
+        IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default);
+    Task AddStockCountSessionAsync(StockCountSession session, CancellationToken cancellationToken = default);
+    Task<StockCountSession?> GetStockCountSessionForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto?> GetStockCountSessionDetailsAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<PagedResult<StockCountSessionListItemDto>> ListStockCountSessionsAsync(StockCountSessionListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
 }

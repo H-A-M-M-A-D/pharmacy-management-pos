@@ -1,0 +1,272 @@
+using System.Data;
+using System.Text.Json;
+using Pharmacy.Application.Common;
+using Pharmacy.Application.DTOs.Accounting;
+using Pharmacy.Application.DTOs.Users;
+using Pharmacy.Application.Security;
+using Pharmacy.Domain.Entities;
+
+namespace Pharmacy.Application.Services.Accounting;
+
+public sealed class AccountingService(IAccountingRepository repository, TimeProvider timeProvider) : IAccountingService
+{
+    public async Task<IReadOnlyList<ChartOfAccountListItemDto>> ListAccountsAsync(Guid actorId, bool includeInactive, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaView, cancellationToken);
+        var accounts = await repository.ListAccountsAsync(includeInactive, cancellationToken);
+        var byId = accounts.ToDictionary(x => x.Id);
+        return accounts.Select(x => new ChartOfAccountListItemDto(x.Id, x.Code, x.Name, x.ParentAccountId,
+            x.ParentAccountId.HasValue && byId.TryGetValue(x.ParentAccountId.Value, out var parent) ? parent.Name : null,
+            x.AccountType, x.NormalBalance, x.IsPostingAccount, x.IsActive, x.Description)).ToList();
+    }
+
+    public async Task<ChartOfAccountDto> GetAccountAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaView, cancellationToken);
+        var account = await RequiredAccount(id, cancellationToken);
+        var balance = await repository.GetAccountBalanceAsync(id, cancellationToken);
+        return await MapAccount(account, balance, cancellationToken);
+    }
+
+    public async Task<ChartOfAccountDto> CreateAccountAsync(Guid actorId, ChartOfAccountRequest request, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaManage, cancellationToken);
+        ValidateCode(request.Code);
+        ValidateName(request.Name);
+        if (!Enum.IsDefined(request.AccountType)) throw new RequestValidationException("Account type is invalid.");
+        if (!Enum.IsDefined(request.NormalBalance)) throw new RequestValidationException("Normal balance is invalid.");
+        var normalized = Normalize(request.Code);
+        if (await repository.GetAccountByNormalizedCodeAsync(normalized, cancellationToken) is not null)
+            throw new ResourceConflictException("An account with this code already exists.");
+        if (request.ParentAccountId.HasValue && await repository.GetAccountAsync(request.ParentAccountId.Value, cancellationToken) is null)
+            throw new RequestValidationException("Parent account was not found.");
+
+        ChartOfAccount? account = null;
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            account = new ChartOfAccount
+            {
+                Code = request.Code.Trim(),
+                NormalizedCode = normalized,
+                Name = request.Name.Trim(),
+                ParentAccountId = request.ParentAccountId,
+                AccountType = request.AccountType,
+                NormalBalance = request.NormalBalance,
+                IsPostingAccount = request.IsPostingAccount,
+                Description = Clean(request.Description)
+            };
+            await repository.AddAccountAsync(account, ct);
+            await Audit(actorId, "ChartOfAccountCreated", "ChartOfAccount", account.Id, new { account.Code, account.Name, account.AccountType, account.NormalBalance }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await MapAccount(account!, 0, cancellationToken);
+    }
+
+    public async Task<ChartOfAccountDto> UpdateAccountAsync(Guid actorId, Guid id, ChartOfAccountUpdateRequest request, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaManage, cancellationToken);
+        ValidateName(request.Name);
+        var account = await RequiredAccount(id, cancellationToken);
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            account.Name = request.Name.Trim();
+            account.Description = Clean(request.Description);
+            account.IsPostingAccount = request.IsPostingAccount;
+            account.UpdatedAt = UtcNow();
+            await Audit(actorId, "ChartOfAccountUpdated", "ChartOfAccount", account.Id, new { account.Name, account.IsPostingAccount }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await MapAccount(account, await repository.GetAccountBalanceAsync(id, cancellationToken), cancellationToken);
+    }
+
+    public async Task SetAccountActiveAsync(Guid actorId, Guid id, bool active, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaManage, cancellationToken);
+        var account = await RequiredAccount(id, cancellationToken);
+        if (!active && await repository.IsAccountMappedAsync(id, cancellationToken))
+            throw new RequestValidationException("This account is used by an active account mapping. Reassign the mapping before deactivating it.");
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            account.IsActive = active;
+            account.UpdatedAt = UtcNow();
+            await Audit(actorId, active ? "ChartOfAccountActivated" : "ChartOfAccountDeactivated", "ChartOfAccount", account.Id, new { account.Code }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AccountMappingDto>> ListAccountMappingsAsync(Guid actorId, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaView, cancellationToken);
+        var mappings = await repository.ListAccountMappingsAsync(cancellationToken);
+        return mappings.Select(x => new AccountMappingDto(x.MappingKey, x.ChartOfAccountId, x.ChartOfAccount?.Code ?? string.Empty, x.ChartOfAccount?.Name ?? string.Empty)).ToList();
+    }
+
+    public async Task<AccountMappingDto> SetAccountMappingAsync(Guid actorId, SetAccountMappingRequest request, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCoaManage, cancellationToken);
+        if (!Enum.IsDefined(request.MappingKey)) throw new RequestValidationException("Mapping key is invalid.");
+        var account = await repository.GetAccountAsync(request.ChartOfAccountId, cancellationToken)
+            ?? throw new RequestValidationException("Target account was not found.");
+        if (!account.IsActive) throw new RequestValidationException("Cannot map to an inactive account.");
+        if (!account.IsPostingAccount) throw new RequestValidationException("Cannot map to a header/summary account. Choose a posting account.");
+
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var existing = await repository.GetAccountMappingAsync(request.MappingKey, ct);
+            if (existing is null)
+            {
+                await repository.AddAccountMappingAsync(new AccountMapping { MappingKey = request.MappingKey, ChartOfAccountId = request.ChartOfAccountId }, ct);
+            }
+            else
+            {
+                existing.ChartOfAccountId = request.ChartOfAccountId;
+                existing.UpdatedAt = UtcNow();
+            }
+            await Audit(actorId, "AccountMappingSet", "AccountMapping", request.ChartOfAccountId, new { request.MappingKey, request.ChartOfAccountId }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return new AccountMappingDto(request.MappingKey, request.ChartOfAccountId, account.Code, account.Name);
+    }
+
+    public async Task<JournalEntryDto> PostManualJournalAsync(Guid actorId, PostManualJournalRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalPost, cancellationToken);
+        EnsureBranchAccess(actor, request.BranchId);
+        if (string.IsNullOrWhiteSpace(request.Description)) throw new RequestValidationException("Description is required.");
+        if (request.Lines.Count < 2) throw new RequestValidationException("A journal entry requires at least two lines.");
+        if (await repository.GetBranchAsync(request.BranchId, cancellationToken) is not { IsActive: true })
+            throw new RequestValidationException("Branch is invalid or inactive.");
+
+        JournalEntry? entry = null;
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            decimal totalDebit = 0, totalCredit = 0;
+            var lines = new List<JournalEntryLine>();
+            foreach (var line in request.Lines)
+            {
+                if (line.Debit < 0 || line.Credit < 0) throw new RequestValidationException("Line amounts cannot be negative.");
+                if (line.Debit > 0 && line.Credit > 0) throw new RequestValidationException("A line cannot carry both a debit and a credit.");
+                if (line.Debit == 0 && line.Credit == 0) throw new RequestValidationException("Every line must carry a non-zero debit or credit.");
+                var account = await repository.GetAccountAsync(line.ChartOfAccountId, ct)
+                    ?? throw new RequestValidationException("One or more accounts were not found.");
+                if (!account.IsActive) throw new RequestValidationException($"Account {account.Code} is inactive.");
+                if (!account.IsPostingAccount) throw new RequestValidationException($"Account {account.Code} is a header/summary account and cannot be posted to directly.");
+                if (line.CustomerId.HasValue && await repository.GetCustomerAsync(line.CustomerId.Value, ct) is null)
+                    throw new RequestValidationException("Customer was not found.");
+                if (line.SupplierId.HasValue && await repository.GetSupplierAsync(line.SupplierId.Value, ct) is null)
+                    throw new RequestValidationException("Supplier was not found.");
+                totalDebit += line.Debit;
+                totalCredit += line.Credit;
+                lines.Add(new JournalEntryLine
+                {
+                    ChartOfAccountId = line.ChartOfAccountId, Debit = line.Debit, Credit = line.Credit,
+                    BranchId = request.BranchId, CustomerId = line.CustomerId, SupplierId = line.SupplierId, Description = Clean(line.Description)
+                });
+            }
+            if (decimal.Round(totalDebit, 2) != decimal.Round(totalCredit, 2))
+                throw new RequestValidationException($"The entry does not balance: total debit {totalDebit} vs total credit {totalCredit}.");
+
+            entry = new JournalEntry
+            {
+                EntryNumber = await repository.NextJournalEntryNumberAsync(request.EntryDateUtc, ct),
+                EntryDateUtc = request.EntryDateUtc,
+                SourceType = JournalSourceType.ManualVoucher,
+                Reference = Clean(request.Reference),
+                Description = request.Description.Trim(),
+                BranchId = request.BranchId,
+                PostedByUserId = actorId,
+                PostedAtUtc = UtcNow(),
+                Status = JournalEntryStatus.Posted,
+                Lines = lines
+            };
+            await repository.AddJournalEntryAsync(entry, ct);
+            await Audit(actorId, "ManualJournalPosted", "JournalEntry", entry.Id, new { entry.EntryNumber, TotalDebit = totalDebit, TotalCredit = totalCredit }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await MapJournalEntry(entry!, cancellationToken);
+    }
+
+    public async Task<JournalEntryDto> GetJournalEntryAsync(Guid actorId, Guid id, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        var entry = await repository.GetJournalEntryAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Journal entry was not found.");
+        EnsureBranchAccess(actor, entry.BranchId);
+        return await MapJournalEntry(entry, cancellationToken);
+    }
+
+    public async Task<PagedResult<JournalEntryListItemDto>> ListJournalEntriesAsync(Guid actorId, JournalEntryListQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        if (query.Page < 1 || query.PageSize is < 1 or > 100) throw new RequestValidationException("Page must be positive and page size must be between 1 and 100.");
+        var scope = Scope(actor, query.BranchId);
+        return await repository.ListJournalEntriesAsync(query with { BranchId = scope }, actor.BranchId, CanSelectBranch(actor), cancellationToken);
+    }
+
+    public async Task<TrialBalanceDto> GetTrialBalanceAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        var scope = Scope(actor, branchId);
+        var rows = await repository.GetTrialBalanceAsync(asOfUtc, scope, cancellationToken);
+        return new TrialBalanceDto(asOfUtc, rows, rows.Sum(x => x.Debit), rows.Sum(x => x.Credit));
+    }
+
+    private async Task<ChartOfAccountDto> MapAccount(ChartOfAccount account, decimal balance, CancellationToken ct)
+    {
+        var parentName = account.ParentAccountId.HasValue
+            ? (await repository.GetAccountAsync(account.ParentAccountId.Value, ct))?.Name
+            : null;
+        return new ChartOfAccountDto(account.Id, account.Code, account.Name, account.ParentAccountId, parentName,
+            account.AccountType, account.NormalBalance, account.IsPostingAccount, account.IsActive, account.Description, balance);
+    }
+
+    private async Task<JournalEntryDto> MapJournalEntry(JournalEntry entry, CancellationToken ct)
+    {
+        var branch = await repository.GetBranchAsync(entry.BranchId, ct);
+        var postedBy = await repository.GetActorAsync(entry.PostedByUserId, ct);
+        var lineDtos = new List<JournalEntryLineDto>();
+        foreach (var line in entry.Lines)
+        {
+            var account = line.ChartOfAccount ?? await repository.GetAccountAsync(line.ChartOfAccountId, ct);
+            var customer = line.CustomerId.HasValue ? line.Customer ?? await repository.GetCustomerAsync(line.CustomerId.Value, ct) : null;
+            var supplier = line.SupplierId.HasValue ? line.Supplier ?? await repository.GetSupplierAsync(line.SupplierId.Value, ct) : null;
+            lineDtos.Add(new JournalEntryLineDto(line.Id, line.ChartOfAccountId, account?.Code ?? string.Empty, account?.Name ?? string.Empty,
+                line.Debit, line.Credit, line.BranchId, customer?.Name, supplier?.Name, line.Description));
+        }
+        return new JournalEntryDto(entry.Id, entry.EntryNumber, entry.EntryDateUtc, entry.SourceType, entry.SourceId, entry.Reference,
+            entry.Description, entry.BranchId, branch?.Name ?? string.Empty, postedBy?.FullName ?? string.Empty, entry.PostedAtUtc, entry.Status,
+            lineDtos.Sum(x => x.Debit), lineDtos.Sum(x => x.Credit), lineDtos);
+    }
+
+    private async Task<ChartOfAccount> RequiredAccount(Guid id, CancellationToken ct) =>
+        await repository.GetAccountAsync(id, ct) ?? throw new ResourceNotFoundException("Account was not found.");
+
+    private async Task<User> Require(Guid actorId, string permission, CancellationToken ct)
+    {
+        var actor = await repository.GetActorAsync(actorId, ct);
+        if (actor is null || !actor.IsActive || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == permission) != true)
+            throw new ForbiddenOperationException("The current user is not permitted to perform this operation.");
+        return actor;
+    }
+
+    private static Guid? Scope(User actor, Guid? requested)
+    {
+        if (CanSelectBranch(actor)) return requested;
+        if (requested.HasValue && requested != actor.BranchId) throw new ForbiddenOperationException("The current user cannot access this branch.");
+        return actor.BranchId;
+    }
+
+    private static void EnsureBranchAccess(User actor, Guid branchId)
+    {
+        if (!CanSelectBranch(actor) && actor.BranchId != branchId)
+            throw new ForbiddenOperationException("The current user cannot access this branch.");
+    }
+
+    private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager;
+    private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
+    private async Task Audit(Guid userId, string action, string entityType, Guid entityId, object values, CancellationToken ct) =>
+        await repository.AddAuditAsync(new AuditLog { UserId = userId, Action = action, EntityType = entityType, EntityId = entityId, NewValues = JsonSerializer.Serialize(values) }, ct);
+    private static void ValidateCode(string code) { if (string.IsNullOrWhiteSpace(code) || code.Trim().Length > 20) throw new RequestValidationException("Account code is required and must be 20 characters or fewer."); }
+    private static void ValidateName(string name) { if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 200) throw new RequestValidationException("Account name is required and must be 200 characters or fewer."); }
+    private static string Normalize(string value) => value.Trim().ToUpperInvariant();
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

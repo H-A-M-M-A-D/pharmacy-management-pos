@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Customers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Customers;
 using Pharmacy.Domain.Entities;
 
@@ -20,6 +21,13 @@ public sealed class CustomerManagementTests
         Assert.Equal(0, result.AdvanceBalance);
         Assert.Contains(f.Ledger, x => x.EntryType == CustomerLedgerEntryType.OpeningBalance && x.Amount == 10000);
         Assert.Contains(f.Audits, x => x.Action == "CustomerCreated");
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.OpeningBalance, journal.SourceType);
+        var receivable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivable);
+        Assert.Equal(10000, receivable.Debit);
+        Assert.Equal(f.Customer!.Id, receivable.CustomerId);
+        Assert.Equal(10000, journal.Lines.Single(x => x.Account == AccountMappingKey.RetainedEarnings).Credit);
     }
 
     [Fact]
@@ -30,6 +38,12 @@ public sealed class CustomerManagementTests
         Assert.Equal(5000, result.AdvanceBalance);
         Assert.Equal(0, result.OutstandingBalance);
         Assert.Contains(f.Ledger, x => x.EntryType == CustomerLedgerEntryType.OpeningBalance && x.Amount == -5000);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(5000, journal.Lines.Single(x => x.Account == AccountMappingKey.RetainedEarnings).Debit);
+        var receivable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivable);
+        Assert.Equal(5000, receivable.Credit);
+        Assert.Equal(f.Customer!.Id, receivable.CustomerId);
     }
 
     [Fact]
@@ -38,6 +52,7 @@ public sealed class CustomerManagementTests
         var f = new Fixture(PermissionCatalog.CustomersCreate);
         await f.Service.CreateCustomerAsync(f.Actor.Id, Request(opening: 0));
         Assert.Empty(f.Ledger);
+        Assert.Empty(f.Journal.Posted);
     }
 
     [Fact]
@@ -73,6 +88,24 @@ public sealed class CustomerManagementTests
         Assert.Contains(f.Ledger, x => x.EntryType == CustomerLedgerEntryType.AdjustmentCredit && x.Amount == -1500);
         Assert.Equal(-3500, f.Balance);
         Assert.Single(f.Payments);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.CustomerPayment, journal.SourceType);
+        Assert.Equal(f.Payments.Single().Id, journal.SourceId);
+        Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Debit);
+        var receivable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivable);
+        Assert.Equal(4000, receivable.Credit);
+        Assert.Equal(f.Customer!.Id, receivable.CustomerId);
+    }
+
+    [Fact]
+    public async Task Customer_payment_journal_posting_failure_rolls_back_the_entire_payment()
+    {
+        var f = new Fixture(PermissionCatalog.CustomersPaymentCreate) { Journal = { ThrowOnPost = true } };
+        f.ExistingCustomer();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.RecordPaymentAsync(f.Actor.Id, new(f.Customer!.Id, f.Branch.Id, 4000, DateTime.UtcNow, CustomerPaymentMethod.Cash, "R-1", null)));
+        Assert.Empty(f.Ledger);
+        Assert.Empty(f.Payments);
     }
 
     [Fact]
@@ -117,6 +150,7 @@ public sealed class CustomerManagementTests
         public readonly List<CustomerLedgerEntry> Ledger = [];
         public readonly List<CustomerPayment> Payments = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly FakeJournalPostingService Journal = new();
         public Customer? Customer;
         public CustomerService Service { get; }
         public decimal Balance => Ledger.Sum(x => x.Amount);
@@ -127,7 +161,7 @@ public sealed class CustomerManagementTests
             foreach (var permission in permissions)
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, TimeProvider.System);
+            Service = new(this, Journal, TimeProvider.System);
         }
 
         public void ExistingCustomer(decimal opening = 0, decimal creditLimit = 100000)
@@ -150,7 +184,30 @@ public sealed class CustomerManagementTests
         public Task<IReadOnlyList<CustomerLookupDto>> LookupCustomersAsync(string? search, bool activeOnly, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CustomerLookupDto>>([]);
         public Task<PagedResult<CustomerLedgerEntryDto>> ListLedgerAsync(Guid customerId, CustomerLedgerQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<CustomerLedgerEntryDto>([], query.Page, query.PageSize, 0));
         public Task<CustomerPaymentReceiptDto?> GetPaymentReceiptAsync(Guid paymentId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult<CustomerPaymentReceiptDto?>(null);
-        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
+        public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+        {
+            var snapshot = (Ledger.ToList(), Payments.ToList(), Audits.ToList());
+            try { await operation(cancellationToken); }
+            catch
+            {
+                Ledger.Clear(); Ledger.AddRange(snapshot.Item1);
+                Payments.Clear(); Payments.AddRange(snapshot.Item2);
+                Audits.Clear(); Audits.AddRange(snapshot.Item3);
+                throw;
+            }
+        }
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public bool ThrowOnPost;
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnPost) throw new InvalidOperationException("forced journal failure");
+            Posted.Add(request);
+            return Task.CompletedTask;
+        }
     }
 }

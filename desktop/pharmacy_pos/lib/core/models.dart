@@ -594,6 +594,371 @@ class PagedMovements {
   );
 }
 
+class StockCountLine {
+  const StockCountLine({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.productBatchId,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.systemQuantity,
+    required this.unitCostSnapshot,
+    this.countedQuantity,
+    this.variance,
+    this.varianceValue,
+    this.reason,
+    this.notes,
+    this.countedBy,
+    this.countedAtUtc,
+  });
+  final String id, productId, productName, sku, productBatchId, batchNumber;
+  final DateTime expiryDate;
+  final int systemQuantity;
+  final int? countedQuantity, variance;
+  final double unitCostSnapshot;
+  final double? varianceValue;
+  final String? reason, notes, countedBy;
+  final DateTime? countedAtUtc;
+  factory StockCountLine.fromJson(Map<String, dynamic> json) => StockCountLine(
+    id: json['id'] as String,
+    productId: json['productId'] as String,
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    productBatchId: json['productBatchId'] as String,
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    systemQuantity: json['systemQuantity'] as int? ?? 0,
+    countedQuantity: json['countedQuantity'] as int?,
+    variance: json['variance'] as int?,
+    unitCostSnapshot: (json['unitCostSnapshot'] as num?)?.toDouble() ?? 0,
+    varianceValue: (json['varianceValue'] as num?)?.toDouble(),
+    reason: json['reason'] as String?,
+    notes: json['notes'] as String?,
+    countedBy: json['countedBy'] as String?,
+    countedAtUtc: _date(json['countedAtUtc']),
+  );
+}
+
+class StockCountSession {
+  const StockCountSession({
+    required this.id,
+    required this.countNumber,
+    required this.branchId,
+    required this.branchName,
+    required this.countDate,
+    required this.status,
+    required this.scope,
+    required this.createdBy,
+    required this.totalItems,
+    required this.countedItems,
+    required this.varianceItems,
+    required this.items,
+    this.categoryId,
+    this.categoryName,
+    this.notes,
+    this.startedBy,
+    this.startedAtUtc,
+    this.completedBy,
+    this.completedAtUtc,
+    this.cancelledBy,
+    this.cancelledAtUtc,
+  });
+  final String id, countNumber, branchId, branchName, status, scope, createdBy;
+  final DateTime countDate;
+  final String? categoryId, categoryName, notes, startedBy, completedBy, cancelledBy;
+  final DateTime? startedAtUtc, completedAtUtc, cancelledAtUtc;
+  final int totalItems, countedItems, varianceItems;
+  final List<StockCountLine> items;
+  factory StockCountSession.fromJson(Map<String, dynamic> json) =>
+      StockCountSession(
+        id: json['id'] as String,
+        countNumber: json['countNumber'] as String? ?? '',
+        branchId: json['branchId'] as String,
+        branchName: json['branchName'] as String? ?? '',
+        countDate: _date(json['countDate']) ?? DateTime.now(),
+        status: json['status'] as String? ?? '',
+        scope: json['scope'] as String? ?? '',
+        categoryId: json['categoryId'] as String?,
+        categoryName: json['categoryName'] as String?,
+        notes: json['notes'] as String?,
+        createdBy: json['createdBy'] as String? ?? '',
+        startedBy: json['startedBy'] as String?,
+        startedAtUtc: _date(json['startedAtUtc']),
+        completedBy: json['completedBy'] as String?,
+        completedAtUtc: _date(json['completedAtUtc']),
+        cancelledBy: json['cancelledBy'] as String?,
+        cancelledAtUtc: _date(json['cancelledAtUtc']),
+        totalItems: json['totalItems'] as int? ?? 0,
+        countedItems: json['countedItems'] as int? ?? 0,
+        varianceItems: json['varianceItems'] as int? ?? 0,
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => StockCountLine.fromJson(x as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class StockCountSessionSummary {
+  const StockCountSessionSummary({
+    required this.id,
+    required this.countNumber,
+    required this.branchId,
+    required this.branchName,
+    required this.countDate,
+    required this.status,
+    required this.scope,
+    required this.totalItems,
+    required this.countedItems,
+    required this.varianceItems,
+    required this.createdBy,
+    required this.createdAt,
+    this.categoryName,
+    this.completedAtUtc,
+  });
+  final String id, countNumber, branchId, branchName, status, scope, createdBy;
+  final DateTime countDate, createdAt;
+  final String? categoryName;
+  final DateTime? completedAtUtc;
+  final int totalItems, countedItems, varianceItems;
+  factory StockCountSessionSummary.fromJson(Map<String, dynamic> json) =>
+      StockCountSessionSummary(
+        id: json['id'] as String,
+        countNumber: json['countNumber'] as String? ?? '',
+        branchId: json['branchId'] as String,
+        branchName: json['branchName'] as String? ?? '',
+        countDate: _date(json['countDate']) ?? DateTime.now(),
+        status: json['status'] as String? ?? '',
+        scope: json['scope'] as String? ?? '',
+        categoryName: json['categoryName'] as String?,
+        totalItems: json['totalItems'] as int? ?? 0,
+        countedItems: json['countedItems'] as int? ?? 0,
+        varianceItems: json['varianceItems'] as int? ?? 0,
+        createdBy: json['createdBy'] as String? ?? '',
+        createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
+        completedAtUtc: _date(json['completedAtUtc']),
+      );
+}
+
+class CashierShiftPaymentSummary {
+  const CashierShiftPaymentSummary({
+    required this.paymentMethod,
+    required this.salesAmount,
+    required this.refundsAmount,
+  });
+  final String paymentMethod;
+  final double salesAmount, refundsAmount;
+  factory CashierShiftPaymentSummary.fromJson(Map<String, dynamic> json) =>
+      CashierShiftPaymentSummary(
+        paymentMethod: json['paymentMethod'] as String? ?? '',
+        salesAmount: (json['salesAmount'] as num?)?.toDouble() ?? 0,
+        refundsAmount: (json['refundsAmount'] as num?)?.toDouble() ?? 0,
+      );
+}
+
+class CashierShiftDrawerEntry {
+  const CashierShiftDrawerEntry({
+    required this.id,
+    required this.entryType,
+    required this.amount,
+    required this.reason,
+    required this.createdBy,
+    required this.createdAtUtc,
+  });
+  final String id, entryType, reason, createdBy;
+  final double amount;
+  final DateTime createdAtUtc;
+  factory CashierShiftDrawerEntry.fromJson(Map<String, dynamic> json) =>
+      CashierShiftDrawerEntry(
+        id: json['id'] as String,
+        entryType: json['entryType'] as String? ?? '',
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        reason: json['reason'] as String? ?? '',
+        createdBy: json['createdBy'] as String? ?? '',
+        createdAtUtc: DateTime.parse(json['createdAtUtc'] as String).toLocal(),
+      );
+}
+
+class CashierShift {
+  const CashierShift({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.cashierUserId,
+    required this.cashierName,
+    required this.openingCash,
+    required this.openedAtUtc,
+    required this.status,
+    required this.totalSales,
+    required this.totalRefunds,
+    required this.cashSales,
+    required this.cashRefunds,
+    required this.customerCashReceived,
+    required this.cashPaidOut,
+    required this.manualCashIn,
+    required this.manualCashOut,
+    required this.paymentBreakdown,
+    required this.drawerEntries,
+    this.terminalName,
+    this.openingNotes,
+    this.closedAtUtc,
+    this.expectedCash,
+    this.actualCountedCash,
+    this.cashVariance,
+    this.closingNotes,
+    this.reconciledBy,
+    this.reconciledAtUtc,
+    this.reconciliationNotes,
+  });
+  final String id, branchId, branchName, cashierUserId, cashierName, status;
+  final String? terminalName, openingNotes, closingNotes, reconciledBy, reconciliationNotes;
+  final double openingCash, totalSales, totalRefunds, cashSales, cashRefunds,
+      customerCashReceived, cashPaidOut, manualCashIn, manualCashOut;
+  final double? expectedCash, actualCountedCash, cashVariance;
+  final DateTime openedAtUtc;
+  final DateTime? closedAtUtc, reconciledAtUtc;
+  final List<CashierShiftPaymentSummary> paymentBreakdown;
+  final List<CashierShiftDrawerEntry> drawerEntries;
+  factory CashierShift.fromJson(Map<String, dynamic> json) => CashierShift(
+    id: json['id'] as String,
+    branchId: json['branchId'] as String,
+    branchName: json['branchName'] as String? ?? '',
+    cashierUserId: json['cashierUserId'] as String,
+    cashierName: json['cashierName'] as String? ?? '',
+    terminalName: json['terminalName'] as String?,
+    openingCash: (json['openingCash'] as num?)?.toDouble() ?? 0,
+    openedAtUtc: DateTime.parse(json['openedAtUtc'] as String).toLocal(),
+    openingNotes: json['openingNotes'] as String?,
+    status: json['status'] as String? ?? '',
+    closedAtUtc: _date(json['closedAtUtc']),
+    expectedCash: (json['expectedCash'] as num?)?.toDouble(),
+    actualCountedCash: (json['actualCountedCash'] as num?)?.toDouble(),
+    cashVariance: (json['cashVariance'] as num?)?.toDouble(),
+    closingNotes: json['closingNotes'] as String?,
+    reconciledBy: json['reconciledBy'] as String?,
+    reconciledAtUtc: _date(json['reconciledAtUtc']),
+    reconciliationNotes: json['reconciliationNotes'] as String?,
+    totalSales: (json['totalSales'] as num?)?.toDouble() ?? 0,
+    totalRefunds: (json['totalRefunds'] as num?)?.toDouble() ?? 0,
+    cashSales: (json['cashSales'] as num?)?.toDouble() ?? 0,
+    cashRefunds: (json['cashRefunds'] as num?)?.toDouble() ?? 0,
+    customerCashReceived: (json['customerCashReceived'] as num?)?.toDouble() ?? 0,
+    cashPaidOut: (json['cashPaidOut'] as num?)?.toDouble() ?? 0,
+    manualCashIn: (json['manualCashIn'] as num?)?.toDouble() ?? 0,
+    manualCashOut: (json['manualCashOut'] as num?)?.toDouble() ?? 0,
+    paymentBreakdown: (json['paymentBreakdown'] as List<dynamic>? ?? [])
+        .map((x) => CashierShiftPaymentSummary.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    drawerEntries: (json['drawerEntries'] as List<dynamic>? ?? [])
+        .map((x) => CashierShiftDrawerEntry.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class CashierShiftListItem {
+  const CashierShiftListItem({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.cashierUserId,
+    required this.cashierName,
+    required this.openingCash,
+    required this.openedAtUtc,
+    required this.status,
+    this.terminalName,
+    this.closedAtUtc,
+    this.expectedCash,
+    this.actualCountedCash,
+    this.cashVariance,
+  });
+  final String id, branchId, branchName, cashierUserId, cashierName, status;
+  final String? terminalName;
+  final double openingCash;
+  final double? expectedCash, actualCountedCash, cashVariance;
+  final DateTime openedAtUtc;
+  final DateTime? closedAtUtc;
+  factory CashierShiftListItem.fromJson(Map<String, dynamic> json) =>
+      CashierShiftListItem(
+        id: json['id'] as String,
+        branchId: json['branchId'] as String,
+        branchName: json['branchName'] as String? ?? '',
+        cashierUserId: json['cashierUserId'] as String,
+        cashierName: json['cashierName'] as String? ?? '',
+        terminalName: json['terminalName'] as String?,
+        openingCash: (json['openingCash'] as num?)?.toDouble() ?? 0,
+        openedAtUtc: DateTime.parse(json['openedAtUtc'] as String).toLocal(),
+        status: json['status'] as String? ?? '',
+        closedAtUtc: _date(json['closedAtUtc']),
+        expectedCash: (json['expectedCash'] as num?)?.toDouble(),
+        actualCountedCash: (json['actualCountedCash'] as num?)?.toDouble(),
+        cashVariance: (json['cashVariance'] as num?)?.toDouble(),
+      );
+}
+
+class PagedCashierShifts {
+  const PagedCashierShifts({required this.items, required this.totalCount});
+  final List<CashierShiftListItem> items;
+  final int totalCount;
+  factory PagedCashierShifts.fromJson(Map<String, dynamic> json) =>
+      PagedCashierShifts(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map((x) => CashierShiftListItem.fromJson(x as Map<String, dynamic>))
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
+class DailyClosingSummary {
+  const DailyClosingSummary({
+    required this.branchId,
+    required this.branchName,
+    required this.date,
+    required this.shiftCount,
+    required this.openShiftCount,
+    required this.totalOpeningCash,
+    required this.totalExpectedCash,
+    required this.totalActualCash,
+    required this.totalVariance,
+    required this.paymentBreakdown,
+  });
+  final String branchId, branchName;
+  final DateTime date;
+  final int shiftCount, openShiftCount;
+  final double totalOpeningCash, totalExpectedCash, totalActualCash, totalVariance;
+  final List<CashierShiftPaymentSummary> paymentBreakdown;
+  factory DailyClosingSummary.fromJson(Map<String, dynamic> json) =>
+      DailyClosingSummary(
+        branchId: json['branchId'] as String,
+        branchName: json['branchName'] as String? ?? '',
+        date: _date(json['date']) ?? DateTime.now(),
+        shiftCount: json['shiftCount'] as int? ?? 0,
+        openShiftCount: json['openShiftCount'] as int? ?? 0,
+        totalOpeningCash: (json['totalOpeningCash'] as num?)?.toDouble() ?? 0,
+        totalExpectedCash: (json['totalExpectedCash'] as num?)?.toDouble() ?? 0,
+        totalActualCash: (json['totalActualCash'] as num?)?.toDouble() ?? 0,
+        totalVariance: (json['totalVariance'] as num?)?.toDouble() ?? 0,
+        paymentBreakdown: (json['paymentBreakdown'] as List<dynamic>? ?? [])
+            .map((x) => CashierShiftPaymentSummary.fromJson(x as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class PagedStockCountSessions {
+  const PagedStockCountSessions({required this.items, required this.totalCount});
+  final List<StockCountSessionSummary> items;
+  final int totalCount;
+  factory PagedStockCountSessions.fromJson(Map<String, dynamic> json) =>
+      PagedStockCountSessions(
+        items: (json['items'] as List<dynamic>? ?? [])
+            .map(
+              (x) =>
+                  StockCountSessionSummary.fromJson(x as Map<String, dynamic>),
+            )
+            .toList(),
+        totalCount: json['totalCount'] as int? ?? 0,
+      );
+}
+
 class SupplierListItem {
   const SupplierListItem({
     required this.id,

@@ -1,6 +1,6 @@
 # Pharmacy Management System POS
 
-Pharmacy management system with completed Phase 12 operational Reports and Analytics for an ASP.NET Core API and Flutter Windows client. Reports are read-only projections over verified PostgreSQL transactional data. Full general-ledger accounting and bank reconciliation have not started.
+Pharmacy management system with completed Phase 12 operational Reports and Analytics, plus a double-entry accounting engine (Chart of Accounts, Journal, automatic posting), for an ASP.NET Core API and Flutter Windows client. Reports are read-only projections over verified PostgreSQL transactional data. Core sales, purchasing, returns, payment, expense, income, transfer, opening-balance, and inventory-adjustment flows are wired to the accounting engine. Bank reconciliation has not started.
 
 ## Current Scope
 
@@ -13,14 +13,16 @@ Pharmacy management system with completed Phase 12 operational Reports and Analy
 - Reusable FEFO batch allocation service
 - Flutter desktop shell, secure token storage, session restoration, login, forced password change, users, customers, and profile screens
 - Product, category, and manufacturer administration with permission-aware desktop screens, server-side product paging/filtering, immutable SKU, and activation workflows
-- Controlled opening stock, stock adjustments, stock count reconciliation, expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
+- Controlled opening stock, stock adjustments, single-batch stock count reconciliation, session-based physical stock counting (Draft/InProgress/Completed/Cancelled with full/category/selected-product/selected-batch scope and variance posting on finalize), expiry disposal, branch inventory views, batch views, movement ledger, valuation, and FEFO preview
 - Supplier master management with activation, search, lookup, branch-scoped financial ledger, opening balances, payments, and balance adjustments
 - Purchase orders, direct purchases, goods receiving, supplier invoice uniqueness, paid/bonus quantity handling, inventory posting, supplier payable ledger integration, immutable original-GRN purchase returns, supplier credit ledger entries, POS checkout, sales posting, held sales, split payments, customer credit settlement, receipt preview/reprint, sales history, original-allocation sales returns, customer-credit reduction, refunds, and return receipt history
 - Customer master management with activation, lookup, branch-scoped receivable ledger, opening balances, payments, balance adjustments, and credit-limit enforcement
+- Cashier shift management: open/close/reconcile with expected-vs-actual cash variance, manual drawer cash-in/cash-out, per-payment-method breakdown, shift history, and a daily branch closing summary
+- Double-entry accounting engine: global chart of accounts (seeded), semantic account mappings, balanced/immutable journal entries, manual journal vouchers, trial balance, and automatic journals for sales, purchases, returns, payments, expenses, other income, account transfers, opening balances, and stock adjustments/write-offs
 - Backend unit/foundation and PostgreSQL integration tests, plus Flutter widget tests
 - Branch- and permission-scoped sales, purchase, inventory, financial, profitability, and dashboard reports with safe CSV export
 
-Full general-ledger accounting, supplier cash-refund settlement for purchase returns, exchange/store-credit returns, bank reconciliation, and true invoice aging are not implemented.
+A double-entry general ledger now exists and the core operational posting paths are wired to it (see Accounting Engine Policy below). Manual customer/supplier balance adjustments and manual financial-account adjustments remain operational-ledger-only. Supplier cash-refund settlement for purchase returns, exchange/store-credit returns, bank reconciliation, and true invoice aging are not implemented.
 
 ## Dependency Graph
 
@@ -62,9 +64,15 @@ backend/Pharmacy.Infrastructure/Migrations/20260903231207_CompletePurchaseReturn
 backend/Pharmacy.Infrastructure/Migrations/20260904125716_CompleteCustomerManagementAndCreditSales.cs
 backend/Pharmacy.Infrastructure/Migrations/20260907195029_CompleteAccountsExpensesAndCashManagement.cs
 backend/Pharmacy.Infrastructure/Migrations/20260907210154_AddReportingPermissions.cs
+backend/Pharmacy.Infrastructure/Migrations/20260907220809_CompleteSystemAdministration.cs
+backend/Pharmacy.Infrastructure/Migrations/20260907222557_EnforceAuditImmutability.cs
+backend/Pharmacy.Infrastructure/Migrations/20260909151127_CompletePhysicalStockCounting.cs
+backend/Pharmacy.Infrastructure/Migrations/20260909160946_CompleteCashierShiftManagement.cs
+backend/Pharmacy.Infrastructure/Migrations/20260909162909_CompleteAccountingEngine.cs
+backend/Pharmacy.Infrastructure/Migrations/20260909165535_AddInventoryAdjustmentGainMapping.cs
 ```
 
-All twelve migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema remains 37 application tables plus `__EFMigrationsHistory`; Phase 12 adds reporting permissions only because existing query indexes cover the report paths. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
+All eighteen migrations are applied to local `pharmacy_dev` and `pharmacy_test` through the non-superuser `pharmacy_app_dev` role. The schema is 48 application tables plus `__EFMigrationsHistory`. Credentials remain outside the repository. See [QUICK_START.md](QUICK_START.md) for safe local configuration.
 
 ## Reporting Policy
 
@@ -78,7 +86,7 @@ Financial reports use the financial, customer, and supplier ledgers. Consolidate
 
 Accounts are branch-scoped. PostgreSQL locks the account row during ledger insertion and rejects outflows that would make an account negative. Actual sales payments and customer receipts create positive entries; supplier payments and cash refunds create negative entries. Credit portions of sales affect only the customer receivable ledger, and purchase returns affect only supplier payable unless a separate cash receipt is posted.
 
-Daily cash position is calculated only from the financial ledger: opening plus inflows minus outflows equals closing. This operational layer is not a chart of accounts, double-entry general ledger, tax system, bank reconciliation system, or financial-statement engine.
+Daily cash position is calculated only from the financial ledger: opening plus inflows minus outflows equals closing. This operational cashbook remains distinct from the double-entry accounting engine described in Accounting Engine Policy below, even though its core posting paths now create atomic journal entries too; it is not a tax system, bank reconciliation system, or financial-statement engine on its own.
 
 ## Product Master Policy
 
@@ -110,6 +118,8 @@ Daily cash position is calculated only from the financial ledger: opening plus i
 - Expired stock disposal records a negative `Expired` movement; damaged stock uses a controlled stock adjustment with `Damaged`.
 - Low stock is `QuantityInStock > 0 && QuantityInStock <= ReorderLevel`; out of stock is `QuantityInStock <= 0`.
 - Inventory value is operational cost value: available quantity multiplied by batch purchase price.
+- `StockCountSession`/`StockCountItem` provide a session-based physical count workflow (Draft → InProgress → Completed/Cancelled) layered on top of the same stock movement primitives: Draft snapshots system quantity and cost per selected batch (full branch, category, selected products, or selected batches); Start locks the count into InProgress; count entries are staged on the session without touching stock; Finalize posts one `AdjustmentIncrease`/`AdjustmentDecrease` movement per counted line with a non-zero variance in a single transaction and is blocked once the session is no longer InProgress (no duplicate finalization). Completed and cancelled sessions are immutable. The original single-batch `POST /api/inventory/stock-count` quick-reconcile endpoint remains for ad-hoc corrections and is unrelated to sessions.
+- Stock adjustment reasons cover physical count correction, damaged, expired, broken, leakage, theft/loss, missing, data correction, and other. An adjustment that moves at least 100 units or at least half of a batch's current stock is flagged `Significant` in its audit entry (and the audit action name itself gains a `Significant` suffix) so large or unusual manual adjustments stand out from routine ones without a separate review workflow.
 - Positive movements: `OpeningStock`, `Purchase`, `SaleReturn`, `TransferIn`, `AdjustmentIncrease`.
 - Negative movements: `Sale`, `PurchaseReturn`, `TransferOut`, `AdjustmentDecrease`, `Expired`, `Damaged`.
 - Application validation and a PostgreSQL check constraint reject zero quantities and incorrect signs.
@@ -180,6 +190,26 @@ Daily cash position is calculated only from the financial ledger: opening plus i
 - Refund amounts are calculated from original sale price, discount, tax, and cost snapshots. Final partial returns receive any rounding residual so cumulative refund does not exceed the original allocation economics.
 - For cash sales, refund payment totals must equal the backend-calculated refund. For customer-credit sales, the backend reduces customer receivable first and requires refund payments only for the remaining cash refund amount. Cash, card, bank transfer, Easypaisa, JazzCash, and other methods are supported.
 - Posted sales returns, return items, return allocations, and refund payments are immutable through DbContext validation. Return numbers use a PostgreSQL sequence and a unique index.
+## Cashier Shift Policy
+
+- `CashierShift` bounds a till session (Open → Closed → Reconciled). Sales, refunds, and customer cash receipts are attributed to a shift by cashier + branch + time window (`[OpenedAtUtc, ClosedAtUtc or now)`), not a foreign key, since exactly one shift can be open per cashier at a time — opening a second shift while one is already open is rejected.
+- `CashierShiftDrawerEntry` records manual cash-in/cash-out drawer movements (float top-ups, bank deposits, petty payouts) that aren't a sale, refund, or customer payment. Entries are permanent once recorded and only accepted while the shift is Open.
+- Closing a shift computes `ExpectedCash = OpeningCash + cash sales + cash customer receipts + manual cash in − cash refunds − cash-paid expenses − manual cash out`, freezes it alongside the counted `ActualCountedCash`, the resulting `CashVariance`, and a `CashierShiftPaymentSummary` row per payment method (for the full, not just cash, sales/refunds breakdown). A shift can only be closed once.
+- Only the shift's own cashier can close it or add drawer entries unless the actor holds `cashier_shift.close_any`. Reconciliation is a separate manager-only step (`cashier_shift.reconcile`) available only on a Closed shift, and reconciled shifts are permanent.
+- The daily closing summary aggregates every shift closed on a branch's Asia/Karachi business date (closed shifts only; a currently-open shift contributes to the open-shift count but not to the totals until it closes).
+
+## Accounting Engine Policy
+
+- `ChartOfAccount` is a global, hierarchical, company-wide chart of accounts (not branch-scoped); the branch dimension lives on `JournalEntryLine` so financial statements can still be filtered per branch. A default 29-account pharmacy chart is seeded (Assets/Liabilities/Equity/Income/Cost of Sales/Expenses), including contra-revenue "Sales Returns and Allowances" and "Inventory Adjustment Gain" accounts.
+- `AccountMapping` binds a stable semantic role (`AccountMappingKey`, e.g. `Cash`, `AccountsReceivable`, `CostOfGoodsSold`) to the actual `ChartOfAccount` a business has configured for it. Posting logic never hard-codes a raw account id — it resolves the mapping at posting time and fails loudly if one is missing. All 13 mapping keys are seeded to sensible defaults out of the box. An account cannot be deactivated while it's the target of an active mapping, and mappings can only point to active, posting-level (non-header) accounts.
+- `JournalEntry`/`JournalEntryLine` are the double-entry source of truth. `PharmacyDbContext` enforces, for every newly-added entry, that its lines' total debit equals total credit before the save is allowed to reach PostgreSQL, and posted entries (and their lines) can never be updated or deleted — corrections are new entries, never edits.
+- `IJournalPostingService.PostAsync` is the internal capability other bounded-context services (Sales, Purchasing, Customers, Suppliers, Finance) call to post automatically. It takes semantic `AccountMappingKey` lines, never a raw account id, and only *stages* the entry into the shared `DbContext` — it never opens its own transaction or calls `SaveChanges`, so it always commits (or rolls back) atomically with whatever operational transaction it was posted from.
+- Manual journal vouchers (`POST /api/accounts/journal`, permission `accounts.journal.post`) take raw `ChartOfAccountId` lines directly (the operator picks accounts from the chart) rather than semantic keys, and require at least two lines that balance.
+- **Operational posting is wired to the engine**: sales post consideration/revenue and exact allocation-snapshot COGS/inventory; goods receipts post inventory/payables; purchase returns reverse inventory/payables; sales returns post contra-revenue/refunds or receivable reduction and reverse COGS for restockable allocations; customer and supplier payments post against their control accounts; expenses and other income post against the selected cash/bank account; account transfers move value between cash/bank mappings; customer, supplier, financial-account, and inventory opening balances offset retained earnings.
+- Inventory increases use the batch purchase-price valuation to debit Inventory and credit Inventory Adjustment Gain. Manual decreases, damaged stock, and expired disposal debit Inventory Loss Expense and credit Inventory. Session-based counts post one journal per non-zero batch variance inside the same finalization transaction.
+- Zero-value operational postings are omitted. Manual customer/supplier balance adjustments and manual financial-account adjustments remain operational-ledger-only until a dedicated adjustment/suspense-account policy is defined; they are not silently forced into an unrelated account.
+- There is no Chart of Accounts / Journal / Trial Balance screen in the Flutter app yet; the engine is API-only for now (`GET/POST /api/accounts/chart`, `/api/accounts/mappings`, `/api/accounts/journal`, `/api/accounts/trial-balance`).
+
 ## FEFO and Expiry
 
 `FefoAllocationService` filters by branch and product, excludes disposed, expired, and empty batches, orders deterministically by expiry/creation/batch/id, and allocates across batches. Expiry and manufacturing dates use `DateOnly` and PostgreSQL `date`. A batch expiring on the sale date is considered sellable for that entire date in the current fixed MVP policy.
@@ -226,4 +256,3 @@ flutter test
 ```
 
 Architecture details and the exact mapped table inventory are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-

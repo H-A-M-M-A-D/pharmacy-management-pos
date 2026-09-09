@@ -4,12 +4,13 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Sales;
 
-public sealed class SalesService(ISalesRepository repository, IFefoAllocationService fefo, TimeProvider timeProvider) : ISalesService
+public sealed class SalesService(ISalesRepository repository, IFefoAllocationService fefo, IJournalPostingService journalPosting, TimeProvider timeProvider) : ISalesService
 {
     public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(Guid actorId, PosProductSearchQuery query, CancellationToken cancellationToken = default)
     {
@@ -257,8 +258,32 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         sale.TaxTotal = 0;
         sale.NetTotal = Money(sale.NetTotal);
         await ApplyPayments(actor, sale, payments, ct);
+        await PostSaleJournalAsync(actor, sale, ct);
         return sale;
     }
+
+    private async Task PostSaleJournalAsync(User actor, Sale sale, CancellationToken ct)
+    {
+        var lines = new List<JournalLineInput>();
+        foreach (var payment in sale.Payments)
+            if (payment.AmountApplied > 0)
+                lines.Add(new JournalLineInput(PaymentAccount(payment.Method), payment.AmountApplied, 0));
+        if (sale.CreditAmount > 0)
+            lines.Add(new JournalLineInput(AccountMappingKey.AccountsReceivable, sale.CreditAmount, 0, CustomerId: sale.CustomerId));
+        if (sale.NetTotal > 0)
+            lines.Add(new JournalLineInput(AccountMappingKey.SalesRevenue, 0, sale.NetTotal));
+        var cogs = Money(sale.Items.SelectMany(x => x.Allocations).Sum(a => a.Quantity * a.UnitCostPriceSnapshot));
+        if (cogs > 0)
+        {
+            lines.Add(new JournalLineInput(AccountMappingKey.CostOfGoodsSold, cogs, 0));
+            lines.Add(new JournalLineInput(AccountMappingKey.Inventory, 0, cogs));
+        }
+        if (lines.Count == 0) return;
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.Sale, sale.Id, sale.BranchId, sale.PostedAtUtc!.Value,
+            sale.InvoiceNumber, $"Sale {sale.InvoiceNumber}", actor.Id, lines), ct);
+    }
+
+    private static AccountMappingKey PaymentAccount(SalePaymentMethod method) => method == SalePaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
     private async Task ApplyPayments(User actor, Sale sale, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
     {

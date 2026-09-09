@@ -29,6 +29,8 @@ public static class PermissionCatalog
     public const string InventoryOpeningStock = "inventory.opening_stock";
     public const string InventoryAdjust = "inventory.adjust";
     public const string InventoryStockCount = "inventory.stock_count";
+    public const string InventoryStockCountView = "inventory.stock_count.view";
+    public const string InventoryStockCountFinalize = "inventory.stock_count.finalize";
     public const string InventoryExpiryManage = "inventory.expiry_manage";
     public const string InventoryMovementsView = "inventory.movements.view";
     public const string BatchesView = "batches.view";
@@ -70,8 +72,18 @@ public static class PermissionCatalog
     public const string PurchaseReturnsView = "purchase_returns.view";
     public const string PurchaseReturnsCreate = "purchase_returns.create";
     public const string PurchaseReturnsReprint = "purchase_returns.reprint";
+    public const string CashierShiftOpen = "cashier_shift.open";
+    public const string CashierShiftView = "cashier_shift.view";
+    public const string CashierShiftClose = "cashier_shift.close";
+    public const string CashierShiftCloseAny = "cashier_shift.close_any";
+    public const string CashierShiftReconcile = "cashier_shift.reconcile";
+    public const string CashierShiftDrawerAdjust = "cashier_shift.drawer_adjust";
     public const string AccountsView = "accounts.view";
     public const string AccountsManage = "accounts.manage";
+    public const string AccountsCoaView = "accounts.coa.view";
+    public const string AccountsCoaManage = "accounts.coa.manage";
+    public const string AccountsJournalView = "accounts.journal.view";
+    public const string AccountsJournalPost = "accounts.journal.post";
     public const string ExpensesView = "expenses.view";
     public const string ExpensesCreate = "expenses.create";
     public const string ExpensesPost = "expenses.post";
@@ -103,6 +115,7 @@ public static class PermissionCatalog
         ProductsView, ProductsCreate, ProductsUpdate, ProductsActivate, ProductsDeactivate,
         CategoriesView, CategoriesManage, ManufacturersView, ManufacturersManage,
         InventoryView, InventoryOpeningStock, InventoryAdjust, InventoryStockCount,
+        InventoryStockCountView, InventoryStockCountFinalize,
         InventoryExpiryManage, InventoryMovementsView, BatchesView,
         SuppliersView, SuppliersCreate, SuppliersUpdate, SuppliersActivate,
         SuppliersDeactivate, SuppliersLedgerView, SuppliersPaymentCreate,
@@ -116,7 +129,11 @@ public static class PermissionCatalog
         SalesView, SalesCreate, SalesCredit, SalesHold, SalesDiscount, SalesReprint,
         SalesReturnsView, SalesReturnsCreate, SalesReturnsRefund, SalesReturnsReprint,
         PurchaseReturnsView, PurchaseReturnsCreate, PurchaseReturnsReprint,
-        AccountsView, AccountsManage, ExpensesView, ExpensesCreate, ExpensesPost,
+        CashierShiftOpen, CashierShiftView, CashierShiftClose, CashierShiftCloseAny,
+        CashierShiftReconcile, CashierShiftDrawerAdjust,
+        AccountsView, AccountsManage, AccountsCoaView, AccountsCoaManage,
+        AccountsJournalView, AccountsJournalPost,
+        ExpensesView, ExpensesCreate, ExpensesPost,
         FinanceLedgerView, FinanceIncomeCreate, FinanceTransfer, FinanceAdjust,
         ReportsView, ReportsSales, ReportsPurchases, ReportsInventory, ReportsFinancial,
         ReportsProfitability, ReportsExport,

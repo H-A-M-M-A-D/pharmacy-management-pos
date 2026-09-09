@@ -5,11 +5,12 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Customers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Customers;
 
-public sealed class CustomerService(ICustomerRepository repository, TimeProvider timeProvider) : ICustomerService
+public sealed class CustomerService(ICustomerRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : ICustomerService
 {
     public async Task<PagedResult<CustomerListItemDto>> ListCustomersAsync(Guid actorId, CustomerListQuery query, CancellationToken cancellationToken = default)
     {
@@ -61,7 +62,7 @@ public sealed class CustomerService(ICustomerRepository repository, TimeProvider
             await Audit(actorId, "CustomerCreated", "Customer", customer.Id, null, Values(customer), ct);
             if (customer.OpeningBalance != 0)
             {
-                await repository.AddLedgerEntryAsync(new CustomerLedgerEntry
+                var opening = new CustomerLedgerEntry
                 {
                     CustomerId = customer.Id,
                     BranchId = actor.BranchId,
@@ -71,7 +72,9 @@ public sealed class CustomerService(ICustomerRepository repository, TimeProvider
                     ReferenceType = "CustomerOpeningBalance",
                     Notes = "Opening balance",
                     CreatedByUserId = actorId
-                }, ct);
+                };
+                await repository.AddLedgerEntryAsync(opening, ct);
+                await PostCustomerOpeningBalanceJournalAsync(actor, customer, opening, ct);
                 await Audit(actorId, "CustomerOpeningBalanceRecorded", "Customer", customer.Id, null, new { customer.Id, customer.OpeningBalance, BranchId = actor.BranchId }, ct);
             }
             await repository.SaveChangesAsync(ct);
@@ -163,6 +166,7 @@ public sealed class CustomerService(ICustomerRepository repository, TimeProvider
                 Notes = payment.Notes,
                 CreatedByUserId = actorId
             }, ct);
+            await PostCustomerPaymentJournalAsync(actor, payment, ct);
             await Audit(actorId, "CustomerPaymentRecorded", "Customer", request.CustomerId, null, new { request.CustomerId, request.BranchId, payment.Amount, payment.PaymentMethod, payment.ReceiptNumber }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -212,6 +216,25 @@ public sealed class CustomerService(ICustomerRepository repository, TimeProvider
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
     }
+
+    private async Task PostCustomerPaymentJournalAsync(User actor, CustomerPayment payment, CancellationToken ct)
+    {
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CustomerPayment, payment.Id, payment.BranchId, payment.PaymentDateUtc,
+            payment.ReceiptNumber, $"Customer payment {payment.ReceiptNumber}", actor.Id,
+            [new(PaymentAccount(payment.PaymentMethod), payment.Amount, 0), new(AccountMappingKey.AccountsReceivable, 0, payment.Amount, CustomerId: payment.CustomerId)]), ct);
+    }
+
+    private async Task PostCustomerOpeningBalanceJournalAsync(User actor, Customer customer, CustomerLedgerEntry entry, CancellationToken ct)
+    {
+        var amount = Math.Abs(customer.OpeningBalance);
+        var lines = customer.OpeningBalance > 0
+            ? new List<JournalLineInput> { new(AccountMappingKey.AccountsReceivable, amount, 0, CustomerId: customer.Id), new(AccountMappingKey.RetainedEarnings, 0, amount) }
+            : new List<JournalLineInput> { new(AccountMappingKey.RetainedEarnings, amount, 0), new(AccountMappingKey.AccountsReceivable, 0, amount, CustomerId: customer.Id) };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OpeningBalance, entry.Id, entry.BranchId, UtcNow(),
+            "Opening balance", $"Opening balance for {customer.Name}", actor.Id, lines), ct);
+    }
+
+    private static AccountMappingKey PaymentAccount(CustomerPaymentMethod method) => method == CustomerPaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
     private async Task<User> Require(Guid actorId, string permission, CancellationToken cancellationToken)
     {

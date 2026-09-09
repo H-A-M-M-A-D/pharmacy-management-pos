@@ -4,6 +4,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Finance;
 using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Reports;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Finance;
 using Pharmacy.Application.Services.Purchasing;
 using Pharmacy.Domain.Entities;
@@ -58,7 +59,7 @@ public sealed class PostgreSqlIntegrationTests
         PurchaseOrderDetailsDto created;
         await using (var createContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(createContext), TimeProvider.System);
+            var service = PurchasingServiceFor(createContext);
             created = await service.CreatePurchaseOrderAsync(actorId, createRequest);
         }
 
@@ -71,7 +72,7 @@ public sealed class PostgreSqlIntegrationTests
             ]);
         await using (var updateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(updateContext), TimeProvider.System);
+            var service = PurchasingServiceFor(updateContext);
             await service.UpdatePurchaseOrderAsync(actorId, created.Id, updateRequest);
         }
 
@@ -115,7 +116,7 @@ public sealed class PostgreSqlIntegrationTests
         };
         await using (var removeContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(removeContext), TimeProvider.System);
+            var service = PurchasingServiceFor(removeContext);
             await service.UpdatePurchaseOrderAsync(actorId, created.Id, removeRequest);
         }
 
@@ -131,12 +132,12 @@ public sealed class PostgreSqlIntegrationTests
 
         await using (var stateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(stateContext), TimeProvider.System);
+            var service = PurchasingServiceFor(stateContext);
             await service.SubmitPurchaseOrderAsync(actorId, created.Id);
         }
         await using (var immutableContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(immutableContext), TimeProvider.System);
+            var service = PurchasingServiceFor(immutableContext);
             await Assert.ThrowsAsync<RequestValidationException>(() =>
                 service.UpdatePurchaseOrderAsync(actorId, created.Id, removeRequest));
             await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
@@ -180,7 +181,7 @@ public sealed class PostgreSqlIntegrationTests
         GoodsReceiptDetailsDto receipt;
         await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            var service = PurchasingServiceFor(receiptContext);
             receipt = await service.PostGoodsReceiptAsync(actorId, receiptRequest);
         }
         var itemId = receipt.Items.Single().Id;
@@ -190,7 +191,7 @@ public sealed class PostgreSqlIntegrationTests
         PurchaseReturnDetailsDto paid;
         await using (var paidContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(paidContext), TimeProvider.System);
+            var service = PurchasingServiceFor(paidContext);
             paid = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
                 new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemId, 20, 0)]));
         }
@@ -199,7 +200,7 @@ public sealed class PostgreSqlIntegrationTests
         PurchaseReturnDetailsDto bonus;
         await using (var bonusContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(bonusContext), TimeProvider.System);
+            var service = PurchasingServiceFor(bonusContext);
             bonus = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
                 new PostPurchaseReturnRequest(PurchaseReturnReason.ExcessSupply, null, [new PurchaseReturnItemRequest(itemId, 0, 5)]));
         }
@@ -208,7 +209,7 @@ public sealed class PostgreSqlIntegrationTests
         PurchaseReturnDetailsDto mixed;
         await using (var mixedContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(mixedContext), TimeProvider.System);
+            var service = PurchasingServiceFor(mixedContext);
             mixed = await service.PostPurchaseReturnAsync(actorId, receipt.Id,
                 new PostPurchaseReturnRequest(PurchaseReturnReason.WrongItem, null, [new PurchaseReturnItemRequest(itemId, 10, 5)]));
         }
@@ -275,7 +276,7 @@ public sealed class PostgreSqlIntegrationTests
         GoodsReceiptDetailsDto receiptB;
         await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            var service = PurchasingServiceFor(receiptContext);
             receiptA = await service.PostGoodsReceiptAsync(actorId, new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-GUARD-A"), receiptDate, null,
                 [new GoodsReceiptItemRequest(productAId, null, "B-PR-GUARD-A", null, receiptDate.AddDays(365), 10, 0, 50m, 60m, 0, 0)]));
             receiptB = await service.PostGoodsReceiptAsync(actorId, new GoodsReceiptRequest(branchId, supplierId, null, Unique("INV-PR-GUARD-B"), receiptDate, null,
@@ -286,14 +287,14 @@ public sealed class PostgreSqlIntegrationTests
 
         await using (var wrongItemContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(wrongItemContext), TimeProvider.System);
+            var service = PurchasingServiceFor(wrongItemContext);
             await Assert.ThrowsAsync<RequestValidationException>(() => service.PostPurchaseReturnAsync(actorId, receiptA.Id,
                 new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemBId, 1, 0)])));
         }
 
         await using (var overReturnContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(overReturnContext), TimeProvider.System);
+            var service = PurchasingServiceFor(overReturnContext);
             await Assert.ThrowsAsync<ResourceConflictException>(() => service.PostPurchaseReturnAsync(actorId, receiptA.Id,
                 new PostPurchaseReturnRequest(PurchaseReturnReason.Damaged, null, [new PurchaseReturnItemRequest(itemAId, 11, 0)])));
         }
@@ -345,7 +346,7 @@ public sealed class PostgreSqlIntegrationTests
         GoodsReceiptDetailsDto receipt;
         await using (var receiptContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new PurchasingService(new PurchasingRepository(receiptContext), TimeProvider.System);
+            var service = PurchasingServiceFor(receiptContext);
             receipt = await service.PostGoodsReceiptAsync(actorId, receiptRequest);
         }
         var itemId = receipt.Items.Single().Id;
@@ -358,7 +359,7 @@ public sealed class PostgreSqlIntegrationTests
         async Task<(PurchaseReturnDetailsDto? Result, Exception? Error)> AttemptAsync()
         {
             await using var raceContext = new PharmacyDbContext(Options(connectionString));
-            var service = new PurchasingService(new PurchasingRepository(raceContext), TimeProvider.System);
+            var service = PurchasingServiceFor(raceContext);
             try { return (await service.PostPurchaseReturnAsync(actorId, receipt.Id, raceRequest), null); }
             catch (Exception ex) { return (null, ex); }
         }
@@ -667,7 +668,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            14L,
+            17L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM "__EFMigrationsHistory"
@@ -685,11 +686,14 @@ public sealed class PostgreSqlIntegrationTests
                     '20260907195029_CompleteAccountsExpensesAndCashManagement',
                     '20260907210154_AddReportingPermissions',
                     '20260907220809_CompleteSystemAdministration',
-                    '20260907222557_EnforceAuditImmutability');
+                    '20260907222557_EnforceAuditImmutability',
+                    '20260909151127_CompletePhysicalStockCounting',
+                    '20260909160946_CompleteCashierShiftManagement',
+                    '20260909162909_CompleteAccountingEngine');
                 """));
 
         Assert.Equal(
-            39L,
+            48L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -1510,6 +1514,172 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
+    public async Task PhaseA_stock_count_constraints_indexes_permissions_and_sequence_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions"
+            WHERE "Code" IN ('inventory.stock_count.view','inventory.stock_count.finalize');
+            """));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name IN ('StockCountSessions','StockCountItems');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = 'StockCountNumberSequence';
+            """));
+        Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND constraint_name IN (
+                'CK_StockCountSessions_Status',
+                'CK_StockCountSessions_Scope',
+                'CK_StockCountItems_SystemQuantity_NonNegative',
+                'CK_StockCountItems_CountedQuantity_NonNegative');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = 'IX_StockCountSessions_CountNumber';
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = 'IX_StockCountItems_StockCountSessionId_ProductBatchId';
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task PhaseE_cashier_shift_constraints_indexes_and_permissions_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(6L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions" WHERE "Code" LIKE 'cashier_shift.%';
+            """));
+        Assert.Equal(3L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name IN ('CashierShifts','CashierShiftDrawerEntries','CashierShiftPaymentSummaries');
+            """));
+        Assert.Equal(5L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND constraint_name IN (
+                'CK_CashierShifts_Status',
+                'CK_CashierShifts_OpeningCash_NonNegative',
+                'CK_CashierShifts_ActualCountedCash_NonNegative',
+                'CK_CashierShifts_Closed_Fields',
+                'CK_CashierShifts_Reconciled_Fields');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = 'IX_CashierShiftPaymentSummaries_CashierShiftId_PaymentMethod';
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task PhaseHIJ_accounting_engine_schema_seed_data_and_permissions_are_real()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions" WHERE "Code" LIKE 'accounts.coa.%' OR "Code" LIKE 'accounts.journal.%';
+            """));
+        Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name IN ('ChartOfAccounts','AccountMappings','JournalEntries','JournalEntryLines');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = 'JournalEntryNumberSequence';
+            """));
+        Assert.Equal(29L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"ChartOfAccounts\";"));
+        Assert.Equal(13L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"AccountMappings\";"));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "ChartOfAccounts" WHERE "Code" = '1010' AND "Name" = 'Cash' AND "AccountType" = 1 AND "NormalBalance" = 1;
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "AccountMappings" am JOIN "ChartOfAccounts" coa ON coa."Id" = am."ChartOfAccountId"
+            WHERE am."MappingKey" = 6 AND coa."Code" = '4010';
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "AccountMappings" am JOIN "ChartOfAccounts" coa ON coa."Id" = am."ChartOfAccountId"
+            WHERE am."MappingKey" = 13 AND coa."Code" = '4091';
+            """));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public' AND constraint_name IN ('CK_JournalEntryLines_Amounts', 'CK_ChartOfAccounts_NormalBalance');
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Journal_entry_balance_is_enforced_by_the_real_dbcontext_pipeline()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PharmacyDbContext(options);
+        await context.Database.UseTransactionAsync(transaction);
+
+        var branchId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(connection, transaction, branchId);
+        var username = Unique("journal-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, userId);
+
+        var cashAccountId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"ChartOfAccounts\" WHERE \"Code\"='1010';");
+        var salesAccountId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"ChartOfAccounts\" WHERE \"Code\"='4010';");
+
+        var balanced = new JournalEntry
+        {
+            EntryNumber = Unique("JV"),
+            EntryDateUtc = DateTime.UtcNow,
+            SourceType = JournalSourceType.ManualVoucher,
+            Description = "balanced",
+            BranchId = branchId,
+            PostedByUserId = userId,
+            PostedAtUtc = DateTime.UtcNow,
+            Lines =
+            [
+                new JournalEntryLine { ChartOfAccountId = cashAccountId, Debit = 500, Credit = 0, BranchId = branchId },
+                new JournalEntryLine { ChartOfAccountId = salesAccountId, Debit = 0, Credit = 500, BranchId = branchId }
+            ]
+        };
+        context.JournalEntries.Add(balanced);
+        await context.SaveChangesAsync();
+        Assert.Equal(1, await context.JournalEntries.CountAsync(x => x.Id == balanced.Id));
+
+        var unbalanced = new JournalEntry
+        {
+            EntryNumber = Unique("JV"),
+            EntryDateUtc = DateTime.UtcNow,
+            SourceType = JournalSourceType.ManualVoucher,
+            Description = "unbalanced",
+            BranchId = branchId,
+            PostedByUserId = userId,
+            PostedAtUtc = DateTime.UtcNow,
+            Lines =
+            [
+                new JournalEntryLine { ChartOfAccountId = cashAccountId, Debit = 300, Credit = 0, BranchId = branchId },
+                new JournalEntryLine { ChartOfAccountId = salesAccountId, Debit = 0, Credit = 250, BranchId = branchId }
+            ]
+        };
+        context.JournalEntries.Add(unbalanced);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            balanced.Description = "edited";
+            await context.SaveChangesAsync();
+        });
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
     public async Task Phase9_purchase_return_database_constraints_fks_and_signs_are_enforced()
     {
         await using var connection = await OpenConnectionAsync();
@@ -1793,7 +1963,7 @@ public sealed class PostgreSqlIntegrationTests
         FinancialAccountDto destination;
         await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            var service = FinanceServiceFor(setupContext);
             source = await service.CreateAccountAsync(actorId,
                 new FinancialAccountRequest(branchId, Unique("Finance Seq Cash"), FinancialAccountType.Cash, 10000m, null));
             destination = await service.CreateAccountAsync(actorId,
@@ -1804,14 +1974,14 @@ public sealed class PostgreSqlIntegrationTests
         ExpenseDto expenseOne;
         await using (var expenseContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(expenseContext), TimeProvider.System);
+            var service = FinanceServiceFor(expenseContext);
             expenseOne = await service.PostExpenseAsync(actorId,
                 new PostExpenseRequest(branchId, categoryId, source.Id, DateTime.UtcNow, 1200m, "Integration expense one", null, null, null));
         }
         ExpenseDto expenseTwo;
         await using (var expenseContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(expenseContext), TimeProvider.System);
+            var service = FinanceServiceFor(expenseContext);
             expenseTwo = await service.PostExpenseAsync(actorId,
                 new PostExpenseRequest(branchId, categoryId, source.Id, DateTime.UtcNow, 300m, "Integration expense two", null, null, null));
         }
@@ -1819,7 +1989,7 @@ public sealed class PostgreSqlIntegrationTests
         OtherIncomeDto income;
         await using (var incomeContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(incomeContext), TimeProvider.System);
+            var service = FinanceServiceFor(incomeContext);
             income = await service.PostOtherIncomeAsync(actorId,
                 new PostOtherIncomeRequest(branchId, source.Id, DateTime.UtcNow, 800m, "Integration other income", null, null));
         }
@@ -1827,7 +1997,7 @@ public sealed class PostgreSqlIntegrationTests
         FinancialTransferDto transfer;
         await using (var transferContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(transferContext), TimeProvider.System);
+            var service = FinanceServiceFor(transferContext);
             transfer = await service.PostTransferAsync(actorId,
                 new PostTransferRequest(branchId, source.Id, destination.Id, DateTime.UtcNow, 3000m, null, null));
         }
@@ -1867,6 +2037,16 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(6300m, await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == source.Id).SumAsync(x => x.Amount));
         Assert.Equal(3000m, await verifyContext.FinancialLedgerEntries.Where(x => x.FinancialAccountId == destination.Id).SumAsync(x => x.Amount));
 
+        var journalSources = new[] { source.Id, expenseOne.Id, expenseTwo.Id, income.Id, transfer.Id };
+        var journals = await verifyContext.JournalEntries.AsNoTracking().Include(x => x.Lines)
+            .Where(x => x.SourceId.HasValue && journalSources.Contains(x.SourceId.Value)).ToListAsync();
+        Assert.Equal(5, journals.Count);
+        Assert.Contains(journals, x => x.SourceType == JournalSourceType.OpeningBalance && x.SourceId == source.Id);
+        Assert.Contains(journals, x => x.SourceType == JournalSourceType.Expense && x.SourceId == expenseOne.Id);
+        Assert.Contains(journals, x => x.SourceType == JournalSourceType.OtherIncome && x.SourceId == income.Id);
+        Assert.Contains(journals, x => x.SourceType == JournalSourceType.CashTransfer && x.SourceId == transfer.Id);
+        Assert.All(journals, x => Assert.Equal(x.Lines.Sum(line => line.Debit), x.Lines.Sum(line => line.Credit)));
+
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "Expense" && x.EntityId == expenseOne.Id && x.Action == "ExpensePosted"));
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "OtherIncome" && x.EntityId == income.Id && x.Action == "OtherIncomePosted"));
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "FinancialTransfer" && x.EntityId == transfer.Id && x.Action == "AccountTransferPosted"));
@@ -1894,7 +2074,7 @@ public sealed class PostgreSqlIntegrationTests
         FinancialAccountDto account;
         await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            var service = FinanceServiceFor(setupContext);
             account = await service.CreateAccountAsync(actorId,
                 new FinancialAccountRequest(branchId, Unique("Finance Exp Conc"), FinancialAccountType.Cash, 1000m, null));
         }
@@ -1907,7 +2087,7 @@ public sealed class PostgreSqlIntegrationTests
         async Task<(ExpenseDto? Result, Exception? Error)> AttemptAsync(string label)
         {
             await using var raceContext = new PharmacyDbContext(Options(connectionString));
-            var service = new FinanceService(new FinanceRepository(raceContext), TimeProvider.System);
+            var service = FinanceServiceFor(raceContext);
             try
             {
                 return (await service.PostExpenseAsync(actorId,
@@ -1965,7 +2145,7 @@ public sealed class PostgreSqlIntegrationTests
         FinancialAccountDto source, destinationA, destinationB;
         await using (var setupContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(setupContext), TimeProvider.System);
+            var service = FinanceServiceFor(setupContext);
             source = await service.CreateAccountAsync(actorId,
                 new FinancialAccountRequest(branchId, Unique("Finance Trf Conc Source"), FinancialAccountType.Cash, 1000m, null));
             destinationA = await service.CreateAccountAsync(actorId,
@@ -1979,7 +2159,7 @@ public sealed class PostgreSqlIntegrationTests
         async Task<(FinancialTransferDto? Result, Exception? Error)> AttemptAsync(Guid destinationId, string label)
         {
             await using var raceContext = new PharmacyDbContext(Options(connectionString));
-            var service = new FinanceService(new FinanceRepository(raceContext), TimeProvider.System);
+            var service = FinanceServiceFor(raceContext);
             try
             {
                 return (await service.PostTransferAsync(actorId,
@@ -2044,22 +2224,22 @@ public sealed class PostgreSqlIntegrationTests
         ExpenseCategoryDto category;
         await using (var createContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(createContext), TimeProvider.System);
+            var service = FinanceServiceFor(createContext);
             category = await service.CreateCategoryAsync(actorId, new ExpenseCategoryRequest(Unique("Finance Cat Audit"), "Created for audit test"));
         }
         await using (var updateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(updateContext), TimeProvider.System);
+            var service = FinanceServiceFor(updateContext);
             await service.UpdateCategoryAsync(actorId, category.Id, new ExpenseCategoryRequest(category.Name + " Updated", "Updated for audit test"));
         }
         await using (var deactivateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(deactivateContext), TimeProvider.System);
+            var service = FinanceServiceFor(deactivateContext);
             await service.SetCategoryActiveAsync(actorId, category.Id, false);
         }
         await using (var activateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(activateContext), TimeProvider.System);
+            var service = FinanceServiceFor(activateContext);
             await service.SetCategoryActiveAsync(actorId, category.Id, true);
         }
 
@@ -2067,13 +2247,13 @@ public sealed class PostgreSqlIntegrationTests
         // invalid (blank-name) update must never write a success audit entry.
         await using (var dupCreateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(dupCreateContext), TimeProvider.System);
+            var service = FinanceServiceFor(dupCreateContext);
             await Assert.ThrowsAsync<ResourceConflictException>(() =>
                 service.CreateCategoryAsync(actorId, new ExpenseCategoryRequest(category.Name + " Updated", "duplicate")));
         }
         await using (var invalidUpdateContext = new PharmacyDbContext(Options(connectionString)))
         {
-            var service = new FinanceService(new FinanceRepository(invalidUpdateContext), TimeProvider.System);
+            var service = FinanceServiceFor(invalidUpdateContext);
             await Assert.ThrowsAsync<RequestValidationException>(() =>
                 service.UpdateCategoryAsync(actorId, category.Id, new ExpenseCategoryRequest("   ", "blank name")));
         }
@@ -2085,6 +2265,15 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(1, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id && x.Action == "ExpenseCategoryActivated"));
         Assert.Equal(4, await verifyContext.AuditLogs.CountAsync(x => x.EntityType == "ExpenseCategory" && x.EntityId == category.Id));
     }
+
+    private static PurchasingService PurchasingServiceFor(PharmacyDbContext context) =>
+        new(new PurchasingRepository(context), JournalPostingFor(context), TimeProvider.System);
+
+    private static FinanceService FinanceServiceFor(PharmacyDbContext context) =>
+        new(new FinanceRepository(context), JournalPostingFor(context), TimeProvider.System);
+
+    private static JournalPostingService JournalPostingFor(PharmacyDbContext context) =>
+        new(new AccountingRepository(context), TimeProvider.System);
 
     private static async Task<NpgsqlConnection> OpenConnectionAsync()
     {

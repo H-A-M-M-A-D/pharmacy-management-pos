@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Suppliers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Domain.Entities;
 
@@ -19,6 +20,13 @@ public sealed class SupplierManagementTests
         Assert.Equal(10000, result.OutstandingBalance);
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.OpeningBalance && x.Amount == 10000);
         Assert.Contains(f.Audits, x => x.Action == "SupplierCreated");
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.OpeningBalance, journal.SourceType);
+        Assert.Equal(10000, journal.Lines.Single(x => x.Account == AccountMappingKey.RetainedEarnings).Debit);
+        var payable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable);
+        Assert.Equal(10000, payable.Credit);
+        Assert.Equal(f.Supplier!.Id, payable.SupplierId);
     }
 
     [Fact]
@@ -28,6 +36,12 @@ public sealed class SupplierManagementTests
         var result = await f.Service.CreateSupplierAsync(f.Actor.Id, Request(opening: -5000));
         Assert.Equal(-5000, result.OutstandingBalance);
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.OpeningBalance && x.Amount == -5000);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        var payable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable);
+        Assert.Equal(5000, payable.Debit);
+        Assert.Equal(f.Supplier!.Id, payable.SupplierId);
+        Assert.Equal(5000, journal.Lines.Single(x => x.Account == AccountMappingKey.RetainedEarnings).Credit);
     }
 
     [Fact]
@@ -36,6 +50,7 @@ public sealed class SupplierManagementTests
         var f = new Fixture(PermissionCatalog.SuppliersCreate);
         await f.Service.CreateSupplierAsync(f.Actor.Id, Request(opening: 0));
         Assert.Empty(f.Ledger);
+        Assert.Empty(f.Journal.Posted);
     }
 
     [Fact]
@@ -72,6 +87,20 @@ public sealed class SupplierManagementTests
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.AdjustmentDebit && x.Amount == 2000);
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.AdjustmentCredit && x.Amount == -1500);
         Assert.Equal(-3500, f.Balance);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.SupplierPayment, journal.SourceType);
+        Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable).Debit);
+        Assert.Equal(4000, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Credit);
+    }
+
+    [Fact]
+    public async Task Supplier_payment_journal_posting_failure_rolls_back_the_entire_payment()
+    {
+        var f = new Fixture(PermissionCatalog.SuppliersPaymentCreate) { Journal = { ThrowOnPost = true } };
+        f.ExistingSupplier();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.RecordPaymentAsync(f.Actor.Id, new(f.Supplier!.Id, f.Branch.Id, 4000, f.Today, SupplierPaymentMethod.Cash, "R-1", null)));
+        Assert.Empty(f.Ledger);
     }
 
     [Fact]
@@ -115,6 +144,7 @@ public sealed class SupplierManagementTests
         public readonly User Actor;
         public readonly List<SupplierLedgerEntry> Ledger = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly FakeJournalPostingService Journal = new();
         public Supplier? Supplier;
         public bool NameExists;
         public SupplierService Service { get; }
@@ -126,7 +156,7 @@ public sealed class SupplierManagementTests
             foreach (var permission in permissions)
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, TimeProvider.System);
+            Service = new(this, Journal, TimeProvider.System);
         }
 
         public void ExistingSupplier(decimal opening = 0)
@@ -145,7 +175,29 @@ public sealed class SupplierManagementTests
         public Task<SupplierDetailsDto?> GetSupplierDetailsAsync(Guid supplierId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult<SupplierDetailsDto?>(Supplier is null ? null : new(Supplier.Id, Supplier.Name, Supplier.ShortName, Supplier.ContactPerson, Supplier.PhoneNumber, Supplier.AlternatePhone, Supplier.WhatsApp, Supplier.Email, Supplier.Address, Supplier.City, Supplier.TaxNumber, Supplier.STRN, Supplier.OpeningBalance, Supplier.CreditLimit, Supplier.PaymentTermsDays, Supplier.IsActive, Balance, Ledger.Where(x => x.EntryType == SupplierLedgerEntryType.Payment).Sum(x => -x.Amount), null, Supplier.CreatedAt, Supplier.UpdatedAt));
         public Task<IReadOnlyList<SupplierLookupDto>> LookupSuppliersAsync(string? search, bool activeOnly, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<SupplierLookupDto>>([]);
         public Task<PagedResult<SupplierLedgerEntryDto>> ListLedgerAsync(Guid supplierId, SupplierLedgerQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<SupplierLedgerEntryDto>([], query.Page, query.PageSize, 0));
-        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
+        public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+        {
+            var snapshot = (Ledger.ToList(), Audits.ToList());
+            try { await operation(cancellationToken); }
+            catch
+            {
+                Ledger.Clear(); Ledger.AddRange(snapshot.Item1);
+                Audits.Clear(); Audits.AddRange(snapshot.Item2);
+                throw;
+            }
+        }
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public bool ThrowOnPost;
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnPost) throw new InvalidOperationException("forced journal failure");
+            Posted.Add(request);
+            return Task.CompletedTask;
+        }
     }
 }

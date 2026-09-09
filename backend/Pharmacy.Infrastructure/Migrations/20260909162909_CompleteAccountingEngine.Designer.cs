@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pharmacy.Infrastructure.Data;
@@ -11,9 +12,11 @@ using Pharmacy.Infrastructure.Data;
 namespace Pharmacy.Infrastructure.Migrations
 {
     [DbContext(typeof(PharmacyDbContext))]
-    partial class PharmacyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260909162909_CompleteAccountingEngine")]
+    partial class CompleteAccountingEngine
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -55,7 +58,7 @@ namespace Pharmacy.Infrastructure.Migrations
 
                     b.ToTable("AccountMappings", t =>
                         {
-                            t.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 13");
+                            t.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 12");
                         });
                 });
 

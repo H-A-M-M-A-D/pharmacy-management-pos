@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Purchasing;
 using Pharmacy.Domain.Entities;
 
@@ -39,6 +40,27 @@ public sealed class PurchasingServiceTests
         Assert.Contains(f.Movements, x => x.MovementType == StockMovementType.Purchase && x.Quantity == 110);
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.Purchase && x.Amount == 4845);
         Assert.Contains(f.Audits, x => x.Action == "DirectPurchasePosted");
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.Purchase, journal.SourceType);
+        Assert.Equal(receipt.Id, journal.SourceId);
+        Assert.Equal(4845, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Debit);
+        var payable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable);
+        Assert.Equal(4845, payable.Credit);
+        Assert.Equal(f.Supplier.Id, payable.SupplierId);
+        Assert.Equal(journal.Lines.Sum(x => x.Debit), journal.Lines.Sum(x => x.Credit));
+    }
+
+    [Fact]
+    public async Task Purchase_journal_posting_failure_rolls_back_the_entire_receipt()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate) { Journal = { ThrowOnPost = true } };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(10, 0, 20, 0, 0)));
+        Assert.Empty(f.Receipts);
+        Assert.Empty(f.Batches);
+        Assert.Empty(f.Inventory);
+        Assert.Empty(f.Movements);
+        Assert.Empty(f.Ledger);
     }
 
     [Fact]
@@ -111,14 +133,24 @@ public sealed class PurchasingServiceTests
         Assert.Contains(f.Movements, x => x.MovementType == StockMovementType.PurchaseReturn && x.Quantity == -20);
         Assert.Contains(f.Ledger, x => x.EntryType == SupplierLedgerEntryType.PurchaseReturn && x.Amount == -1000);
 
+        var paidJournal = Assert.Single(f.Journal.Posted, x => x.SourceType == JournalSourceType.PurchaseReturn);
+        Assert.Equal(JournalSourceType.PurchaseReturn, paidJournal.SourceType);
+        Assert.Equal(paid.Id, paidJournal.SourceId);
+        Assert.Equal(1000, paidJournal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable).Debit);
+        Assert.Equal(1000, paidJournal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Credit);
+
         var bonus = await f.Service.PostPurchaseReturnAsync(f.Actor.Id, receipt.Id, new(PurchaseReturnReason.ExcessSupply, null, [new(itemId, 0, 5)]));
         Assert.Equal(0, bonus.NetSupplierCredit);
         Assert.Equal(85, f.Batches.Single().QuantityAvailable);
         Assert.DoesNotContain(f.Ledger, x => x.ReferenceId == bonus.Id);
+        Assert.Single(f.Journal.Posted, x => x.SourceType == JournalSourceType.PurchaseReturn);
 
         var mixed = await f.Service.PostPurchaseReturnAsync(f.Actor.Id, receipt.Id, new(PurchaseReturnReason.WrongItem, null, [new(itemId, 10, 5)]));
         Assert.Equal(500, mixed.NetSupplierCredit);
         Assert.Equal(70, f.Batches.Single().QuantityAvailable);
+        var mixedJournal = Assert.Single(f.Journal.Posted, x => x.SourceId == mixed.Id);
+        Assert.Equal(500, mixedJournal.Lines.Single(x => x.Account == AccountMappingKey.AccountsPayable).Debit);
+        Assert.Equal(500, mixedJournal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Credit);
     }
 
     [Fact]
@@ -191,6 +223,7 @@ public sealed class PurchasingServiceTests
         public readonly List<SupplierLedgerEntry> Ledger = [];
         public readonly List<PurchaseReturn> PurchaseReturns = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly FakeJournalPostingService Journal = new();
         public bool FailOnSave;
         public PurchasingService Service { get; }
 
@@ -200,7 +233,7 @@ public sealed class PurchasingServiceTests
             var role = new Role { Name = RoleCatalog.Manager };
             foreach (var permission in permissions) role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, TimeProvider.System);
+            Service = new(this, Journal, TimeProvider.System);
         }
 
         public PurchaseOrderRequest OrderRequest(int quantity) => new(Branch.Id, Supplier.Id, Today, Today.AddDays(3), null, null, [new(Product.Id, quantity, 50, null)]);
@@ -275,5 +308,17 @@ public sealed class PurchasingServiceTests
             Inventory.Clear(); Inventory.AddRange(s.Inventory); Movements.Clear(); Movements.AddRange(s.Movements); Ledger.Clear(); Ledger.AddRange(s.Ledger); Audits.Clear(); Audits.AddRange(s.Audits);
         }
         private static string Unique(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
+    }
+
+    private sealed class FakeJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public bool ThrowOnPost;
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnPost) throw new InvalidOperationException("forced journal failure");
+            Posted.Add(request);
+            return Task.CompletedTask;
+        }
     }
 }

@@ -3,11 +3,12 @@ using System.Text.Json;
 using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Finance;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Finance;
 
-public sealed class FinanceService(IFinanceRepository repository, TimeProvider timeProvider) : IFinanceService
+public sealed class FinanceService(IFinanceRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : IFinanceService
 {
     public async Task<IReadOnlyList<FinancialAccountDto>> ListAccountsAsync(Guid actorId, Guid? branchId, CancellationToken cancellationToken = default)
     {
@@ -50,8 +51,11 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
             };
             await repository.AddAccountAsync(account, ct);
             if (account.OpeningBalance != 0)
+            {
                 await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.OpeningBalance,
                     account.OpeningBalance, "FinancialAccount", account.Id, "Opening balance", actorId, UtcNow()), ct);
+                await PostFinancialAccountOpeningBalanceJournalAsync(actorId, account, ct);
+            }
             await Audit(actorId, "FinancialAccountCreated", "FinancialAccount", account.Id,
                 new { account.Name, account.BranchId, account.AccountType, account.OpeningBalance }, ct);
             await repository.SaveChangesAsync(ct);
@@ -174,6 +178,7 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
                 CreatedByUserId = actorId, PostedAtUtc = now };
             await repository.AddExpenseAsync(expense, ct);
             await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.Expense, -expense.Amount, "Expense", expense.Id, expense.Description, actorId, expense.ExpenseDateUtc, expense.ExpenseNumber), ct);
+            await PostExpenseJournalAsync(actorId, expense, account, ct);
             await Audit(actorId, "ExpensePosted", "Expense", expense.Id, new { expense.ExpenseNumber, expense.BranchId, expense.FinancialAccountId, expense.Amount }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -193,6 +198,7 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
                 Notes = Clean(request.Notes), OccurredAtUtc = AsUtc(request.OccurredAtUtc), CreatedByUserId = actorId };
             await repository.AddOtherIncomeAsync(income, ct);
             await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.OtherIncome, income.Amount, "OtherIncome", income.Id, income.Description, actorId, income.OccurredAtUtc, income.IncomeNumber), ct);
+            await PostOtherIncomeJournalAsync(actorId, income, account, ct);
             await Audit(actorId, "OtherIncomePosted", "OtherIncome", income.Id, new { income.IncomeNumber, income.BranchId, income.FinancialAccountId, income.Amount }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -221,6 +227,7 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
             await repository.AddTransferAsync(transfer, ct);
             await repository.AddLedgerEntryAsync(Entry(source, FinancialLedgerEntryType.TransferOut, -transfer.Amount, "FinancialTransfer", transfer.Id, "Transfer to " + destination.Name, actorId, transfer.OccurredAtUtc, transfer.TransferNumber), ct);
             await repository.AddLedgerEntryAsync(Entry(destination, FinancialLedgerEntryType.TransferIn, transfer.Amount, "FinancialTransfer", transfer.Id, "Transfer from " + source.Name, actorId, transfer.OccurredAtUtc, transfer.TransferNumber), ct);
+            await PostTransferJournalAsync(actorId, transfer, source, destination, ct);
             await Audit(actorId, "AccountTransferPosted", "FinancialTransfer", transfer.Id, new { transfer.TransferNumber, transfer.SourceAccountId, transfer.DestinationAccountId, transfer.Amount }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
@@ -268,6 +275,40 @@ public sealed class FinanceService(IFinanceRepository repository, TimeProvider t
             x.Where(e => e.Amount > 0).Sum(e => e.Amount), -x.Where(e => e.Amount < 0).Sum(e => e.Amount))).ToList();
         return new(branchId, date, accountId, opening, moneyIn, moneyOut, opening + moneyIn - moneyOut, breakdown);
     }
+
+    private async Task PostExpenseJournalAsync(Guid actorId, Expense expense, FinancialAccount account, CancellationToken ct)
+    {
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.Expense, expense.Id, expense.BranchId, expense.ExpenseDateUtc,
+            expense.ExpenseNumber, $"Expense {expense.ExpenseNumber}", actorId,
+            [new(AccountMappingKey.GeneralExpenseDefault, expense.Amount, 0), new(PaymentAccount(account.AccountType), 0, expense.Amount)]), ct);
+    }
+
+    private async Task PostFinancialAccountOpeningBalanceJournalAsync(Guid actorId, FinancialAccount account, CancellationToken ct)
+    {
+        var amount = Math.Abs(account.OpeningBalance);
+        var accountMapping = PaymentAccount(account.AccountType);
+        var lines = account.OpeningBalance > 0
+            ? new List<JournalLineInput> { new(accountMapping, amount, 0), new(AccountMappingKey.RetainedEarnings, 0, amount) }
+            : new List<JournalLineInput> { new(AccountMappingKey.RetainedEarnings, amount, 0), new(accountMapping, 0, amount) };
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OpeningBalance, account.Id, account.BranchId, UtcNow(),
+            "Opening balance", $"Opening balance for {account.Name}", actorId, lines), ct);
+    }
+
+    private async Task PostOtherIncomeJournalAsync(Guid actorId, OtherIncome income, FinancialAccount account, CancellationToken ct)
+    {
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OtherIncome, income.Id, income.BranchId, income.OccurredAtUtc,
+            income.IncomeNumber, $"Other income {income.IncomeNumber}", actorId,
+            [new(PaymentAccount(account.AccountType), income.Amount, 0), new(AccountMappingKey.OtherIncomeDefault, 0, income.Amount)]), ct);
+    }
+
+    private async Task PostTransferJournalAsync(Guid actorId, FinancialTransfer transfer, FinancialAccount source, FinancialAccount destination, CancellationToken ct)
+    {
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashTransfer, transfer.Id, transfer.BranchId, transfer.OccurredAtUtc,
+            transfer.TransferNumber, $"Account transfer {transfer.TransferNumber}", actorId,
+            [new(PaymentAccount(destination.AccountType), transfer.Amount, 0), new(PaymentAccount(source.AccountType), 0, transfer.Amount)]), ct);
+    }
+
+    private static AccountMappingKey PaymentAccount(FinancialAccountType type) => type == FinancialAccountType.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
     private async Task<FinancialAccount> LockedActiveAccount(Guid accountId, Guid branchId, CancellationToken ct)
     {

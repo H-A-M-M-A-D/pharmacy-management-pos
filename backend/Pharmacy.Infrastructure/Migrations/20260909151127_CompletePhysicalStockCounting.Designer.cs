@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pharmacy.Infrastructure.Data;
@@ -11,9 +12,11 @@ using Pharmacy.Infrastructure.Data;
 namespace Pharmacy.Infrastructure.Migrations
 {
     [DbContext(typeof(PharmacyDbContext))]
-    partial class PharmacyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260909151127_CompletePhysicalStockCounting")]
+    partial class CompletePhysicalStockCounting
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -27,37 +30,6 @@ namespace Pharmacy.Infrastructure.Migrations
             modelBuilder.HasSequence("FinancialTransferNumberSequence");
 
             modelBuilder.HasSequence("OtherIncomeNumberSequence");
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountMapping", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ChartOfAccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("MappingKey")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChartOfAccountId");
-
-                    b.HasIndex("MappingKey")
-                        .IsUnique();
-
-                    b.ToTable("AccountMappings", t =>
-                        {
-                            t.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 13");
-                        });
-                });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.AuditLog", b =>
                 {
@@ -213,247 +185,6 @@ namespace Pharmacy.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Branches");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShift", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal?>("ActualCountedCash")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal?>("CashPaidOutSnapshot")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<decimal?>("CashVariance")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<Guid>("CashierUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ClosedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ClosingNotes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal?>("CustomerCashReceivedSnapshot")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<decimal?>("ExpectedCash")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<DateTime>("OpenedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal>("OpeningCash")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<string>("OpeningNotes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateTime?>("ReconciledAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ReconciledByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ReconciliationNotes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("TerminalName")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ReconciledByUserId");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("BranchId", "ClosedAtUtc");
-
-                    b.HasIndex("BranchId", "OpenedAtUtc");
-
-                    b.HasIndex("CashierUserId", "Status");
-
-                    b.ToTable("CashierShifts", t =>
-                        {
-                            t.HasCheckConstraint("CK_CashierShifts_ActualCountedCash_NonNegative", "\"ActualCountedCash\" IS NULL OR \"ActualCountedCash\" >= 0");
-
-                            t.HasCheckConstraint("CK_CashierShifts_Closed_Fields", "(\"Status\" = 1 AND \"ClosedAtUtc\" IS NULL) OR (\"Status\" <> 1 AND \"ClosedAtUtc\" IS NOT NULL AND \"ExpectedCash\" IS NOT NULL AND \"ActualCountedCash\" IS NOT NULL)");
-
-                            t.HasCheckConstraint("CK_CashierShifts_OpeningCash_NonNegative", "\"OpeningCash\" >= 0");
-
-                            t.HasCheckConstraint("CK_CashierShifts_Reconciled_Fields", "\"Status\" <> 3 OR (\"ReconciledByUserId\" IS NOT NULL AND \"ReconciledAtUtc\" IS NOT NULL)");
-
-                            t.HasCheckConstraint("CK_CashierShifts_Status", "\"Status\" IN (1, 2, 3)");
-                        });
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShiftDrawerEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<Guid>("CashierShiftId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("EntryType")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CashierShiftId");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.ToTable("CashierShiftDrawerEntries", t =>
-                        {
-                            t.HasCheckConstraint("CK_CashierShiftDrawerEntries_Amount_Positive", "\"Amount\" > 0");
-                        });
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShiftPaymentSummary", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CashierShiftId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("PaymentMethod")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("RefundsAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<decimal>("SalesAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CashierShiftId", "PaymentMethod")
-                        .IsUnique();
-
-                    b.ToTable("CashierShiftPaymentSummaries", t =>
-                        {
-                            t.HasCheckConstraint("CK_CashierShiftPaymentSummaries_NonNegative", "\"SalesAmount\" >= 0 AND \"RefundsAmount\" >= 0");
-                        });
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.ChartOfAccount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("AccountType")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsPostingAccount")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("NormalBalance")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("NormalizedCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<Guid?>("ParentAccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("NormalizedCode")
-                        .IsUnique();
-
-                    b.HasIndex("ParentAccountId");
-
-                    b.HasIndex("AccountType", "IsActive");
-
-                    b.ToTable("ChartOfAccounts", t =>
-                        {
-                            t.HasCheckConstraint("CK_ChartOfAccounts_AccountType", "\"AccountType\" IN (1, 2, 3, 4, 5, 6)");
-
-                            t.HasCheckConstraint("CK_ChartOfAccounts_NormalBalance", "\"NormalBalance\" IN (1, 2)");
-                        });
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.Customer", b =>
@@ -1236,129 +967,6 @@ namespace Pharmacy.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_Inventory_QuantityInStock_NonNegative", "\"QuantityInStock\" >= 0");
 
                             t.HasCheckConstraint("CK_Inventory_ReorderLevel_NonNegative", "\"ReorderLevel\" >= 0");
-                        });
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateTime>("EntryDateUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("EntryNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("PostedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("PostedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Reference")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid?>("SourceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("SourceType")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EntryDateUtc");
-
-                    b.HasIndex("EntryNumber")
-                        .IsUnique();
-
-                    b.HasIndex("PostedByUserId");
-
-                    b.HasIndex("BranchId", "EntryDateUtc");
-
-                    b.HasIndex("SourceType", "SourceId");
-
-                    b.ToTable("JournalEntries", t =>
-                        {
-                            t.HasCheckConstraint("CK_JournalEntries_Status", "\"Status\" = 1");
-                        });
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntryLine", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ChartOfAccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal>("Credit")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<Guid?>("CustomerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Debit")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<Guid>("JournalEntryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("SupplierId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("CustomerId");
-
-                    b.HasIndex("JournalEntryId");
-
-                    b.HasIndex("SupplierId");
-
-                    b.HasIndex("ChartOfAccountId", "BranchId");
-
-                    b.ToTable("JournalEntryLines", t =>
-                        {
-                            t.HasCheckConstraint("CK_JournalEntryLines_Amounts", "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)");
                         });
                 });
 
@@ -3186,17 +2794,6 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
-            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountMapping", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ChartOfAccount")
-                        .WithMany()
-                        .HasForeignKey("ChartOfAccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ChartOfAccount");
-                });
-
             modelBuilder.Entity("Pharmacy.Domain.Entities.AuditLog", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.User", "User")
@@ -3206,72 +2803,6 @@ namespace Pharmacy.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShift", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.User", "CashierUser")
-                        .WithMany()
-                        .HasForeignKey("CashierUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.User", "ReconciledByUser")
-                        .WithMany()
-                        .HasForeignKey("ReconciledByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("CashierUser");
-
-                    b.Navigation("ReconciledByUser");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShiftDrawerEntry", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.CashierShift", "CashierShift")
-                        .WithMany("DrawerEntries")
-                        .HasForeignKey("CashierShiftId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("CashierShift");
-
-                    b.Navigation("CreatedByUser");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShiftPaymentSummary", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.CashierShift", "CashierShift")
-                        .WithMany("PaymentSummaries")
-                        .HasForeignKey("CashierShiftId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CashierShift");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.ChartOfAccount", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ParentAccount")
-                        .WithMany("ChildAccounts")
-                        .HasForeignKey("ParentAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ParentAccount");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerLedgerEntry", b =>
@@ -3533,66 +3064,6 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Product");
 
                     b.Navigation("ProductBatch");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntry", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.User", "PostedByUser")
-                        .WithMany()
-                        .HasForeignKey("PostedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("PostedByUser");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntryLine", b =>
-                {
-                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ChartOfAccount")
-                        .WithMany()
-                        .HasForeignKey("ChartOfAccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.Customer", "Customer")
-                        .WithMany()
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Pharmacy.Domain.Entities.JournalEntry", "JournalEntry")
-                        .WithMany("Lines")
-                        .HasForeignKey("JournalEntryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Pharmacy.Domain.Entities.Supplier", "Supplier")
-                        .WithMany()
-                        .HasForeignKey("SupplierId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("ChartOfAccount");
-
-                    b.Navigation("Customer");
-
-                    b.Navigation("JournalEntry");
-
-                    b.Navigation("Supplier");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.OtherIncome", b =>
@@ -4159,18 +3630,6 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Users");
                 });
 
-            modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShift", b =>
-                {
-                    b.Navigation("DrawerEntries");
-
-                    b.Navigation("PaymentSummaries");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.ChartOfAccount", b =>
-                {
-                    b.Navigation("ChildAccounts");
-                });
-
             modelBuilder.Entity("Pharmacy.Domain.Entities.Customer", b =>
                 {
                     b.Navigation("LedgerEntries");
@@ -4188,11 +3647,6 @@ namespace Pharmacy.Infrastructure.Migrations
             modelBuilder.Entity("Pharmacy.Domain.Entities.GoodsReceipt", b =>
                 {
                     b.Navigation("Items");
-                });
-
-            modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntry", b =>
-                {
-                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.Manufacturer", b =>

@@ -4,11 +4,12 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Sales;
 
-public sealed class SalesReturnService(ISalesReturnRepository repository, TimeProvider timeProvider) : ISalesReturnService
+public sealed class SalesReturnService(ISalesReturnRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : ISalesReturnService
 {
     public async Task<ReturnableSaleDto> GetReturnableSaleAsync(Guid actorId, Guid saleId, CancellationToken cancellationToken = default)
     {
@@ -145,6 +146,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
             }
             posted.CashRefundAmount = Money(posted.RefundAmount - posted.CustomerCreditReductionAmount);
             ApplyRefundPayments(posted, request.RefundPayments);
+            await PostSalesReturnJournalAsync(actor, sale, posted, ct);
             await repository.AddSalesReturnAsync(posted, ct);
             await repository.AddAuditAsync(new AuditLog
             {
@@ -198,6 +200,29 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, TimePr
         }
         return new SalesReturnReceiptDto(detail.ReturnNumber, detail.OriginalInvoiceNumber, detail.BranchName, detail.BranchAddress, detail.BranchPhone, detail.ReturnDateUtc, detail.ProcessedByName, detail.CustomerName, detail.Reason, detail.RefundAmount, detail.CustomerCreditReductionAmount, detail.CashRefundAmount, detail.Items, detail.RefundPayments);
     }
+
+    private async Task PostSalesReturnJournalAsync(User actor, Sale sale, SalesReturn posted, CancellationToken ct)
+    {
+        var lines = new List<JournalLineInput>();
+        if (posted.RefundAmount > 0)
+            lines.Add(new JournalLineInput(AccountMappingKey.SalesReturnsContra, posted.RefundAmount, 0));
+        foreach (var payment in posted.RefundPayments)
+            if (payment.Amount > 0)
+                lines.Add(new JournalLineInput(PaymentAccount(payment.Method), 0, payment.Amount));
+        if (posted.CustomerCreditReductionAmount > 0)
+            lines.Add(new JournalLineInput(AccountMappingKey.AccountsReceivable, 0, posted.CustomerCreditReductionAmount, CustomerId: sale.CustomerId));
+        var cogs = Money(posted.Items.SelectMany(x => x.Allocations).Where(a => a.Disposition == SalesReturnDisposition.Restockable).Sum(a => a.Quantity * a.UnitCostPriceSnapshot));
+        if (cogs > 0)
+        {
+            lines.Add(new JournalLineInput(AccountMappingKey.Inventory, cogs, 0));
+            lines.Add(new JournalLineInput(AccountMappingKey.CostOfGoodsSold, 0, cogs));
+        }
+        if (lines.Count == 0) return;
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.SalesReturn, posted.Id, posted.BranchId, posted.PostedAtUtc!.Value,
+            posted.ReturnNumber, $"Sales return {posted.ReturnNumber}", actor.Id, lines), ct);
+    }
+
+    private static AccountMappingKey PaymentAccount(SalePaymentMethod method) => method == SalePaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
     private static StockMovement Movement(StockMovementType type, Guid returnId, Guid branchId, Guid productId, Guid batchId, int quantity, Guid actorId, string returnNumber) => new()
     {

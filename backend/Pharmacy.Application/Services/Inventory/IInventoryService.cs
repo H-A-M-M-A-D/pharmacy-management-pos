@@ -18,4 +18,13 @@ public interface IInventoryService
     Task<FefoPreviewDto> PreviewFefoAsync(Guid actorId, FefoPreviewRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InventoryIntegrityIssueDto>> CheckIntegrityAsync(Guid actorId, Guid? branchId, Guid? productId, CancellationToken cancellationToken = default);
     Task<InventoryOptionsDto> GetOptionsAsync(Guid actorId, string? productSearch, CancellationToken cancellationToken = default);
+
+    Task<StockCountSessionDto> CreateStockCountSessionAsync(Guid actorId, CreateStockCountSessionRequest request, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto> StartStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto> SubmitStockCountEntriesAsync(Guid actorId, Guid sessionId, SubmitStockCountEntriesRequest request, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto> FinalizeStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto> CancelStockCountSessionAsync(Guid actorId, Guid sessionId, CancelStockCountSessionRequest request, CancellationToken cancellationToken = default);
+    Task<StockCountSessionDto> GetStockCountSessionAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default);
+    Task<PagedResult<StockCountSessionListItemDto>> ListStockCountSessionsAsync(Guid actorId, StockCountSessionListQuery query, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<StockCountItemDto>> GetStockCountDiscrepanciesAsync(Guid actorId, Guid sessionId, CancellationToken cancellationToken = default);
 }

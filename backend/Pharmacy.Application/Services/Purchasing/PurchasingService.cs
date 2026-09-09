@@ -4,11 +4,12 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Purchasing;
 
-public sealed class PurchasingService(IPurchasingRepository repository, TimeProvider timeProvider) : IPurchasingService
+public sealed class PurchasingService(IPurchasingRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : IPurchasingService
 {
     public async Task<PagedResult<PurchaseOrderListItemDto>> ListPurchaseOrdersAsync(Guid actorId, PurchaseOrderListQuery query, CancellationToken cancellationToken = default)
     {
@@ -275,6 +276,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
                 order.UpdatedAt = UtcNow();
             }
 
+            await PostGoodsReceiptJournalAsync(actor, receipt, ct);
             await Audit(actorId, order is null ? "DirectPurchasePosted" : "PurchasePosted", "GoodsReceipt", receipt.Id, null,
                 new { receipt.GrnNumber, receipt.SupplierInvoiceNumber, receipt.BranchId, receipt.SupplierId, receipt.PurchaseOrderId, receipt.NetTotal, ItemCount = receipt.Items.Count }, ct);
             await repository.SaveChangesAsync(ct);
@@ -398,6 +400,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
                 }, ct);
             }
 
+            await PostPurchaseReturnJournalAsync(actor, posted, ct);
             await Audit(actorId, "PurchaseReturnPosted", "PurchaseReturn", posted.Id, null,
                 new { posted.ReturnNumber, receipt.GrnNumber, posted.SupplierId, posted.BranchId, posted.NetSupplierCredit, PhysicalQuantity = posted.Items.Sum(x => x.PaidReturnQuantity + x.BonusReturnQuantity) }, ct);
             await repository.SaveChangesAsync(ct);
@@ -435,6 +438,22 @@ public sealed class PurchasingService(IPurchasingRepository repository, TimeProv
     {
         var actor = await Require(actorId, PermissionCatalog.PurchasesView, cancellationToken);
         return await repository.GetOptionsAsync(productSearch, actor.BranchId, CanSelectBranch(actor), cancellationToken);
+    }
+
+    private async Task PostGoodsReceiptJournalAsync(User actor, GoodsReceipt receipt, CancellationToken ct)
+    {
+        if (receipt.NetTotal <= 0) return;
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.Purchase, receipt.Id, receipt.BranchId, UtcNow(),
+            ReferenceNumber(receipt), $"Purchase {receipt.GrnNumber}", actor.Id,
+            [new(AccountMappingKey.Inventory, receipt.NetTotal, 0), new(AccountMappingKey.AccountsPayable, 0, receipt.NetTotal, SupplierId: receipt.SupplierId)]), ct);
+    }
+
+    private async Task PostPurchaseReturnJournalAsync(User actor, PurchaseReturn posted, CancellationToken ct)
+    {
+        if (posted.NetSupplierCredit <= 0) return;
+        await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.PurchaseReturn, posted.Id, posted.BranchId, posted.PostedAtUtc,
+            posted.ReturnNumber, $"Purchase return {posted.ReturnNumber}", actor.Id,
+            [new(AccountMappingKey.AccountsPayable, posted.NetSupplierCredit, 0, SupplierId: posted.SupplierId), new(AccountMappingKey.Inventory, 0, posted.NetSupplierCredit)]), ct);
     }
 
     private async Task<User> Require(Guid actorId, string permission, CancellationToken cancellationToken)

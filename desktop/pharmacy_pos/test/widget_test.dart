@@ -255,14 +255,85 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('adjust_stock')));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('save_adjustment_quantity')),
-      '99',
-    );
-    await tester.enterText(find.byType(TextFormField).last, 'count');
+    await tester.tap(find.byKey(const Key('picker_branch')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Head Office').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('picker_product')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Panadol Extra (MED-001)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('picker_batch')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B-001 (qty 10)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adjust_direction_decrease')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('adjust_quantity')), '99');
+    await tester.enterText(find.byKey(const Key('adjust_notes')), 'count');
     await tester.tap(find.byKey(const Key('save_adjustment')));
     await tester.pumpAndSettle();
     expect(find.text('Insufficient stock in selected batch.'), findsOneWidget);
+  });
+
+  testWidgets(
+    'adjustment dialog requires branch product batch quantity and reason',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'inventory.view', 'inventory.adjust'},
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Inventory'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('adjust_stock')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_adjustment')));
+      await tester.pump();
+      expect(find.text('Branch is required'), findsOneWidget);
+      expect(find.text('Product is required'), findsOneWidget);
+      expect(find.text('Batch is required'), findsOneWidget);
+      expect(find.text('Enter a positive quantity'), findsOneWidget);
+    },
+  );
+
+  testWidgets('adjustment dialog requires notes when reason is other', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'inventory.view', 'inventory.adjust'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adjust_stock')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('picker_branch')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Head Office').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('picker_product')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Panadol Extra (MED-001)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('picker_batch')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B-001 (qty 10)').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('adjust_quantity')), '2');
+    await tester.tap(find.byKey(const Key('adjust_reason')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Other').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_adjustment')));
+    await tester.pump();
+    expect(
+      find.text('Notes are required when reason is Other'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('stock movements are read only', (tester) async {
@@ -279,6 +350,95 @@ void main() {
     expect(find.text('OpeningStock'), findsOneWidget);
     expect(find.text('Edit'), findsNothing);
     expect(find.text('Delete'), findsNothing);
+  });
+
+  testWidgets('stock taking session can be started counted and finalized', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'inventory.view',
+        'inventory.stock_count',
+        'inventory.stock_count.view',
+        'inventory.stock_count.finalize',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Inventory'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stock Taking'));
+    await tester.pumpAndSettle();
+    expect(find.text('SC-2026-000001'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('open_stock_count_session-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('Start Counting'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('start_stock_count')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('count_entry_line-1')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('count_entry_line-1')), '12');
+    await tester.tap(find.byKey(const Key('save_stock_count_entries')));
+    await tester.pumpAndSettle();
+    expect(find.text('2'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('finalize_stock_count')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_finalize_stock_count')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(Chip, 'Completed'), findsOneWidget);
+  });
+
+  testWidgets('cashier shift can be opened, adjusted, closed and reconciled', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'cashier_shift.open',
+        'cashier_shift.view',
+        'cashier_shift.close',
+        'cashier_shift.reconcile',
+        'cashier_shift.drawer_adjust',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Cashier Shift'));
+    await tester.pumpAndSettle();
+    expect(find.text('You do not have an open cashier shift.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('open_cashier_shift')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('open_shift_cash')), '500');
+    await tester.tap(find.byKey(const Key('save_open_shift')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('close_cashier_shift')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('cashier_shift_cash_in')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('drawer_entry_amount')), '50');
+    await tester.enterText(find.byKey(const Key('drawer_entry_reason')), 'float top-up');
+    await tester.tap(find.byKey(const Key('save_drawer_entry')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('float top-up'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('close_cashier_shift')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('close_shift_actual_cash')), '100');
+    await tester.tap(find.byKey(const Key('save_close_shift')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('reconcile_cashier_shift')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('reconcile_cashier_shift')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_reconcile_shift')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(Chip, 'Reconciled'), findsOneWidget);
   });
 
   testWidgets('suppliers navigation follows suppliers.view permission', (
@@ -1487,6 +1647,390 @@ class FakeApi implements PharmacyApi {
         ],
         totalCount: 1,
       );
+
+  static final DateTime _lineExpiry = DateTime(2026, 10, 1);
+
+  StockCountSession _stockCountSession = StockCountSession(
+    id: 'session-1',
+    countNumber: 'SC-2026-000001',
+    branchId: user.branch.id,
+    branchName: user.branch.name,
+    countDate: DateTime(2026, 9, 9),
+    status: 'Draft',
+    scope: 'Full',
+    createdBy: user.fullName,
+    totalItems: 1,
+    countedItems: 0,
+    varianceItems: 0,
+    items: [
+      StockCountLine(
+        id: 'line-1',
+        productId: 'product-1',
+        productName: 'Panadol Extra',
+        sku: 'MED-001',
+        productBatchId: 'batch-1',
+        batchNumber: 'B-001',
+        expiryDate: _lineExpiry,
+        systemQuantity: 10,
+        unitCostSnapshot: 8,
+      ),
+    ],
+  );
+
+  @override
+  Future<PagedStockCountSessions> listStockCountSessions(
+    String token, {
+    String? branchId,
+    String? status,
+  }) async => PagedStockCountSessions(
+    items: [
+      StockCountSessionSummary(
+        id: _stockCountSession.id,
+        countNumber: _stockCountSession.countNumber,
+        branchId: _stockCountSession.branchId,
+        branchName: _stockCountSession.branchName,
+        countDate: _stockCountSession.countDate,
+        status: _stockCountSession.status,
+        scope: _stockCountSession.scope,
+        totalItems: _stockCountSession.totalItems,
+        countedItems: _stockCountSession.countedItems,
+        varianceItems: _stockCountSession.varianceItems,
+        createdBy: _stockCountSession.createdBy,
+        createdAt: DateTime(2026, 9, 9),
+      ),
+    ],
+    totalCount: 1,
+  );
+
+  @override
+  Future<StockCountSession> getStockCountSession(
+    String token,
+    String id,
+  ) async => _stockCountSession;
+
+  @override
+  Future<StockCountSession> createStockCountSession(
+    String token,
+    Map<String, dynamic> values,
+  ) async => _stockCountSession;
+
+  @override
+  Future<StockCountSession> startStockCountSession(
+    String token,
+    String id,
+  ) async {
+    _stockCountSession = StockCountSession(
+      id: _stockCountSession.id,
+      countNumber: _stockCountSession.countNumber,
+      branchId: _stockCountSession.branchId,
+      branchName: _stockCountSession.branchName,
+      countDate: _stockCountSession.countDate,
+      status: 'InProgress',
+      scope: _stockCountSession.scope,
+      createdBy: _stockCountSession.createdBy,
+      startedBy: user.fullName,
+      totalItems: _stockCountSession.totalItems,
+      countedItems: _stockCountSession.countedItems,
+      varianceItems: _stockCountSession.varianceItems,
+      items: _stockCountSession.items,
+    );
+    return _stockCountSession;
+  }
+
+  @override
+  Future<StockCountSession> submitStockCountEntries(
+    String token,
+    String id,
+    List<Map<String, dynamic>> entries,
+  ) async {
+    final counted = entries.isNotEmpty
+        ? entries.first['countedQuantity'] as int
+        : 10;
+    final line = StockCountLine(
+      id: 'line-1',
+      productId: 'product-1',
+      productName: 'Panadol Extra',
+      sku: 'MED-001',
+      productBatchId: 'batch-1',
+      batchNumber: 'B-001',
+      expiryDate: _lineExpiry,
+      systemQuantity: 10,
+      unitCostSnapshot: 8,
+      countedQuantity: counted,
+      variance: counted - 10,
+    );
+    _stockCountSession = StockCountSession(
+      id: _stockCountSession.id,
+      countNumber: _stockCountSession.countNumber,
+      branchId: _stockCountSession.branchId,
+      branchName: _stockCountSession.branchName,
+      countDate: _stockCountSession.countDate,
+      status: _stockCountSession.status,
+      scope: _stockCountSession.scope,
+      createdBy: _stockCountSession.createdBy,
+      startedBy: _stockCountSession.startedBy,
+      totalItems: _stockCountSession.totalItems,
+      countedItems: 1,
+      varianceItems: line.variance != 0 ? 1 : 0,
+      items: [line],
+    );
+    return _stockCountSession;
+  }
+
+  @override
+  Future<StockCountSession> finalizeStockCountSession(
+    String token,
+    String id,
+  ) async {
+    _stockCountSession = StockCountSession(
+      id: _stockCountSession.id,
+      countNumber: _stockCountSession.countNumber,
+      branchId: _stockCountSession.branchId,
+      branchName: _stockCountSession.branchName,
+      countDate: _stockCountSession.countDate,
+      status: 'Completed',
+      scope: _stockCountSession.scope,
+      createdBy: _stockCountSession.createdBy,
+      startedBy: _stockCountSession.startedBy,
+      completedBy: user.fullName,
+      totalItems: _stockCountSession.totalItems,
+      countedItems: _stockCountSession.countedItems,
+      varianceItems: _stockCountSession.varianceItems,
+      items: _stockCountSession.items,
+    );
+    return _stockCountSession;
+  }
+
+  @override
+  Future<StockCountSession> cancelStockCountSession(
+    String token,
+    String id,
+    String reason,
+  ) async {
+    _stockCountSession = StockCountSession(
+      id: _stockCountSession.id,
+      countNumber: _stockCountSession.countNumber,
+      branchId: _stockCountSession.branchId,
+      branchName: _stockCountSession.branchName,
+      countDate: _stockCountSession.countDate,
+      status: 'Cancelled',
+      scope: _stockCountSession.scope,
+      createdBy: _stockCountSession.createdBy,
+      totalItems: _stockCountSession.totalItems,
+      countedItems: _stockCountSession.countedItems,
+      varianceItems: _stockCountSession.varianceItems,
+      items: _stockCountSession.items,
+    );
+    return _stockCountSession;
+  }
+
+  CashierShift? _cashierShift;
+
+  @override
+  Future<CashierShift?> myOpenCashierShift(String token) async =>
+      _cashierShift?.status == 'Open' ? _cashierShift : null;
+
+  @override
+  Future<CashierShift> openCashierShift(
+    String token,
+    Map<String, dynamic> values,
+  ) async {
+    _cashierShift = CashierShift(
+      id: 'shift-1',
+      branchId: user.branch.id,
+      branchName: user.branch.name,
+      cashierUserId: user.id,
+      cashierName: user.fullName,
+      terminalName: values['terminalName'] as String?,
+      openingCash: (values['openingCash'] as num).toDouble(),
+      openedAtUtc: DateTime(2026, 9, 9, 9),
+      openingNotes: values['openingNotes'] as String?,
+      status: 'Open',
+      totalSales: 0,
+      totalRefunds: 0,
+      cashSales: 0,
+      cashRefunds: 0,
+      customerCashReceived: 0,
+      cashPaidOut: 0,
+      manualCashIn: 0,
+      manualCashOut: 0,
+      paymentBreakdown: const [],
+      drawerEntries: const [],
+    );
+    return _cashierShift!;
+  }
+
+  @override
+  Future<CashierShift> addCashierShiftDrawerEntry(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {
+    final current = _cashierShift!;
+    final entryType = values['entryType'] as String;
+    final amount = (values['amount'] as num).toDouble();
+    final entries = [
+      ...current.drawerEntries,
+      CashierShiftDrawerEntry(
+        id: 'entry-${current.drawerEntries.length + 1}',
+        entryType: entryType,
+        amount: amount,
+        reason: values['reason'] as String,
+        createdBy: user.fullName,
+        createdAtUtc: DateTime(2026, 9, 9, 10),
+      ),
+    ];
+    _cashierShift = CashierShift(
+      id: current.id,
+      branchId: current.branchId,
+      branchName: current.branchName,
+      cashierUserId: current.cashierUserId,
+      cashierName: current.cashierName,
+      terminalName: current.terminalName,
+      openingCash: current.openingCash,
+      openedAtUtc: current.openedAtUtc,
+      openingNotes: current.openingNotes,
+      status: current.status,
+      totalSales: current.totalSales,
+      totalRefunds: current.totalRefunds,
+      cashSales: current.cashSales,
+      cashRefunds: current.cashRefunds,
+      customerCashReceived: current.customerCashReceived,
+      cashPaidOut: current.cashPaidOut,
+      manualCashIn: current.manualCashIn + (entryType == 'CashIn' ? amount : 0),
+      manualCashOut: current.manualCashOut + (entryType == 'CashOut' ? amount : 0),
+      paymentBreakdown: current.paymentBreakdown,
+      drawerEntries: entries,
+    );
+    return _cashierShift!;
+  }
+
+  @override
+  Future<CashierShift> closeCashierShift(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {
+    final current = _cashierShift!;
+    final actual = (values['actualCountedCash'] as num).toDouble();
+    const expected = 100.0;
+    _cashierShift = CashierShift(
+      id: current.id,
+      branchId: current.branchId,
+      branchName: current.branchName,
+      cashierUserId: current.cashierUserId,
+      cashierName: current.cashierName,
+      terminalName: current.terminalName,
+      openingCash: current.openingCash,
+      openedAtUtc: current.openedAtUtc,
+      openingNotes: current.openingNotes,
+      status: 'Closed',
+      closedAtUtc: DateTime(2026, 9, 9, 17),
+      expectedCash: expected,
+      actualCountedCash: actual,
+      cashVariance: actual - expected,
+      closingNotes: values['closingNotes'] as String?,
+      totalSales: current.totalSales,
+      totalRefunds: current.totalRefunds,
+      cashSales: current.cashSales,
+      cashRefunds: current.cashRefunds,
+      customerCashReceived: current.customerCashReceived,
+      cashPaidOut: current.cashPaidOut,
+      manualCashIn: current.manualCashIn,
+      manualCashOut: current.manualCashOut,
+      paymentBreakdown: const [
+        CashierShiftPaymentSummary(paymentMethod: 'Cash', salesAmount: 100, refundsAmount: 0),
+      ],
+      drawerEntries: current.drawerEntries,
+    );
+    return _cashierShift!;
+  }
+
+  @override
+  Future<CashierShift> reconcileCashierShift(
+    String token,
+    String id,
+    String? notes,
+  ) async {
+    final current = _cashierShift!;
+    _cashierShift = CashierShift(
+      id: current.id,
+      branchId: current.branchId,
+      branchName: current.branchName,
+      cashierUserId: current.cashierUserId,
+      cashierName: current.cashierName,
+      terminalName: current.terminalName,
+      openingCash: current.openingCash,
+      openedAtUtc: current.openedAtUtc,
+      openingNotes: current.openingNotes,
+      status: 'Reconciled',
+      closedAtUtc: current.closedAtUtc,
+      expectedCash: current.expectedCash,
+      actualCountedCash: current.actualCountedCash,
+      cashVariance: current.cashVariance,
+      closingNotes: current.closingNotes,
+      reconciledBy: user.fullName,
+      reconciledAtUtc: DateTime(2026, 9, 9, 18),
+      reconciliationNotes: notes,
+      totalSales: current.totalSales,
+      totalRefunds: current.totalRefunds,
+      cashSales: current.cashSales,
+      cashRefunds: current.cashRefunds,
+      customerCashReceived: current.customerCashReceived,
+      cashPaidOut: current.cashPaidOut,
+      manualCashIn: current.manualCashIn,
+      manualCashOut: current.manualCashOut,
+      paymentBreakdown: current.paymentBreakdown,
+      drawerEntries: current.drawerEntries,
+    );
+    return _cashierShift!;
+  }
+
+  @override
+  Future<CashierShift> cashierShiftDetails(String token, String id) async => _cashierShift!;
+
+  @override
+  Future<PagedCashierShifts> listCashierShifts(String token, {String? status}) async =>
+      PagedCashierShifts(
+        items: _cashierShift == null
+            ? []
+            : [
+                CashierShiftListItem(
+                  id: _cashierShift!.id,
+                  branchId: _cashierShift!.branchId,
+                  branchName: _cashierShift!.branchName,
+                  cashierUserId: _cashierShift!.cashierUserId,
+                  cashierName: _cashierShift!.cashierName,
+                  terminalName: _cashierShift!.terminalName,
+                  openingCash: _cashierShift!.openingCash,
+                  openedAtUtc: _cashierShift!.openedAtUtc,
+                  status: _cashierShift!.status,
+                  closedAtUtc: _cashierShift!.closedAtUtc,
+                  expectedCash: _cashierShift!.expectedCash,
+                  actualCountedCash: _cashierShift!.actualCountedCash,
+                  cashVariance: _cashierShift!.cashVariance,
+                ),
+              ],
+        totalCount: _cashierShift == null ? 0 : 1,
+      );
+
+  @override
+  Future<DailyClosingSummary> dailyCashierClosingSummary(
+    String token,
+    String branchId,
+    DateTime date,
+  ) async => DailyClosingSummary(
+    branchId: branchId,
+    branchName: user.branch.name,
+    date: date,
+    shiftCount: _cashierShift == null ? 0 : 1,
+    openShiftCount: 0,
+    totalOpeningCash: _cashierShift?.openingCash ?? 0,
+    totalExpectedCash: _cashierShift?.expectedCash ?? 0,
+    totalActualCash: _cashierShift?.actualCountedCash ?? 0,
+    totalVariance: _cashierShift?.cashVariance ?? 0,
+    paymentBreakdown: _cashierShift?.paymentBreakdown ?? const [],
+  );
 
   SupplierListItem get supplier => const SupplierListItem(
     id: 'supplier-1',

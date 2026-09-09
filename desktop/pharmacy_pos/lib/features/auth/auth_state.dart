@@ -223,6 +223,49 @@ class AuthState extends ChangeNotifier {
       _api.listBatches(_requiredToken, search: search);
   Future<PagedMovements> listMovements({String? search}) =>
       _api.listMovements(_requiredToken, search: search);
+  Future<PagedStockCountSessions> listStockCountSessions({
+    String? branchId,
+    String? status,
+  }) => _api.listStockCountSessions(
+    _requiredToken,
+    branchId: branchId,
+    status: status,
+  );
+  Future<StockCountSession> getStockCountSession(String id) =>
+      _api.getStockCountSession(_requiredToken, id);
+  Future<StockCountSession> createStockCountSession(
+    Map<String, dynamic> values,
+  ) => _api.createStockCountSession(_requiredToken, values);
+  Future<StockCountSession> startStockCountSession(String id) =>
+      _api.startStockCountSession(_requiredToken, id);
+  Future<StockCountSession> submitStockCountEntries(
+    String id,
+    List<Map<String, dynamic>> entries,
+  ) => _api.submitStockCountEntries(_requiredToken, id, entries);
+  Future<StockCountSession> finalizeStockCountSession(String id) =>
+      _api.finalizeStockCountSession(_requiredToken, id);
+  Future<StockCountSession> cancelStockCountSession(String id, String reason) =>
+      _api.cancelStockCountSession(_requiredToken, id, reason);
+  Future<CashierShift?> myOpenCashierShift() =>
+      _api.myOpenCashierShift(_requiredToken);
+  Future<CashierShift> openCashierShift(Map<String, dynamic> values) =>
+      _api.openCashierShift(_requiredToken, values);
+  Future<CashierShift> addCashierShiftDrawerEntry(
+    String id,
+    Map<String, dynamic> values,
+  ) => _api.addCashierShiftDrawerEntry(_requiredToken, id, values);
+  Future<CashierShift> closeCashierShift(String id, Map<String, dynamic> values) =>
+      _api.closeCashierShift(_requiredToken, id, values);
+  Future<CashierShift> reconcileCashierShift(String id, String? notes) =>
+      _api.reconcileCashierShift(_requiredToken, id, notes);
+  Future<CashierShift> cashierShiftDetails(String id) =>
+      _api.cashierShiftDetails(_requiredToken, id);
+  Future<PagedCashierShifts> listCashierShifts({String? status}) =>
+      _api.listCashierShifts(_requiredToken, status: status);
+  Future<DailyClosingSummary> dailyCashierClosingSummary(
+    String branchId,
+    DateTime date,
+  ) => _api.dailyCashierClosingSummary(_requiredToken, branchId, date);
   Future<PagedSuppliers> listSuppliers({String? search, bool? isActive}) =>
       _api.listSuppliers(_requiredToken, search: search, isActive: isActive);
   Future<SupplierListItem> createSupplier(Map<String, dynamic> values) =>

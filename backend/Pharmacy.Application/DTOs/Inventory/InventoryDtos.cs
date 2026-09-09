@@ -4,7 +4,18 @@ namespace Pharmacy.Application.DTOs.Inventory;
 
 public enum InventoryStockStatus { Healthy, LowStock, OutOfStock }
 public enum BatchState { Active, NearExpiry, Expired, Depleted, Disposed }
-public enum AdjustmentReason { PhysicalCountCorrection, Damaged, Missing, DataEntryCorrection, Other }
+public enum AdjustmentReason
+{
+    PhysicalCountCorrection,
+    Damaged,
+    Expired,
+    Broken,
+    Leakage,
+    TheftOrLoss,
+    Missing,
+    DataEntryCorrection,
+    Other
+}
 
 public sealed record OpeningStockRequest(
     Guid BranchId, Guid ProductId, string BatchNumber, DateOnly? ManufacturingDate,
@@ -81,3 +92,32 @@ public sealed record InventoryOptionsDto(
 
 public sealed record InventoryLookupDto(Guid Id, string Name);
 public sealed record ProductLookupDto(Guid Id, string Name, string SKU, string? Barcode, string? GenericName, bool IsActive);
+
+public sealed record CreateStockCountSessionRequest(
+    Guid BranchId, DateOnly CountDate, StockCountScope Scope, Guid? CategoryId,
+    IReadOnlyList<Guid>? ProductIds, IReadOnlyList<Guid>? ProductBatchIds, string? Notes);
+
+public sealed record SubmitStockCountEntryRequest(Guid StockCountItemId, int CountedQuantity, AdjustmentReason? Reason, string? Notes);
+public sealed record SubmitStockCountEntriesRequest(IReadOnlyList<SubmitStockCountEntryRequest> Entries);
+public sealed record CancelStockCountSessionRequest(string Reason);
+
+public sealed record StockCountSessionListQuery(
+    int Page = 1, int PageSize = 25, Guid? BranchId = null, StockCountStatus? Status = null,
+    DateOnly? From = null, DateOnly? To = null);
+
+public sealed record StockCountItemDto(
+    Guid Id, Guid ProductId, string ProductName, string SKU, Guid ProductBatchId, string BatchNumber,
+    DateOnly ExpiryDate, int SystemQuantity, int? CountedQuantity, int? Variance, decimal UnitCostSnapshot,
+    decimal? VarianceValue, string? Reason, string? Notes, string? CountedBy, DateTime? CountedAtUtc);
+
+public sealed record StockCountSessionDto(
+    Guid Id, string CountNumber, Guid BranchId, string BranchName, DateOnly CountDate, StockCountStatus Status,
+    StockCountScope Scope, Guid? CategoryId, string? CategoryName, string? Notes,
+    string CreatedBy, string? StartedBy, DateTime? StartedAtUtc, string? CompletedBy, DateTime? CompletedAtUtc,
+    string? CancelledBy, DateTime? CancelledAtUtc, int TotalItems, int CountedItems, int VarianceItems,
+    IReadOnlyList<StockCountItemDto> Items);
+
+public sealed record StockCountSessionListItemDto(
+    Guid Id, string CountNumber, Guid BranchId, string BranchName, DateOnly CountDate, StockCountStatus Status,
+    StockCountScope Scope, string? CategoryName, int TotalItems, int CountedItems, int VarianceItems,
+    string CreatedBy, DateTime CreatedAt, DateTime? CompletedAtUtc);

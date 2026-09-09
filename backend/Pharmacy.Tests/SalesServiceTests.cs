@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Application.Services.Sales;
 using Pharmacy.Domain.Entities;
@@ -39,6 +40,15 @@ public sealed class SalesServiceTests
         Assert.Equal([-3, -2], f.Movements.Select(x => x.Quantity));
         Assert.All(f.Movements, x => Assert.Equal(StockMovementType.Sale, x.MovementType));
         Assert.Contains(f.Audits, x => x.Action == "SalePosted" && x.NewValues?.Contains("Password", StringComparison.OrdinalIgnoreCase) != true);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.Sale, journal.SourceType);
+        Assert.Equal(sale.Id, journal.SourceId);
+        Assert.Equal(62, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Debit);
+        Assert.Equal(62, journal.Lines.Single(x => x.Account == AccountMappingKey.SalesRevenue).Credit);
+        Assert.Equal(42, journal.Lines.Single(x => x.Account == AccountMappingKey.CostOfGoodsSold).Debit);
+        Assert.Equal(42, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Credit);
+        Assert.Equal(journal.Lines.Sum(x => x.Debit), journal.Lines.Sum(x => x.Credit));
     }
 
     [Fact]
@@ -160,6 +170,16 @@ public sealed class SalesServiceTests
         Assert.Equal(40, ledger.Amount);
         Assert.Equal(sale.Id, ledger.ReferenceId);
         Assert.Equal(customer.Id, sale.CustomerId);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(20, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Debit);
+        var receivable = journal.Lines.Single(x => x.Account == AccountMappingKey.AccountsReceivable);
+        Assert.Equal(40, receivable.Debit);
+        Assert.Equal(customer.Id, receivable.CustomerId);
+        Assert.Equal(60, journal.Lines.Single(x => x.Account == AccountMappingKey.SalesRevenue).Credit);
+        Assert.Equal(40, journal.Lines.Single(x => x.Account == AccountMappingKey.CostOfGoodsSold).Debit);
+        Assert.Equal(40, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Credit);
+        Assert.Equal(journal.Lines.Sum(x => x.Debit), journal.Lines.Sum(x => x.Credit));
     }
 
     [Fact]
@@ -245,6 +265,7 @@ public sealed class SalesServiceTests
         public readonly List<Customer> Customers = [];
         public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly FakeJournalPostingService Journal = new();
         public SalesService Service { get; }
 
         public Fixture(params string[] permissions)
@@ -273,7 +294,7 @@ public sealed class SalesServiceTests
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             }
             Actor = new User { Username = "cashier", NormalizedUsername = "CASHIER", FullName = "Cashier User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
-            Service = new(this, new FefoAllocationService(), TimeProvider.System);
+            Service = new(this, new FefoAllocationService(), Journal, TimeProvider.System);
         }
 
         public ProductBatch AddBatch(string number, int quantity, DateOnly expiry, decimal purchasePrice, decimal retailPrice, bool disposed = false, Guid? branchId = null)
@@ -349,6 +370,16 @@ public sealed class SalesServiceTests
             var payments = sale.Payments.Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
             var customer = Customers.FirstOrDefault(x => x.Id == sale.CustomerId);
             return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, sale.CashierUserId, Actor.FullName, sale.CustomerId, customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments);
+        }
+    }
+
+    private sealed class FakeJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            Posted.Add(request);
+            return Task.CompletedTask;
         }
     }
 }

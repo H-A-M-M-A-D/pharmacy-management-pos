@@ -3,6 +3,7 @@ using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
+using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Sales;
 using Pharmacy.Domain.Entities;
 using DomainInventory = Pharmacy.Domain.Entities.Inventory;
@@ -32,6 +33,43 @@ public sealed class SalesReturnServiceTests
         Assert.Equal(StockMovementType.SaleReturn, f.Movements.Single().MovementType);
         Assert.Equal(5, f.Movements.Single().Quantity);
         Assert.Equal(SalesReturnState.FullyReturned, (await f.Service.GetReturnableSaleAsync(f.Actor.Id, f.Sale.Id)).ReturnState);
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(JournalSourceType.SalesReturn, journal.SourceType);
+        Assert.Equal(result.Id, journal.SourceId);
+        Assert.Equal(450, journal.Lines.Single(x => x.Account == AccountMappingKey.SalesReturnsContra).Debit);
+        Assert.Equal(450, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Credit);
+        Assert.Equal(350, journal.Lines.Single(x => x.Account == AccountMappingKey.Inventory).Debit);
+        Assert.Equal(350, journal.Lines.Single(x => x.Account == AccountMappingKey.CostOfGoodsSold).Credit);
+        Assert.Equal(journal.Lines.Sum(x => x.Debit), journal.Lines.Sum(x => x.Credit));
+    }
+
+    [Fact]
+    public async Task Non_resellable_return_does_not_reverse_cogs_but_still_reverses_revenue()
+    {
+        var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund);
+        var allocation = f.AddOriginalSaleAllocation("A", 5, 100, 100);
+
+        await f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(SalesReturnReason.Damaged, null, [new(allocation.Id, 2, SalesReturnDisposition.NonResellable)], [new(SalePaymentMethod.Cash, 200)]));
+
+        var journal = Assert.Single(f.Journal.Posted);
+        Assert.Equal(200, journal.Lines.Single(x => x.Account == AccountMappingKey.SalesReturnsContra).Debit);
+        Assert.Equal(200, journal.Lines.Single(x => x.Account == AccountMappingKey.Cash).Credit);
+        Assert.DoesNotContain(journal.Lines, x => x.Account == AccountMappingKey.CostOfGoodsSold);
+        Assert.DoesNotContain(journal.Lines, x => x.Account == AccountMappingKey.Inventory);
+    }
+
+    [Fact]
+    public async Task Sales_return_journal_posting_failure_rolls_back_the_entire_return()
+    {
+        var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund) { Journal = { ThrowOnPost = true } };
+        var allocation = f.AddOriginalSaleAllocation("A", 5, 100, 90);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(
+            SalesReturnReason.CustomerReturn, null, [new(allocation.Id, 5, SalesReturnDisposition.Restockable)], [new(SalePaymentMethod.Cash, 450)])));
+
+        Assert.Empty(f.Returns);
+        Assert.Empty(f.Movements);
     }
 
     [Fact]
@@ -184,6 +222,7 @@ public sealed class SalesReturnServiceTests
         public readonly List<StockMovement> Movements = [];
         public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly FakeJournalPostingService Journal = new();
         public SalesReturnService Service { get; }
 
         public Fixture(params string[] permissions)
@@ -196,7 +235,7 @@ public sealed class SalesReturnServiceTests
             }
             Actor = new User { Username = "manager", NormalizedUsername = "MANAGER", FullName = "Manager User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
             Sale = new Sale { BranchId = Branch.Id, Branch = Branch, CashierUserId = Actor.Id, CashierUser = Actor, InvoiceNumber = "INV-2026-000001", Status = SaleStatus.Posted, PostedAtUtc = DateTime.UtcNow, NetTotal = 0, AmountPaid = 0 };
-            Service = new(this, TimeProvider.System);
+            Service = new(this, Journal, TimeProvider.System);
         }
 
         public SaleItemBatchAllocation AddOriginalSaleAllocation(string batchNumber, int quantity, decimal unitRetail, decimal unitSale, decimal? netAmount = null, DateOnly? expiry = null, bool disposed = false)
@@ -254,11 +293,35 @@ public sealed class SalesReturnServiceTests
             var state = remaining == sold ? SalesReturnState.NotReturned : remaining == 0 ? SalesReturnState.FullyReturned : SalesReturnState.PartiallyReturned;
             return new ReturnableSaleDto(Sale.Id, Sale.InvoiceNumber!, Sale.PostedAtUtc!.Value, Sale.BranchId, Branch.Name, Actor.FullName, Sale.CustomerName, Sale.CustomerPhone, Sale.NetTotal, Sale.CustomerId, Sale.Customer?.CustomerCode, Sale.AmountPaid, Sale.CreditAmount, state, items, []);
         }
-        public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => await operation(cancellationToken);
+        public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+        {
+            var snapshot = (Returns.ToList(), Movements.ToList(), CustomerLedger.ToList(), Audits.ToList());
+            try { await operation(cancellationToken); }
+            catch
+            {
+                Returns.Clear(); Returns.AddRange(snapshot.Item1);
+                Movements.Clear(); Movements.AddRange(snapshot.Item2);
+                CustomerLedger.Clear(); CustomerLedger.AddRange(snapshot.Item3);
+                Audits.Clear(); Audits.AddRange(snapshot.Item4);
+                throw;
+            }
+        }
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         private SalesReturnDetailsDto Map(SalesReturn x) => new(x.Id, x.ReturnNumber, x.OriginalSaleId, Sale.InvoiceNumber!, x.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, x.ProcessedByUserId, Actor.FullName, x.ReturnDateUtc, x.Reason, x.Notes, x.GrossReturnAmount, x.DiscountReturnAmount, x.TaxReturnAmount, x.RefundAmount, x.CustomerCreditReductionAmount, x.CashRefundAmount, x.Status, Sale.CustomerName, Sale.CustomerPhone,
             x.Items.Select(i => new SalesReturnItemDto(i.Id, i.OriginalSaleItemId, i.ProductId, Product.Name, Product.SKU, i.Quantity, i.GrossReturnAmount, i.DiscountReturnAmount, i.TaxReturnAmount, i.RefundAmount, i.Allocations.Select(a => new SalesReturnAllocationDto(a.Id, a.OriginalSaleItemBatchAllocationId, a.ProductBatchId, Batches.Single(b => b.Id == a.ProductBatchId).BatchNumber, a.ExpiryDateSnapshot, a.Quantity, a.Disposition, a.UnitSalePriceSnapshot, a.GrossReturnAmount, a.DiscountReturnAmount, a.TaxReturnAmount, a.RefundAmount)).ToList())).ToList(),
             x.RefundPayments.Select(p => new SalesRefundPaymentDto(p.Id, p.Method, p.Amount, p.ReferenceNumber)).ToList());
+    }
+
+    private sealed class FakeJournalPostingService : IJournalPostingService
+    {
+        public readonly List<JournalPostingRequest> Posted = [];
+        public bool ThrowOnPost;
+        public Task PostAsync(JournalPostingRequest request, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnPost) throw new InvalidOperationException("forced journal failure");
+            Posted.Add(request);
+            return Task.CompletedTask;
+        }
     }
 }

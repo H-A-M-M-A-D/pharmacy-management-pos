@@ -55,5 +55,37 @@ public sealed class InventoryController(IInventoryService inventory) : Controlle
     public Task<IReadOnlyList<InventoryIntegrityIssueDto>> Integrity([FromQuery] Guid? branchId, [FromQuery] Guid? productId, CancellationToken ct) =>
         inventory.CheckIntegrityAsync(UserId(), branchId, productId, ct);
 
+    [HttpGet("stock-count/sessions"), HasPermission(PermissionCatalog.InventoryStockCountView)]
+    public Task<Pharmacy.Application.DTOs.Users.PagedResult<StockCountSessionListItemDto>> StockCountSessions([FromQuery] StockCountSessionListQuery query, CancellationToken ct) =>
+        inventory.ListStockCountSessionsAsync(UserId(), query, ct);
+
+    [HttpGet("stock-count/sessions/{id:guid}"), HasPermission(PermissionCatalog.InventoryStockCountView)]
+    public Task<StockCountSessionDto> StockCountSession(Guid id, CancellationToken ct) =>
+        inventory.GetStockCountSessionAsync(UserId(), id, ct);
+
+    [HttpGet("stock-count/sessions/{id:guid}/discrepancies"), HasPermission(PermissionCatalog.InventoryStockCountView)]
+    public Task<IReadOnlyList<StockCountItemDto>> StockCountDiscrepancies(Guid id, CancellationToken ct) =>
+        inventory.GetStockCountDiscrepanciesAsync(UserId(), id, ct);
+
+    [HttpPost("stock-count/sessions"), HasPermission(PermissionCatalog.InventoryStockCount)]
+    public Task<StockCountSessionDto> CreateStockCountSession(CreateStockCountSessionRequest request, CancellationToken ct) =>
+        inventory.CreateStockCountSessionAsync(UserId(), request, ct);
+
+    [HttpPost("stock-count/sessions/{id:guid}/start"), HasPermission(PermissionCatalog.InventoryStockCount)]
+    public Task<StockCountSessionDto> StartStockCountSession(Guid id, CancellationToken ct) =>
+        inventory.StartStockCountSessionAsync(UserId(), id, ct);
+
+    [HttpPost("stock-count/sessions/{id:guid}/entries"), HasPermission(PermissionCatalog.InventoryStockCount)]
+    public Task<StockCountSessionDto> SubmitStockCountEntries(Guid id, SubmitStockCountEntriesRequest request, CancellationToken ct) =>
+        inventory.SubmitStockCountEntriesAsync(UserId(), id, request, ct);
+
+    [HttpPost("stock-count/sessions/{id:guid}/finalize"), HasPermission(PermissionCatalog.InventoryStockCountFinalize)]
+    public Task<StockCountSessionDto> FinalizeStockCountSession(Guid id, CancellationToken ct) =>
+        inventory.FinalizeStockCountSessionAsync(UserId(), id, ct);
+
+    [HttpPost("stock-count/sessions/{id:guid}/cancel"), HasPermission(PermissionCatalog.InventoryStockCount)]
+    public Task<StockCountSessionDto> CancelStockCountSession(Guid id, CancelStockCountSessionRequest request, CancellationToken ct) =>
+        inventory.CancelStockCountSessionAsync(UserId(), id, request, ct);
+
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }
