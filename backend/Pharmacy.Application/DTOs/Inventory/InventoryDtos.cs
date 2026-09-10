@@ -48,7 +48,7 @@ public sealed record StockMovementListQuery(
     DateTime? FromUtc = null, DateTime? ToUtc = null, Guid? UserId = null, string? Search = null,
     Guid? GodownId = null);
 
-public sealed record ExpiryQuery(Guid? BranchId = null, int? Days = null, DateOnly? From = null, DateOnly? To = null);
+public sealed record ExpiryQuery(Guid? BranchId = null, int? Days = null, DateOnly? From = null, DateOnly? To = null, Guid? GodownId = null);
 
 public sealed record InventoryListItemDto(
     Guid ProductId, string ProductName, string SKU, string? GenericName, string Category,
@@ -58,7 +58,8 @@ public sealed record InventoryListItemDto(
 public sealed record BatchListItemDto(
     Guid BatchId, Guid ProductId, string ProductName, string SKU, string BatchNumber,
     Guid BranchId, string BranchName, DateOnly ExpiryDate, int QuantityAvailable,
-    decimal PurchasePrice, decimal RetailPrice, decimal EstimatedStockValue, BatchState State);
+    decimal PurchasePrice, decimal RetailPrice, decimal EstimatedStockValue, BatchState State,
+    Guid? GodownId = null, string? GodownCode = null, string? GodownName = null);
 
 public sealed record InventoryDetailsDto(
     Guid BranchId, string BranchName, Guid ProductId, string ProductName, string SKU,
@@ -69,12 +70,13 @@ public sealed record InventoryDetailsDto(
 public sealed record ExpiryListItemDto(
     Guid BatchId, string ProductName, string SKU, string BatchNumber, string BranchName,
     DateOnly ExpiryDate, int DaysRemaining, int QuantityAvailable, decimal PurchasePrice,
-    decimal EstimatedStockValue, string? Supplier);
+    decimal EstimatedStockValue, string? Supplier, Guid? GodownId = null, string? GodownName = null);
 
 public sealed record StockMovementListItemDto(
     Guid Id, DateTime CreatedAt, string ProductName, string BatchNumber, string BranchName,
     StockMovementType MovementType, int Quantity, string? PerformedBy,
-    string? ReferenceType, Guid? ReferenceId, string? Notes);
+    string? ReferenceType, Guid? ReferenceId, string? Notes,
+    Guid? GodownId = null, string? GodownName = null);
 
 public sealed record FefoPreviewRequest(Guid BranchId, Guid ProductId, int Quantity, DateOnly? BusinessDate = null);
 public sealed record FefoPreviewDto(IReadOnlyList<FefoPreviewItemDto> Allocations);
@@ -96,7 +98,7 @@ public sealed record ProductLookupDto(Guid Id, string Name, string SKU, string? 
 
 public sealed record CreateStockCountSessionRequest(
     Guid BranchId, DateOnly CountDate, StockCountScope Scope, Guid? CategoryId,
-    IReadOnlyList<Guid>? ProductIds, IReadOnlyList<Guid>? ProductBatchIds, string? Notes);
+    IReadOnlyList<Guid>? ProductIds, IReadOnlyList<Guid>? ProductBatchIds, string? Notes, Guid? GodownId = null);
 
 public sealed record SubmitStockCountEntryRequest(Guid StockCountItemId, int CountedQuantity, AdjustmentReason? Reason, string? Notes);
 public sealed record SubmitStockCountEntriesRequest(IReadOnlyList<SubmitStockCountEntryRequest> Entries);
@@ -104,7 +106,7 @@ public sealed record CancelStockCountSessionRequest(string Reason);
 
 public sealed record StockCountSessionListQuery(
     int Page = 1, int PageSize = 25, Guid? BranchId = null, StockCountStatus? Status = null,
-    DateOnly? From = null, DateOnly? To = null);
+    DateOnly? From = null, DateOnly? To = null, Guid? GodownId = null);
 
 public sealed record StockCountItemDto(
     Guid Id, Guid ProductId, string ProductName, string SKU, Guid ProductBatchId, string BatchNumber,
@@ -116,9 +118,9 @@ public sealed record StockCountSessionDto(
     StockCountScope Scope, Guid? CategoryId, string? CategoryName, string? Notes,
     string CreatedBy, string? StartedBy, DateTime? StartedAtUtc, string? CompletedBy, DateTime? CompletedAtUtc,
     string? CancelledBy, DateTime? CancelledAtUtc, int TotalItems, int CountedItems, int VarianceItems,
-    IReadOnlyList<StockCountItemDto> Items);
+    IReadOnlyList<StockCountItemDto> Items, Guid? GodownId = null, string? GodownName = null);
 
 public sealed record StockCountSessionListItemDto(
     Guid Id, string CountNumber, Guid BranchId, string BranchName, DateOnly CountDate, StockCountStatus Status,
     StockCountScope Scope, string? CategoryName, int TotalItems, int CountedItems, int VarianceItems,
-    string CreatedBy, DateTime CreatedAt, DateTime? CompletedAtUtc);
+    string CreatedBy, DateTime CreatedAt, DateTime? CompletedAtUtc, Guid? GodownId = null, string? GodownName = null);

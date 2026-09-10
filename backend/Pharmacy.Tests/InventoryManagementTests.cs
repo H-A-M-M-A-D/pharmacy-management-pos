@@ -357,9 +357,10 @@ public sealed class InventoryManagementTests
 
         public readonly List<StockCountSession> StockCountSessions = [];
         public Task<string> NextStockCountNumberAsync(DateOnly countDate, CancellationToken cancellationToken = default) => Task.FromResult($"SC-{countDate.Year}-{StockCountSessions.Count + 1:000000}");
-        public Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, StockCountScope scope, Guid? categoryId, IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, Guid? godownId, StockCountScope scope, Guid? categoryId, IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default)
         {
             IEnumerable<ProductBatch> query = Batches.Where(x => x.BranchId == branchId && !x.IsDisposed);
+            if (godownId.HasValue) query = query.Where(x => x.GodownId == godownId);
             query = scope switch
             {
                 StockCountScope.Full => query.Where(x => x.QuantityAvailable > 0),

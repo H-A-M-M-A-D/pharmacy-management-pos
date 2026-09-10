@@ -120,10 +120,187 @@ public sealed class ReportingRepository(PharmacyDbContext db) : IReportingReposi
         var rows = await query.OrderBy(x => x.ExpiryDate).ThenBy(x => x.BatchNumber).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).Select(x => new BatchStockRowDto(x.Product!.Name, x.Product.SKU, x.BatchNumber, x.ExpiryDate, x.QuantityAvailable, x.PurchasePrice, x.QuantityAvailable * x.PurchasePrice, x.Supplier != null ? x.Supplier.Name : "", x.Branch!.Name)).ToListAsync(ct); return new(rows, total, q.Page, q.PageSize);
     }
 
-    public async Task<PagedReport<StockMovementRowDto>> StockMovementsAsync(Guid? branchId, ReportQuery q, string? movementType, CancellationToken ct)
+    public async Task<PagedReport<StockMovementRowDto>> StockMovementsAsync(Guid? branchId, ReportQuery q, string? movementType, Guid? godownId, CancellationToken ct)
     {
-        var query = db.StockMovements.AsNoTracking().Where(x => x.CreatedAt >= q.FromUtc && x.CreatedAt < q.ToUtc && (!branchId.HasValue || x.BranchId == branchId)); if (Enum.TryParse<StockMovementType>(movementType, true, out var type)) query = query.Where(x => x.MovementType == type); var total = await query.CountAsync(ct);
-        var raw = await query.OrderByDescending(x => x.CreatedAt).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).Select(x => new { x.CreatedAt, Branch = x.Branch!.Name, Product = x.Product!.Name, Batch = x.ProductBatch!.BatchNumber, x.MovementType, x.Quantity, User = x.PerformedByUser != null ? x.PerformedByUser.FullName : "System", x.ReferenceType, x.Notes }).ToListAsync(ct); var rows = raw.Select(x => new StockMovementRowDto(x.CreatedAt, x.Branch, x.Product, x.Batch, x.MovementType.ToString(), x.Quantity, x.User, x.ReferenceType, x.Notes)).ToList(); return new(rows, total, q.Page, q.PageSize);
+        var query = db.StockMovements.AsNoTracking().Where(x => x.CreatedAt >= q.FromUtc && x.CreatedAt < q.ToUtc && (!branchId.HasValue || x.BranchId == branchId) && (!godownId.HasValue || x.GodownId == godownId)); if (Enum.TryParse<StockMovementType>(movementType, true, out var type)) query = query.Where(x => x.MovementType == type); var total = await query.CountAsync(ct);
+        var raw = await query.OrderByDescending(x => x.CreatedAt).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).Select(x => new { x.CreatedAt, Branch = x.Branch!.Name, Product = x.Product!.Name, Batch = x.ProductBatch!.BatchNumber, x.MovementType, x.Quantity, User = x.PerformedByUser != null ? x.PerformedByUser.FullName : "System", x.ReferenceType, x.Notes, Godown = x.Godown == null ? null : x.Godown.Name }).ToListAsync(ct); var rows = raw.Select(x => new StockMovementRowDto(x.CreatedAt, x.Branch, x.Product, x.Batch, x.MovementType.ToString(), x.Quantity, x.User, x.ReferenceType, x.Notes, x.Godown)).ToList(); return new(rows, total, q.Page, q.PageSize);
+    }
+
+    public async Task<IReadOnlyList<GodownStockRowDto>> GodownStockAsync(Guid? branchId, Guid? godownId, CancellationToken ct)
+    {
+        var query = db.ProductBatches.AsNoTracking().Where(x => x.GodownId != null && x.QuantityAvailable > 0 &&
+            (!branchId.HasValue || x.BranchId == branchId) && (!godownId.HasValue || x.GodownId == godownId));
+        var rows = await query
+            .GroupBy(x => new { x.GodownId, GodownName = x.Godown!.Name, x.BranchId, BranchName = x.Branch!.Name, x.ProductId, ProductName = x.Product!.Name, x.Product.SKU, Category = x.Product.Category!.Name, x.Product.ReorderLevel })
+            .Select(g => new { g.Key.GodownId, g.Key.GodownName, g.Key.BranchId, g.Key.BranchName, g.Key.ProductId, g.Key.ProductName, g.Key.SKU, g.Key.Category, g.Key.ReorderLevel,
+                Qty = g.Sum(x => x.QuantityAvailable), Value = g.Sum(x => x.QuantityAvailable * x.PurchasePrice) })
+            .ToListAsync(ct);
+        return rows.Select(x => new GodownStockRowDto(x.GodownId!.Value, x.GodownName, x.BranchName, x.ProductId, x.ProductName, x.SKU, x.Category,
+                x.Qty, x.ReorderLevel, x.Qty <= 0 ? "Out of stock" : x.Qty <= x.ReorderLevel ? "Low stock" : "In stock", x.Value))
+            .OrderBy(x => x.Godown).ThenBy(x => x.Product).ToList();
+    }
+
+    public async Task<IReadOnlyList<InTransitStockRowDto>> InTransitStockAsync(Guid? branchId, CancellationToken ct)
+    {
+        var items = db.StockTransferItems.AsNoTracking().Where(x => x.QuantityDispatched > x.QuantityReceived &&
+            (x.StockTransfer!.Status == StockTransferStatus.Dispatched || x.StockTransfer.Status == StockTransferStatus.PartiallyReceived) &&
+            (!branchId.HasValue || x.StockTransfer.SourceBranchId == branchId || x.StockTransfer.DestinationBranchId == branchId));
+        var rows = await items.Select(x => new
+        {
+            x.StockTransfer!.TransferNumber, Product = x.Product!.Name, x.Product.SKU, x.BatchNumber,
+            SourceBranch = x.StockTransfer.SourceBranch!.Name, SourceGodown = x.StockTransfer.SourceGodown!.Name,
+            DestinationBranch = x.StockTransfer.DestinationBranch!.Name, DestinationGodown = x.StockTransfer.DestinationGodown!.Name,
+            x.QuantityDispatched, x.QuantityReceived, x.StockTransfer.DispatchedAtUtc
+        }).ToListAsync(ct);
+        return rows.Select(x => new InTransitStockRowDto(x.TransferNumber, x.Product, x.SKU, x.BatchNumber,
+                x.SourceBranch, x.SourceGodown, x.DestinationBranch, x.DestinationGodown,
+                x.QuantityDispatched, x.QuantityReceived, x.QuantityDispatched - x.QuantityReceived, x.DispatchedAtUtc))
+            .OrderBy(x => x.DispatchedAtUtc).ToList();
+    }
+
+    public async Task<StockTransferSummaryDto> TransferSummaryAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var counts = await TransferHeaders(branchId, q).GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Draft = g.Count(x => x.Status == StockTransferStatus.Draft),
+            Requested = g.Count(x => x.Status == StockTransferStatus.Requested),
+            Approved = g.Count(x => x.Status == StockTransferStatus.Approved),
+            Dispatched = g.Count(x => x.Status == StockTransferStatus.Dispatched),
+            PartiallyReceived = g.Count(x => x.Status == StockTransferStatus.PartiallyReceived),
+            Received = g.Count(x => x.Status == StockTransferStatus.Received),
+            Cancelled = g.Count(x => x.Status == StockTransferStatus.Cancelled),
+        }).SingleOrDefaultAsync(ct);
+        var qty = await TransferItems(branchId, q).GroupBy(_ => 1).Select(g => new
+        {
+            Requested = g.Sum(x => x.QuantityRequested),
+            Approved = g.Sum(x => x.QuantityApproved),
+            Dispatched = g.Sum(x => x.QuantityDispatched),
+            Received = g.Sum(x => x.QuantityReceived),
+            DispatchedValue = g.Sum(x => x.QuantityDispatched * x.UnitCostSnapshot),
+            ReceivedValue = g.Sum(x => x.QuantityReceived * x.UnitCostSnapshot),
+        }).SingleOrDefaultAsync(ct);
+        return new(counts?.Total ?? 0, counts?.Draft ?? 0, counts?.Requested ?? 0, counts?.Approved ?? 0,
+            counts?.Dispatched ?? 0, counts?.PartiallyReceived ?? 0, counts?.Received ?? 0, counts?.Cancelled ?? 0,
+            qty?.Requested ?? 0, qty?.Approved ?? 0, qty?.Dispatched ?? 0, qty?.Received ?? 0,
+            (qty?.Dispatched ?? 0) - (qty?.Received ?? 0), qty?.DispatchedValue ?? 0, qty?.ReceivedValue ?? 0);
+    }
+
+    public async Task<PagedReport<DailyTransferDto>> DailyTransfersAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var query = TransferHeaders(branchId, q);
+        var total = await query.CountAsync(ct);
+        var rows = await query.OrderByDescending(x => x.TransferDate).ThenByDescending(x => x.TransferNumber)
+            .Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new DailyTransferDto(x.Id, x.TransferNumber, x.TransferDate, x.Status.ToString(),
+                x.SourceBranch!.Name, x.SourceGodown!.Name, x.DestinationBranch!.Name, x.DestinationGodown!.Name,
+                x.Items.Sum(i => i.QuantityRequested), x.Items.Sum(i => i.QuantityDispatched), x.Items.Sum(i => i.QuantityReceived),
+                x.RequestedByUser != null ? x.RequestedByUser.FullName : null, x.CreatedByUser!.FullName))
+            .ToListAsync(ct);
+        return new(rows, total, q.Page, q.PageSize);
+    }
+
+    public async Task<PagedReport<TransferDetailRowDto>> TransferDetailAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var query = TransferItems(branchId, q);
+        var total = await query.CountAsync(ct);
+        var rows = await query.OrderByDescending(x => x.StockTransfer!.TransferDate).ThenBy(x => x.StockTransfer!.TransferNumber)
+            .Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new TransferDetailRowDto(x.StockTransfer!.TransferNumber, x.StockTransfer.TransferDate, x.StockTransfer.Status.ToString(),
+                x.Product!.Name, x.Product.SKU, x.BatchNumber, x.UnitCostSnapshot,
+                x.StockTransfer.SourceBranch!.Name, x.StockTransfer.SourceGodown!.Name,
+                x.StockTransfer.DestinationBranch!.Name, x.StockTransfer.DestinationGodown!.Name,
+                x.QuantityRequested, x.QuantityApproved, x.QuantityDispatched, x.QuantityReceived, x.QuantityDispatched - x.QuantityReceived))
+            .ToListAsync(ct);
+        return new(rows, total, q.Page, q.PageSize);
+    }
+
+    public async Task<PagedReport<TransferDiscrepancyRowDto>> TransferDiscrepancyAsync(Guid? branchId, ReportQuery q, string? resolutionFilter, CancellationToken ct)
+    {
+        var query = TransferItems(branchId, q).Where(x => x.QuantityDispatched > x.QuantityReceived);
+        if (resolutionFilter == "outstanding") query = query.Where(x => x.StockTransfer!.Status == StockTransferStatus.Dispatched || x.StockTransfer.Status == StockTransferStatus.PartiallyReceived);
+        else if (resolutionFilter == "resolved") query = query.Where(x => x.StockTransfer!.Status == StockTransferStatus.Received);
+        var total = await query.CountAsync(ct);
+        var raw = await query.OrderByDescending(x => x.StockTransfer!.DispatchedAtUtc)
+            .Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new
+            {
+                x.StockTransfer!.TransferNumber, x.StockTransfer.TransferDate, x.StockTransfer.Status,
+                Product = x.Product!.Name, x.Product.SKU, x.BatchNumber,
+                SourceBranch = x.StockTransfer.SourceBranch!.Name, SourceGodown = x.StockTransfer.SourceGodown!.Name,
+                DestinationBranch = x.StockTransfer.DestinationBranch!.Name, DestinationGodown = x.StockTransfer.DestinationGodown!.Name,
+                x.QuantityDispatched, x.QuantityReceived, x.UnitCostSnapshot,
+                x.StockTransfer.DispatchedAtUtc, x.StockTransfer.ReceivedAtUtc, x.StockTransfer.Notes
+            }).ToListAsync(ct);
+        var rows = raw.Select(x =>
+        {
+            var unresolved = x.QuantityDispatched - x.QuantityReceived;
+            var resolved = x.Status == StockTransferStatus.Received;
+            return new TransferDiscrepancyRowDto(x.TransferNumber, x.TransferDate, x.Product, x.SKU, x.BatchNumber,
+                x.SourceBranch, x.SourceGodown, x.DestinationBranch, x.DestinationGodown,
+                x.QuantityDispatched, x.QuantityReceived, unresolved, unresolved * x.UnitCostSnapshot,
+                resolved ? "Resolved" : "Outstanding", resolved ? x.Notes : null, x.DispatchedAtUtc, resolved ? x.ReceivedAtUtc : null);
+        }).ToList();
+        return new(rows, total, q.Page, q.PageSize);
+    }
+
+    public async Task<PagedReport<StockCountVarianceRowDto>> StockCountVarianceAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var start = BusinessDate(q.FromUtc); var end = BusinessDate(q.ToUtc);
+        var query = db.StockCountItems.AsNoTracking().Where(x =>
+            x.StockCountSession!.Status == StockCountStatus.Completed &&
+            x.StockCountSession.CountDate >= start && x.StockCountSession.CountDate < end &&
+            x.CountedQuantity != null &&
+            (!branchId.HasValue || x.StockCountSession.BranchId == branchId) &&
+            (!q.GodownId.HasValue || x.StockCountSession.GodownId == q.GodownId) &&
+            (!q.ProductId.HasValue || x.ProductId == q.ProductId) &&
+            (string.IsNullOrWhiteSpace(q.Search) || x.StockCountSession.CountNumber.Contains(q.Search) || x.Product!.Name.Contains(q.Search)));
+        var total = await query.CountAsync(ct);
+        var raw = await query.OrderByDescending(x => x.StockCountSession!.CountDate).ThenBy(x => x.StockCountSession!.CountNumber)
+            .Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new
+            {
+                x.StockCountSession!.CountNumber, x.StockCountSession.CountDate, Branch = x.StockCountSession.Branch!.Name,
+                Godown = x.StockCountSession.Godown != null ? x.StockCountSession.Godown.Name : null,
+                Product = x.Product!.Name, x.Product.SKU, Batch = x.ProductBatch!.BatchNumber,
+                x.SystemQuantity, x.CountedQuantity, x.UnitCostSnapshot, x.Reason
+            }).ToListAsync(ct);
+        var rows = raw.Select(x =>
+        {
+            var counted = x.CountedQuantity!.Value;
+            var variance = counted - x.SystemQuantity;
+            return new StockCountVarianceRowDto(x.CountNumber, x.CountDate, x.Branch, x.Godown, x.Product, x.SKU, x.Batch,
+                x.SystemQuantity, counted, variance, x.UnitCostSnapshot, variance * x.UnitCostSnapshot, x.Reason);
+        }).ToList();
+        return new(rows, total, q.Page, q.PageSize);
+    }
+
+    private IQueryable<StockTransfer> TransferHeaders(Guid? branchId, ReportQuery q)
+    {
+        var start = BusinessDate(q.FromUtc); var end = BusinessDate(q.ToUtc);
+        var status = Enum.TryParse<StockTransferStatus>(q.Status, true, out var st) ? st : (StockTransferStatus?)null;
+        return db.StockTransfers.AsNoTracking().Where(x =>
+            x.TransferDate >= start && x.TransferDate < end &&
+            (!branchId.HasValue || x.SourceBranchId == branchId || x.DestinationBranchId == branchId) &&
+            (!q.SourceGodownId.HasValue || x.SourceGodownId == q.SourceGodownId) &&
+            (!q.DestinationGodownId.HasValue || x.DestinationGodownId == q.DestinationGodownId) &&
+            (!status.HasValue || x.Status == status) &&
+            (string.IsNullOrWhiteSpace(q.Search) || x.TransferNumber.Contains(q.Search)) &&
+            (!q.ProductId.HasValue || x.Items.Any(i => i.ProductId == q.ProductId)));
+    }
+
+    private IQueryable<StockTransferItem> TransferItems(Guid? branchId, ReportQuery q)
+    {
+        var start = BusinessDate(q.FromUtc); var end = BusinessDate(q.ToUtc);
+        var status = Enum.TryParse<StockTransferStatus>(q.Status, true, out var st) ? st : (StockTransferStatus?)null;
+        return db.StockTransferItems.AsNoTracking().Where(x =>
+            x.StockTransfer!.TransferDate >= start && x.StockTransfer.TransferDate < end &&
+            (!branchId.HasValue || x.StockTransfer.SourceBranchId == branchId || x.StockTransfer.DestinationBranchId == branchId) &&
+            (!q.SourceGodownId.HasValue || x.StockTransfer.SourceGodownId == q.SourceGodownId) &&
+            (!q.DestinationGodownId.HasValue || x.StockTransfer.DestinationGodownId == q.DestinationGodownId) &&
+            (!status.HasValue || x.StockTransfer.Status == status) &&
+            (string.IsNullOrWhiteSpace(q.Search) || x.StockTransfer.TransferNumber.Contains(q.Search)) &&
+            (!q.ProductId.HasValue || x.ProductId == q.ProductId));
     }
 
     public async Task<InventorySummaryDto> InventorySummaryAsync(Guid? branchId, DateTime nowUtc, CancellationToken ct)

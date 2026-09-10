@@ -105,19 +105,21 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
     {
         var from = query.From ?? DateOnly.MinValue;
         var to = query.To ?? (query.Days.HasValue ? businessDate.AddDays(query.Days.Value) : businessDate.AddDays(30));
-        return await BatchQuery(query.BranchId, actorBranchId, canSelectBranch, businessDate)
-            .Where(x => x.QuantityAvailable > 0 && !x.IsDisposed && x.ExpiryDate >= from && x.ExpiryDate <= to)
-            .OrderBy(x => x.ExpiryDate).ThenBy(x => x.Product!.Name)
+        var expiring = BatchQuery(query.BranchId, actorBranchId, canSelectBranch, businessDate)
+            .Where(x => x.QuantityAvailable > 0 && !x.IsDisposed && x.ExpiryDate >= from && x.ExpiryDate <= to);
+        if (query.GodownId.HasValue) expiring = expiring.Where(x => x.GodownId == query.GodownId);
+        return await expiring.OrderBy(x => x.ExpiryDate).ThenBy(x => x.Product!.Name)
             .Select(x => new ExpiryListItemDto(x.Id, x.Product!.Name, x.Product.SKU, x.BatchNumber, x.Branch!.Name,
                 x.ExpiryDate, x.ExpiryDate.DayNumber - businessDate.DayNumber, x.QuantityAvailable, x.PurchasePrice,
-                x.QuantityAvailable * x.PurchasePrice, x.Supplier == null ? null : x.Supplier.Name))
+                x.QuantityAvailable * x.PurchasePrice, x.Supplier == null ? null : x.Supplier.Name,
+                x.GodownId, x.Godown == null ? null : x.Godown.Name))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<PagedResult<StockMovementListItemDto>> ListMovementsAsync(StockMovementListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
         var movements = context.StockMovements.AsNoTracking()
-            .Include(x => x.Product).Include(x => x.ProductBatch).Include(x => x.Branch).Include(x => x.PerformedByUser).AsQueryable();
+            .Include(x => x.Product).Include(x => x.ProductBatch).Include(x => x.Branch).Include(x => x.Godown).Include(x => x.PerformedByUser).AsQueryable();
         if (!canSelectBranch && actorBranchId.HasValue) movements = movements.Where(x => x.BranchId == actorBranchId);
         if (query.BranchId.HasValue) movements = movements.Where(x => x.BranchId == query.BranchId);
         if (query.GodownId.HasValue) movements = movements.Where(x => x.GodownId == query.GodownId);
@@ -132,7 +134,7 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         var items = await movements.OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id).Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new StockMovementListItemDto(x.Id, x.CreatedAt, x.Product!.Name, x.ProductBatch!.BatchNumber,
                 x.Branch!.Name, x.MovementType, x.Quantity, x.PerformedByUser == null ? null : x.PerformedByUser.FullName,
-                x.ReferenceType, x.ReferenceId, x.Notes)).ToListAsync(cancellationToken);
+                x.ReferenceType, x.ReferenceId, x.Notes, x.GodownId, x.Godown == null ? null : x.Godown.Name)).ToListAsync(cancellationToken);
         return new(items, query.Page, query.PageSize, total);
     }
 
@@ -198,11 +200,12 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         return $"SC-{countDate.Year}-{next:000000}";
     }
 
-    public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, StockCountScope scope, Guid? categoryId,
+    public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, Guid? godownId, StockCountScope scope, Guid? categoryId,
         IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default)
     {
         var query = context.ProductBatches.AsNoTracking().Include(x => x.Product)
             .Where(x => x.BranchId == branchId && !x.IsDisposed);
+        if (godownId.HasValue) query = query.Where(x => x.GodownId == godownId);
         query = scope switch
         {
             StockCountScope.Full => query.Where(x => x.QuantityAvailable > 0),
@@ -233,6 +236,7 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         var sessions = StockCountSessionQuery();
         if (!canSelectBranch && actorBranchId.HasValue) sessions = sessions.Where(x => x.BranchId == actorBranchId);
         if (query.BranchId.HasValue) sessions = sessions.Where(x => x.BranchId == query.BranchId);
+        if (query.GodownId.HasValue) sessions = sessions.Where(x => x.GodownId == query.GodownId);
         if (query.Status.HasValue) sessions = sessions.Where(x => x.Status == query.Status);
         if (query.From.HasValue) sessions = sessions.Where(x => x.CountDate >= query.From);
         if (query.To.HasValue) sessions = sessions.Where(x => x.CountDate <= query.To);
@@ -241,14 +245,14 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
             .Select(x => new StockCountSessionListItemDto(x.Id, x.CountNumber, x.BranchId, x.Branch!.Name, x.CountDate, x.Status, x.Scope,
                 x.Category == null ? null : x.Category.Name, x.Items.Count, x.Items.Count(i => i.CountedQuantity != null),
                 x.Items.Count(i => i.CountedQuantity != null && i.CountedQuantity != i.SystemQuantity),
-                x.CreatedByUser!.FullName, x.CreatedAt, x.CompletedAtUtc))
+                x.CreatedByUser!.FullName, x.CreatedAt, x.CompletedAtUtc, x.GodownId, x.Godown == null ? null : x.Godown.Name))
             .ToListAsync(cancellationToken);
         return new(items, query.Page, query.PageSize, total);
     }
 
     private IQueryable<StockCountSession> StockCountSessionQuery() =>
         context.StockCountSessions.AsNoTracking()
-            .Include(x => x.Branch).Include(x => x.Category)
+            .Include(x => x.Branch).Include(x => x.Godown).Include(x => x.Category)
             .Include(x => x.CreatedByUser).Include(x => x.StartedByUser).Include(x => x.CompletedByUser).Include(x => x.CancelledByUser)
             .Include(x => x.Items).ThenInclude(x => x.Product)
             .Include(x => x.Items).ThenInclude(x => x.ProductBatch)
@@ -264,7 +268,8 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         return new StockCountSessionDto(x.Id, x.CountNumber, x.BranchId, x.Branch!.Name, x.CountDate, x.Status, x.Scope, x.CategoryId,
             x.Category?.Name, x.Notes, x.CreatedByUser!.FullName, x.StartedByUser?.FullName, x.StartedAtUtc,
             x.CompletedByUser?.FullName, x.CompletedAtUtc, x.CancelledByUser?.FullName, x.CancelledAtUtc,
-            items.Count, items.Count(i => i.CountedQuantity != null), items.Count(i => i.Variance is not null and not 0), items);
+            items.Count, items.Count(i => i.CountedQuantity != null), items.Count(i => i.Variance is not null and not 0), items,
+            x.GodownId, x.Godown?.Name);
     }
 
     private IQueryable<ProductBatch> BatchQuery(Guid? branchId, Guid? actorBranchId, bool canSelectBranch, DateOnly businessDate)
@@ -272,7 +277,7 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         var query = context.ProductBatches.AsNoTracking()
             .Include(x => x.Product)!.ThenInclude(x => x!.Category)
             .Include(x => x.Product)!.ThenInclude(x => x!.Manufacturer)
-            .Include(x => x.Branch).Include(x => x.Supplier).AsQueryable();
+            .Include(x => x.Branch).Include(x => x.Godown).Include(x => x.Supplier).AsQueryable();
         if (!canSelectBranch && actorBranchId.HasValue) query = query.Where(x => x.BranchId == actorBranchId);
         if (branchId.HasValue) query = query.Where(x => x.BranchId == branchId);
         return query;
@@ -280,7 +285,8 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
 
     private static BatchListItemDto MapBatch(ProductBatch x, string productName, string sku, string branchName, DateOnly businessDate) =>
         new(x.Id, x.ProductId, productName, sku, x.BatchNumber, x.BranchId, branchName, x.ExpiryDate, x.QuantityAvailable,
-            x.PurchasePrice, x.RetailPrice, x.QuantityAvailable * x.PurchasePrice, BatchStateFor(x, businessDate));
+            x.PurchasePrice, x.RetailPrice, x.QuantityAvailable * x.PurchasePrice, BatchStateFor(x, businessDate),
+            x.GodownId, x.Godown?.Code, x.Godown?.Name);
 
     private static BatchState BatchStateFor(ProductBatch x, DateOnly businessDate)
     {

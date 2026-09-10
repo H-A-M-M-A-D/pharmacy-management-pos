@@ -30,7 +30,7 @@ public interface IInventoryRepository
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<string> NextStockCountNumberAsync(DateOnly countDate, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, StockCountScope scope, Guid? categoryId,
+    Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesForCountAsync(Guid branchId, Guid? godownId, StockCountScope scope, Guid? categoryId,
         IReadOnlyList<Guid>? productIds, IReadOnlyList<Guid>? productBatchIds, CancellationToken cancellationToken = default);
     Task AddStockCountSessionAsync(StockCountSession session, CancellationToken cancellationToken = default);
     Task<StockCountSession?> GetStockCountSessionForUpdateAsync(Guid id, CancellationToken cancellationToken = default);

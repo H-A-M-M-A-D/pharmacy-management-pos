@@ -265,7 +265,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('picker_batch')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('B-001 (qty 10)').last);
+    await tester.tap(find.text('B-001 (qty 10) — Main Store').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('adjust_direction_decrease')));
     await tester.pumpAndSettle();
@@ -321,7 +321,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('picker_batch')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('B-001 (qty 10)').last);
+    await tester.tap(find.text('B-001 (qty 10) — Main Store').last);
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('adjust_quantity')), '2');
     await tester.tap(find.byKey(const Key('adjust_reason')));
@@ -1394,6 +1394,75 @@ void main() {
     expect(find.text('Apply'), findsOneWidget);
   });
 
+  testWidgets(
+    'transfers report section exposes the new stock transfer reports',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'reports.view', 'reports.inventory'},
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Reports'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Transfers').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Summary'), findsOneWidget);
+
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
+      expect(find.text('No report data for this period.'), findsOneWidget);
+
+      await tester.tap(find.text('Summary'));
+      await tester.pumpAndSettle();
+      expect(find.text('Daily Transfers'), findsOneWidget);
+      expect(find.text('Inter-Godown Detail'), findsOneWidget);
+      expect(find.text('Discrepancies'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'inventory report section exposes the new godown-scoped reports',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'reports.view', 'reports.inventory'},
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Reports'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Inventory').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Current Stock'), findsOneWidget);
+
+      await tester.tap(find.text('Current Stock'));
+      await tester.pumpAndSettle();
+      // The dropdown menu is a lazily-built scrollable; scroll the newest
+      // entries into view before asserting on them.
+      final menuScrollable = find.descendant(
+        of: find.byType(Scrollbar),
+        matching: find.byType(Scrollable),
+      );
+      await tester.dragUntilVisible(
+        find.text('Stock Count Variance'),
+        menuScrollable,
+        const Offset(0, -50),
+      );
+      expect(find.text('Godown-wise Stock'), findsOneWidget);
+      expect(find.text('Godown-wise Movements'), findsOneWidget);
+      expect(find.text('Godown-wise Valuation'), findsOneWidget);
+      expect(find.text('In-Transit Stock'), findsOneWidget);
+      expect(find.text('Stock Count Variance'), findsOneWidget);
+    },
+  );
+
   testWidgets('reports show an empty state', (tester) async {
     final fixture = TestFixture(permissions: {'reports.sales'});
     await tester.pumpWidget(fixture.app);
@@ -1588,6 +1657,636 @@ void main() {
     expect(find.text('ABC Pharma'), findsOneWidget);
     expect(find.text('PKR 10000.00'), findsOneWidget);
   });
+
+  testWidgets(
+    'stock transfers navigation follows stock_transfers.view permission',
+    (tester) async {
+      final denied = TestFixture();
+      await tester.pumpWidget(denied.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      expect(find.text('Transfers'), findsNothing);
+
+      final allowed = TestFixture(permissions: {'stock_transfers.view'});
+      await tester.pumpWidget(allowed.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      expect(find.text('Transfers'), findsOneWidget);
+    },
+  );
+
+  testWidgets('stock transfer list starts empty with no transfers', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No transfers found'), findsOneWidget);
+    expect(find.byKey(const Key('new_stock_transfer')), findsNothing);
+  });
+
+  testWidgets('create transfer requires a different source and destination godown', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view', 'stock_transfers.create'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    expect(find.text('New Stock Transfer'), findsOneWidget);
+
+    // Source and destination both default to the branch's default godown.
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pump();
+    expect(
+      find.text('Source and destination godown must be different.'),
+      findsWidgets,
+    );
+  });
+
+  testWidgets(
+    'create, request, approve, dispatch and receive a transfer end to end',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'stock_transfers.view',
+          'stock_transfers.create',
+          'stock_transfers.request',
+          'stock_transfers.approve',
+          'stock_transfers.dispatch',
+          'stock_transfers.receive',
+        },
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      expect(find.text('Panadol Extra (B-001)'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      expect(find.text('Quantity to request'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('line_quantity')), '10');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      expect(find.text('Qty: 10'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('save_request_transfer')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('save_request_transfer')), findsNothing);
+      expect(find.widgetWithText(Chip, 'Requested'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('transfer_action_approve')));
+      await tester.pumpAndSettle();
+      expect(find.text('Approve transfer'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('confirm_approve')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(Chip, 'Approved'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('transfer_action_dispatch')));
+      await tester.pumpAndSettle();
+      expect(find.text('Dispatch transfer'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('confirm_dispatch')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(Chip, 'Dispatched'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('transfer_action_receive')));
+      await tester.pumpAndSettle();
+      expect(find.text('Receive transfer'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('confirm_receive')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(Chip, 'Received'), findsOneWidget);
+
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.text('No transfers found'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a user without approve permission cannot see the approve action',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'stock_transfers.view',
+          'stock_transfers.create',
+          'stock_transfers.request',
+        },
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_request_transfer')));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Chip, 'Requested'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(Chip, 'Requested'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('transfer_action_approve')), findsNothing);
+    },
+  );
+
+  testWidgets('cancel is available for a draft transfer', (tester) async {
+    final fixture = TestFixture(
+      permissions: {
+        'stock_transfers.view',
+        'stock_transfers.create',
+        'stock_transfers.cancel',
+      },
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(Chip, 'Draft'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_action_cancel')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('reason_field')), 'no longer needed');
+    await tester.tap(find.byKey(const Key('confirm_reason')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(Chip, 'Cancelled'), findsOneWidget);
+  });
+
+  testWidgets('edit action is visible on a draft transfer', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view', 'stock_transfers.create'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('transfer_action_edit')), findsOneWidget);
+  });
+
+  testWidgets('edit action is absent once a transfer has been requested', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'stock_transfers.view',
+        'stock_transfers.create',
+        'stock_transfers.request',
+      },
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_request_transfer')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('transfer_action_edit')), findsNothing);
+  });
+
+  testWidgets('editing a draft transfer updates header fields', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view', 'stock_transfers.create'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_action_edit')));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit Stock Transfer'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('transfer_notes')),
+      'updated header note',
+    );
+    await tester.tap(find.byKey(const Key('save_transfer_edit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Notes: updated header note'), findsOneWidget);
+  });
+
+  testWidgets('editing a draft transfer updates batch lines and quantities', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view', 'stock_transfers.create'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_action_edit')));
+    await tester.pumpAndSettle();
+
+    // The existing line is pre-filled from the transfer being edited.
+    expect(find.text('Qty: 5'), findsOneWidget);
+
+    // Re-adding the same batch with a new quantity updates the existing line in place.
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '12');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Qty: 12'), findsOneWidget);
+    expect(find.text('Qty: 5'), findsNothing);
+  });
+
+  testWidgets(
+    'changing the source godown while editing invalidates the batch selection',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'stock_transfers.view', 'stock_transfers.create'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_draft_transfer')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_action_edit')));
+      await tester.pumpAndSettle();
+      expect(find.text('Panadol Extra (B-001)'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('transfer_source_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Panadol Extra (B-001)'), findsNothing);
+      expect(find.text('No items added yet'), findsOneWidget);
+    },
+  );
+
+  testWidgets('editing a draft transfer sends the updated payload to the backend', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'stock_transfers.view', 'stock_transfers.create'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Transfers'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('new_stock_transfer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_draft_transfer')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('transfer_action_edit')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('transfer_notes')),
+      'payload check',
+    );
+    await tester.tap(find.byKey(const Key('search_transferable_batches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('line_quantity')), '9');
+    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_transfer_edit')));
+    await tester.pumpAndSettle();
+
+    final body = fixture.api.lastStockTransferUpdateBody!;
+    expect(body['sourceGodownId'], 'godown-1');
+    expect(body['destinationGodownId'], 'godown-2');
+    expect(body['notes'], 'payload check');
+    final items = body['items'] as List<dynamic>;
+    expect(items, hasLength(1));
+    expect((items.single as Map<String, dynamic>)['quantityRequested'], 9);
+  });
+
+  testWidgets(
+    'per-item and header notes entered while receiving are visible in the transfer detail',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'stock_transfers.view',
+          'stock_transfers.create',
+          'stock_transfers.request',
+          'stock_transfers.approve',
+          'stock_transfers.dispatch',
+          'stock_transfers.receive',
+        },
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('line_quantity')), '10');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_request_transfer')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_action_approve')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_approve')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_action_dispatch')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_dispatch')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('transfer_action_receive')));
+      await tester.pumpAndSettle();
+      const itemId = 'transfer-item-1-batch-1';
+      await tester.enterText(find.byKey(const Key('receive_qty_$itemId')), '7');
+      await tester.enterText(
+        find.byKey(const Key('receive_notes_$itemId')),
+        'carton damaged',
+      );
+      await tester.enterText(
+        find.byKey(const Key('receive_header_notes')),
+        'dock note',
+      );
+      await tester.tap(find.byKey(const Key('confirm_receive')));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Chip, 'PartiallyReceived'), findsOneWidget);
+      expect(find.textContaining('carton damaged'), findsOneWidget);
+      expect(find.text('Notes: dock note'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'inventory batches tab shows a godown filter and column when multiple godowns exist',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'inventory.view'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Inventory'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(of: find.byType(TabBar), matching: find.text('Batches')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Godown'), findsWidgets);
+      expect(find.text('Main Store'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('inventory_godown_filter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('No batches found'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'new stock taking dialog offers a godown scope and defaults to whole branch',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'inventory.view', 'inventory.stock_count'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Inventory'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new_stock_taking')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Branch'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Head Office').last);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('stock_count_godown')), findsOneWidget);
+      expect(find.text('Whole branch (all godowns)'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('stock_count_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('save_stock_count_session')));
+      await tester.pumpAndSettle();
+
+      expect(
+        fixture.api.lastCreateStockCountSessionBody?['godownId'],
+        'godown-2',
+      );
+    },
+  );
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -1678,6 +2377,124 @@ class TestFixture {
   Widget get app => PharmacyPOSApp(key: UniqueKey(), authState: state);
 }
 
+class _FakeTransferItem {
+  _FakeTransferItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.sourceProductBatchId,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.unitCost,
+    required this.requested,
+  });
+  final String id, productId, productName, sku, sourceProductBatchId, batchNumber;
+  final DateTime expiryDate;
+  final double unitCost;
+  final int requested;
+  int approved = 0, dispatched = 0, received = 0;
+  String? destinationProductBatchId;
+  String? notes;
+}
+
+class _FakeTransfer {
+  _FakeTransfer({
+    required this.id,
+    required this.transferNumber,
+    required this.sourceBranchId,
+    required this.sourceBranchName,
+    required this.sourceGodownId,
+    required this.sourceGodownName,
+    required this.destBranchId,
+    required this.destBranchName,
+    required this.destGodownId,
+    required this.destGodownName,
+    required this.transferDate,
+    this.notes,
+  });
+  final String id, transferNumber;
+  String sourceBranchId, sourceBranchName, sourceGodownId, sourceGodownName;
+  String destBranchId, destBranchName, destGodownId, destGodownName;
+  DateTime transferDate;
+  String? notes;
+  String status = 'Draft';
+  String? createdBy, requestedBy, approvedBy, dispatchedBy, receivedBy, cancelledBy, cancellationReason;
+  DateTime? requestedAt, approvedAt, dispatchedAt, receivedAt, cancelledAt;
+  final List<_FakeTransferItem> items = [];
+}
+
+final List<TransferableBatch> _fakeTransferableBatches = [
+  TransferableBatch(
+    productBatchId: 'batch-1',
+    productId: 'product-1',
+    productName: 'Panadol Extra',
+    sku: 'MED-001',
+    batchNumber: 'B-001',
+    expiryDate: DateTime(2027, 6, 30),
+    quantityAvailable: 50,
+    purchasePrice: 8,
+    retailPrice: 12,
+  ),
+];
+
+Map<String, dynamic> _transferListJson(_FakeTransfer t) => {
+  'id': t.id,
+  'transferNumber': t.transferNumber,
+  'transferDate': t.transferDate.toIso8601String().substring(0, 10),
+  'status': t.status,
+  'sourceBranchId': t.sourceBranchId,
+  'sourceBranchName': t.sourceBranchName,
+  'sourceGodownId': t.sourceGodownId,
+  'sourceGodownName': t.sourceGodownName,
+  'destinationBranchId': t.destBranchId,
+  'destinationBranchName': t.destBranchName,
+  'destinationGodownId': t.destGodownId,
+  'destinationGodownName': t.destGodownName,
+  'quantityRequested': t.items.fold<int>(0, (a, i) => a + i.requested),
+  'quantityApproved': t.items.fold<int>(0, (a, i) => a + i.approved),
+  'quantityDispatched': t.items.fold<int>(0, (a, i) => a + i.dispatched),
+  'quantityReceived': t.items.fold<int>(0, (a, i) => a + i.received),
+  'quantityInTransit': t.items.fold<int>(0, (a, i) => a + i.dispatched - i.received),
+  'requestedBy': t.requestedBy,
+  'createdAt': DateTime.now().toIso8601String(),
+};
+
+Map<String, dynamic> _transferItemJson(_FakeTransferItem i) => {
+  'id': i.id,
+  'productId': i.productId,
+  'productName': i.productName,
+  'sku': i.sku,
+  'sourceProductBatchId': i.sourceProductBatchId,
+  'batchNumber': i.batchNumber,
+  'expiryDate': i.expiryDate.toIso8601String().substring(0, 10),
+  'unitCostSnapshot': i.unitCost,
+  'destinationProductBatchId': i.destinationProductBatchId,
+  'quantityRequested': i.requested,
+  'quantityApproved': i.approved,
+  'quantityDispatched': i.dispatched,
+  'quantityReceived': i.received,
+  'quantityInTransit': i.dispatched - i.received,
+  'notes': i.notes,
+};
+
+Map<String, dynamic> _transferDetailJson(_FakeTransfer t) => {
+  ..._transferListJson(t),
+  'notes': t.notes,
+  'createdBy': t.createdBy,
+  'requestedAtUtc': t.requestedAt?.toIso8601String(),
+  'approvedBy': t.approvedBy,
+  'approvedAtUtc': t.approvedAt?.toIso8601String(),
+  'dispatchedBy': t.dispatchedBy,
+  'dispatchedAtUtc': t.dispatchedAt?.toIso8601String(),
+  'receivedBy': t.receivedBy,
+  'receivedAtUtc': t.receivedAt?.toIso8601String(),
+  'cancelledBy': t.cancelledBy,
+  'cancelledAtUtc': t.cancelledAt?.toIso8601String(),
+  'cancellationReason': t.cancellationReason,
+  'items': t.items.map(_transferItemJson).toList(),
+};
+
 class FakeApi implements PharmacyApi {
   FakeApi({
     required this.user,
@@ -1739,6 +2556,7 @@ class FakeApi implements PharmacyApi {
   final Duration reportDelay;
   Map<String, dynamic>? lastPurchaseReturnBody;
   Map<String, dynamic>? lastGoodsReceiptBody;
+  Map<String, dynamic>? lastCreateStockCountSessionBody;
   Map<String, dynamic>? lastDirectPurchaseBody;
   Map<String, dynamic>? lastHoldSaleBody;
   Map<String, dynamic>? lastPostSaleBody;
@@ -2250,6 +3068,9 @@ class FakeApi implements PharmacyApi {
     retailPrice: 12,
     estimatedStockValue: 80,
     state: 'NearExpiry',
+    godownId: _godowns.firstOrNull?.id,
+    godownCode: _godowns.firstOrNull?.code,
+    godownName: _godowns.firstOrNull?.name,
   );
 
   @override
@@ -2301,37 +3122,64 @@ class FakeApi implements PharmacyApi {
   ) async {}
 
   @override
-  Future<List<ExpiryItem>> listExpiry(String token, {int? days}) async => [
-    ExpiryItem(
-      batchId: 'batch-1',
-      productName: 'Panadol Extra',
-      batchNumber: 'B-001',
-      expiryDate: DateTime(2026, 10, 1),
-      daysRemaining: 29,
-      quantityAvailable: 10,
-      estimatedStockValue: 80,
-    ),
-  ];
+  Future<List<ExpiryItem>> listExpiry(
+    String token, {
+    int? days,
+    String? godownId,
+  }) async {
+    if (godownId != null && godownId != _godowns.firstOrNull?.id) return [];
+    return [
+      ExpiryItem(
+        batchId: 'batch-1',
+        productName: 'Panadol Extra',
+        batchNumber: 'B-001',
+        expiryDate: DateTime(2026, 10, 1),
+        daysRemaining: 29,
+        quantityAvailable: 10,
+        estimatedStockValue: 80,
+        godownId: _godowns.firstOrNull?.id,
+        godownName: _godowns.firstOrNull?.name,
+      ),
+    ];
+  }
 
   @override
-  Future<PagedBatches> listBatches(String token, {String? search}) async =>
-      PagedBatches(items: [batch], totalCount: 1);
+  Future<PagedBatches> listBatches(
+    String token, {
+    String? search,
+    String? godownId,
+  }) async {
+    if (godownId != null && godownId != batch.godownId) {
+      return const PagedBatches(items: [], totalCount: 0);
+    }
+    return PagedBatches(items: [batch], totalCount: 1);
+  }
 
   @override
-  Future<PagedMovements> listMovements(String token, {String? search}) async =>
-      PagedMovements(
-        items: [
-          StockMovementItem(
-            createdAt: DateTime(2026, 9, 1, 10),
-            productName: 'Panadol Extra',
-            batchNumber: 'B-001',
-            branchName: user.branch.name,
-            movementType: 'OpeningStock',
-            quantity: 10,
-          ),
-        ],
-        totalCount: 1,
-      );
+  Future<PagedMovements> listMovements(
+    String token, {
+    String? search,
+    String? godownId,
+  }) async {
+    if (godownId != null && godownId != _godowns.firstOrNull?.id) {
+      return const PagedMovements(items: [], totalCount: 0);
+    }
+    return PagedMovements(
+      items: [
+        StockMovementItem(
+          createdAt: DateTime(2026, 9, 1, 10),
+          productName: 'Panadol Extra',
+          batchNumber: 'B-001',
+          branchName: user.branch.name,
+          movementType: 'OpeningStock',
+          quantity: 10,
+          godownId: _godowns.firstOrNull?.id,
+          godownName: _godowns.firstOrNull?.name,
+        ),
+      ],
+      totalCount: 1,
+    );
+  }
 
   static final DateTime _lineExpiry = DateTime(2026, 10, 1);
 
@@ -2372,7 +3220,10 @@ class FakeApi implements PharmacyApi {
   Future<StockCountSession> createStockCountSession(
     String token,
     Map<String, dynamic> values,
-  ) async => _stockCountSession;
+  ) async {
+    lastCreateStockCountSessionBody = values;
+    return _stockCountSession;
+  }
 
   @override
   Future<StockCountSession> startStockCountSession(
@@ -3602,6 +4453,218 @@ class FakeApi implements PharmacyApi {
     'totalCredit': 500,
     'lines': [journalLineOne, journalLineTwo],
   };
+
+  final List<_FakeTransfer> _transfers = [];
+  int _transferSeq = 0;
+  Map<String, dynamic>? lastStockTransferBody;
+  Map<String, dynamic>? lastStockTransferUpdateBody;
+
+  @override
+  Future<dynamic> stockTransfers(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async {
+    if (path.isEmpty && method == 'GET') {
+      var items = _transfers.toList();
+      final status = query?['status'];
+      if (status != null && status.isNotEmpty) {
+        items = items.where((t) => t.status == status).toList();
+      }
+      final transferNumber = query?['transferNumber'];
+      if (transferNumber != null && transferNumber.isNotEmpty) {
+        items = items.where((t) => t.transferNumber.contains(transferNumber)).toList();
+      }
+      return <String, dynamic>{
+        'items': items.map(_transferListJson).toList(),
+        'page': 1,
+        'pageSize': 100,
+        'totalCount': items.length,
+      };
+    }
+    if (path.isEmpty && method == 'POST') {
+      lastStockTransferBody = body;
+      _transferSeq++;
+      final requestItems = (body!['items'] as List<dynamic>).map((raw) {
+        final m = raw as Map<String, dynamic>;
+        final batch = _fakeTransferableBatches.firstWhere(
+          (b) => b.productBatchId == m['productBatchId'],
+        );
+        return _FakeTransferItem(
+          id: 'transfer-item-$_transferSeq-${m['productBatchId']}',
+          productId: batch.productId,
+          productName: batch.productName,
+          sku: batch.sku,
+          sourceProductBatchId: batch.productBatchId,
+          batchNumber: batch.batchNumber,
+          expiryDate: batch.expiryDate,
+          unitCost: batch.purchasePrice,
+          requested: m['quantityRequested'] as int,
+        );
+      }).toList();
+      String godownName(String id) =>
+          _godowns.firstWhere((g) => g.id == id).name;
+      final transfer = _FakeTransfer(
+        id: 'transfer-$_transferSeq',
+        transferNumber: 'TRF-2026-${_transferSeq.toString().padLeft(6, '0')}',
+        sourceBranchId: body['sourceBranchId'] as String,
+        sourceBranchName: user.branch.name,
+        sourceGodownId: body['sourceGodownId'] as String,
+        sourceGodownName: godownName(body['sourceGodownId'] as String),
+        destBranchId: body['destinationBranchId'] as String,
+        destBranchName: user.branch.name,
+        destGodownId: body['destinationGodownId'] as String,
+        destGodownName: godownName(body['destinationGodownId'] as String),
+        transferDate:
+            DateTime.tryParse(body['transferDate'] as String? ?? '') ??
+                DateTime.now(),
+        notes: body['notes'] as String?,
+      )..createdBy = user.fullName;
+      transfer.items.addAll(requestItems);
+      _transfers.add(transfer);
+      return _transferDetailJson(transfer);
+    }
+    if (path == 'transferable-batches') {
+      return _fakeTransferableBatches
+          .map(
+            (b) => <String, dynamic>{
+              'productBatchId': b.productBatchId,
+              'productId': b.productId,
+              'productName': b.productName,
+              'sku': b.sku,
+              'batchNumber': b.batchNumber,
+              'expiryDate': b.expiryDate.toIso8601String().substring(0, 10),
+              'quantityAvailable': b.quantityAvailable,
+              'purchasePrice': b.purchasePrice,
+              'retailPrice': b.retailPrice,
+            },
+          )
+          .toList();
+    }
+    final match = RegExp(r'^([^/]+)(?:/(.+))?$').firstMatch(path);
+    final id = match?.group(1);
+    final action = match?.group(2);
+    final transfer = _transfers.firstWhere(
+      (t) => t.id == id,
+      orElse: () => throw const ApiException('Stock transfer was not found.'),
+    );
+    if (action == null && method == 'GET') return _transferDetailJson(transfer);
+    if (action == null && method == 'PUT') {
+      lastStockTransferUpdateBody = body;
+      final requestItems = (body!['items'] as List<dynamic>).map((raw) {
+        final m = raw as Map<String, dynamic>;
+        final batch = _fakeTransferableBatches.firstWhere(
+          (b) => b.productBatchId == m['productBatchId'],
+        );
+        return _FakeTransferItem(
+          id: 'transfer-item-${transfer.id}-${m['productBatchId']}',
+          productId: batch.productId,
+          productName: batch.productName,
+          sku: batch.sku,
+          sourceProductBatchId: batch.productBatchId,
+          batchNumber: batch.batchNumber,
+          expiryDate: batch.expiryDate,
+          unitCost: batch.purchasePrice,
+          requested: m['quantityRequested'] as int,
+        );
+      }).toList();
+      String godownName(String id) => _godowns.firstWhere((g) => g.id == id).name;
+      transfer.sourceBranchId = body['sourceBranchId'] as String;
+      transfer.sourceBranchName = user.branch.name;
+      transfer.sourceGodownId = body['sourceGodownId'] as String;
+      transfer.sourceGodownName = godownName(body['sourceGodownId'] as String);
+      transfer.destBranchId = body['destinationBranchId'] as String;
+      transfer.destBranchName = user.branch.name;
+      transfer.destGodownId = body['destinationGodownId'] as String;
+      transfer.destGodownName = godownName(body['destinationGodownId'] as String);
+      transfer.transferDate =
+          DateTime.tryParse(body['transferDate'] as String? ?? '') ??
+              transfer.transferDate;
+      transfer.notes = body['notes'] as String?;
+      transfer.items
+        ..clear()
+        ..addAll(requestItems);
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'request') {
+      transfer.status = 'Requested';
+      transfer.requestedBy = user.fullName;
+      transfer.requestedAt = DateTime.now();
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'approve') {
+      final overrides = <String, int>{
+        for (final raw in (body?['items'] as List<dynamic>? ?? <dynamic>[]))
+          (raw as Map<String, dynamic>)['stockTransferItemId'] as String:
+              raw['quantityApproved'] as int,
+      };
+      for (final i in transfer.items) {
+        i.approved = overrides[i.id] ?? i.requested;
+      }
+      transfer.status = 'Approved';
+      transfer.approvedBy = user.fullName;
+      transfer.approvedAt = DateTime.now();
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'dispatch') {
+      final overrides = <String, int>{
+        for (final raw in (body?['items'] as List<dynamic>? ?? <dynamic>[]))
+          (raw as Map<String, dynamic>)['stockTransferItemId'] as String:
+              raw['quantityDispatched'] as int,
+      };
+      for (final i in transfer.items) {
+        if (i.approved > 0) i.dispatched = overrides[i.id] ?? i.approved;
+      }
+      transfer.status = 'Dispatched';
+      transfer.dispatchedBy = user.fullName;
+      transfer.dispatchedAt = DateTime.now();
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'receive') {
+      for (final raw in (body?['items'] as List<dynamic>? ?? <dynamic>[])) {
+        final m = raw as Map<String, dynamic>;
+        final i = transfer.items.firstWhere(
+          (x) => x.id == m['stockTransferItemId'],
+        );
+        i.received += m['quantityReceived'] as int;
+        i.destinationProductBatchId ??= 'dest-${i.sourceProductBatchId}';
+        final itemNote = m['notes'] as String?;
+        if (itemNote != null && itemNote.trim().isNotEmpty) {
+          i.notes = i.notes == null || i.notes!.isEmpty
+              ? itemNote.trim()
+              : '${i.notes}\n${itemNote.trim()}';
+        }
+      }
+      final headerNote = body?['notes'] as String?;
+      if (headerNote != null && headerNote.trim().isNotEmpty) {
+        transfer.notes = transfer.notes == null || transfer.notes!.isEmpty
+            ? headerNote.trim()
+            : '${transfer.notes}\n${headerNote.trim()}';
+      }
+      final totalDispatched = transfer.items.fold<int>(0, (a, i) => a + i.dispatched);
+      final totalReceived = transfer.items.fold<int>(0, (a, i) => a + i.received);
+      transfer.status = totalReceived >= totalDispatched ? 'Received' : 'PartiallyReceived';
+      transfer.receivedBy = user.fullName;
+      transfer.receivedAt = DateTime.now();
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'cancel') {
+      transfer.status = 'Cancelled';
+      transfer.cancelledBy = user.fullName;
+      transfer.cancelledAt = DateTime.now();
+      transfer.cancellationReason = body?['reason'] as String?;
+      return _transferDetailJson(transfer);
+    }
+    if (action == 'resolve-discrepancy') {
+      transfer.status = 'Received';
+      transfer.receivedBy = user.fullName;
+      transfer.receivedAt = DateTime.now();
+      return _transferDetailJson(transfer);
+    }
+    return _transferDetailJson(transfer);
+  }
 
   @override
   Future<dynamic> accounting(

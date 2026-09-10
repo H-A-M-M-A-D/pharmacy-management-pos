@@ -20,7 +20,7 @@ public interface IReportingRepository
     Task<PagedReport<PurchaseReturnRowDto>> PurchaseReturnsAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
     Task<IReadOnlyList<StockRowDto>> CurrentStockAsync(Guid? branchId, string? status, CancellationToken ct);
     Task<PagedReport<BatchStockRowDto>> BatchStockAsync(Guid? branchId, ReportQuery query, int? expiryDays, bool expired, CancellationToken ct);
-    Task<PagedReport<StockMovementRowDto>> StockMovementsAsync(Guid? branchId, ReportQuery query, string? movementType, CancellationToken ct);
+    Task<PagedReport<StockMovementRowDto>> StockMovementsAsync(Guid? branchId, ReportQuery query, string? movementType, Guid? godownId, CancellationToken ct);
     Task<InventorySummaryDto> InventorySummaryAsync(Guid? branchId, DateTime nowUtc, CancellationToken ct);
     Task<PagedReport<ExpenseReportDto>> ExpensesAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
     Task<PagedReport<OtherIncomeReportDto>> OtherIncomeAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
@@ -29,4 +29,11 @@ public interface IReportingRepository
     Task<PagedReport<LedgerReportDto>> AccountLedgerAsync(Guid? branchId, Guid? accountId, ReportQuery query, CancellationToken ct);
     Task<CashPositionReportDto> CashPositionAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
     Task<IReadOnlyList<TrendPointDto>> TrendAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyList<GodownStockRowDto>> GodownStockAsync(Guid? branchId, Guid? godownId, CancellationToken ct);
+    Task<IReadOnlyList<InTransitStockRowDto>> InTransitStockAsync(Guid? branchId, CancellationToken ct);
+    Task<StockTransferSummaryDto> TransferSummaryAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<PagedReport<DailyTransferDto>> DailyTransfersAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<PagedReport<TransferDetailRowDto>> TransferDetailAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<PagedReport<TransferDiscrepancyRowDto>> TransferDiscrepancyAsync(Guid? branchId, ReportQuery query, string? resolutionFilter, CancellationToken ct);
+    Task<PagedReport<StockCountVarianceRowDto>> StockCountVarianceAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
 }

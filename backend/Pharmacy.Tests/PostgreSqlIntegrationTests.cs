@@ -11,7 +11,9 @@ using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Application.Services.Customers;
 using Pharmacy.Application.Services.Finance;
+using Pharmacy.Application.DTOs.StockTransfers;
 using Pharmacy.Application.Services.Purchasing;
+using Pharmacy.Application.Services.StockTransfers;
 using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
@@ -699,7 +701,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            54L,
+            56L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -824,7 +826,7 @@ public sealed class PostgreSqlIntegrationTests
         _ = await reports.PurchaseReturnsAsync(null, query, default);
         _ = await reports.CurrentStockAsync(null, null, default);
         _ = await reports.BatchStockAsync(null, query, 30, false, default);
-        _ = await reports.StockMovementsAsync(null, query, null, default);
+        _ = await reports.StockMovementsAsync(null, query, null, null, default);
         _ = await reports.InventorySummaryAsync(null, from, default);
         _ = await reports.ExpensesAsync(null, query, default);
         _ = await reports.OtherIncomeAsync(null, query, default);
@@ -833,6 +835,13 @@ public sealed class PostgreSqlIntegrationTests
         _ = await reports.AccountLedgerAsync(null, null, query, default);
         _ = await reports.CashPositionAsync(null, from, to, default);
         _ = await reports.TrendAsync(null, from, to, default);
+        _ = await reports.GodownStockAsync(null, null, default);
+        _ = await reports.InTransitStockAsync(null, default);
+        _ = await reports.TransferSummaryAsync(null, query, default);
+        _ = await reports.DailyTransfersAsync(null, query, default);
+        _ = await reports.TransferDetailAsync(null, query, default);
+        _ = await reports.TransferDiscrepancyAsync(null, query, null, default);
+        _ = await reports.StockCountVarianceAsync(null, query, default);
     }
 
     [PostgreSqlFact]
@@ -2845,6 +2854,444 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(9L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name IN ('IsDeleted','DeletedAtUtc','DeletedByUserId') AND table_name IN ('ProductCategories','Manufacturers','ExpenseCategories');"));
         Assert.Equal(1L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM pg_trigger WHERE tgname='TR_AuditLogs_AppendOnly' AND NOT tgisinternal;"));
     }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task PhaseP2_stock_transfer_schema_permissions_indexes_and_sequence_exist()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        Assert.Equal(7L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "Permissions" WHERE "Code" LIKE 'stock_transfers.%';
+            """));
+        Assert.Equal(2L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name IN ('StockTransfers','StockTransferItems');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = 'StockTransferNumberSequence';
+            """));
+        Assert.Equal(7L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND constraint_name IN (
+                'CK_StockTransfers_Status',
+                'CK_StockTransfers_Source_Destination_Godown_Different',
+                'CK_StockTransferItems_Requested_Positive',
+                'CK_StockTransferItems_Approved_Range',
+                'CK_StockTransferItems_Dispatched_Range',
+                'CK_StockTransferItems_Received_Range',
+                'CK_StockTransferItems_UnitCost_NonNegative');
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = 'IX_StockTransfers_TransferNumber' AND indexdef ILIKE '%UNIQUE%';
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = 'IX_StockTransferItems_StockTransferId_SourceProductBatchId' AND indexdef ILIKE '%UNIQUE%';
+            """));
+        Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='StockCountSessions' AND column_name='GodownId';
+            """));
+
+        // Owner/Manager get the full workflow; StoreKeeper is the warehouse operational role (dispatch/receive
+        // but not approve/cancel); everyone else granted only view. Confirms the migration's role grants.
+        Assert.Equal(7L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "RolePermissions" rp JOIN "Roles" r ON r."Id" = rp."RoleId" JOIN "Permissions" p ON p."Id" = rp."PermissionId"
+            WHERE r."Name" = 'Manager' AND p."Code" LIKE 'stock_transfers.%';
+            """));
+        Assert.Equal(5L, await ScalarAsync<long>(connection, null, """
+            SELECT count(*) FROM "RolePermissions" rp JOIN "Roles" r ON r."Id" = rp."RoleId" JOIN "Permissions" p ON p."Id" = rp."PermissionId"
+            WHERE r."Name" = 'StoreKeeper' AND p."Code" LIKE 'stock_transfers.%';
+            """));
+        Assert.False(await ScalarAsync<bool>(connection, null, """
+            SELECT EXISTS (
+                SELECT 1 FROM "RolePermissions" rp JOIN "Roles" r ON r."Id" = rp."RoleId" JOIN "Permissions" p ON p."Id" = rp."PermissionId"
+                WHERE r."Name" = 'StoreKeeper' AND p."Code" IN ('stock_transfers.approve','stock_transfers.cancel'));
+            """));
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task StockTransfer_quantity_check_constraints_enforce_the_approval_chain()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var sourceGodownId = Guid.NewGuid();
+        var destGodownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var transferId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        await InsertCategoryAsync(connection, transaction, categoryId);
+        await InsertBranchAsync(connection, transaction, branchId);
+        await InsertGodownAsync(connection, transaction, branchId, sourceGodownId, isDefault: true);
+        await InsertGodownAsync(connection, transaction, branchId, destGodownId);
+        await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(connection, transaction, branchId, productId, Unique("batch"), batchId, godownId: sourceGodownId);
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+        var username = Unique("constraint-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, userId);
+        await InsertStockTransferAsync(connection, transaction, transferId, branchId, sourceGodownId, branchId, destGodownId, userId);
+
+        await AssertDatabaseErrorAsync(connection, transaction, "same_godown", PostgresErrorCodes.CheckViolation,
+            () => InsertStockTransferAsync(connection, transaction, Guid.NewGuid(), branchId, sourceGodownId, branchId, sourceGodownId, userId));
+        await AssertDatabaseErrorAsync(connection, transaction, "requested_not_positive", PostgresErrorCodes.CheckViolation,
+            () => InsertStockTransferItemAsync(connection, transaction, transferId, productId, batchId, requested: 0));
+        await AssertDatabaseErrorAsync(connection, transaction, "approved_over_requested", PostgresErrorCodes.CheckViolation,
+            () => InsertStockTransferItemAsync(connection, transaction, transferId, productId, batchId, requested: 10, approved: 11));
+        await AssertDatabaseErrorAsync(connection, transaction, "dispatched_over_approved", PostgresErrorCodes.CheckViolation,
+            () => InsertStockTransferItemAsync(connection, transaction, transferId, productId, batchId, requested: 10, approved: 10, dispatched: 11));
+        await AssertDatabaseErrorAsync(connection, transaction, "received_over_dispatched", PostgresErrorCodes.CheckViolation,
+            () => InsertStockTransferItemAsync(connection, transaction, transferId, productId, batchId, requested: 10, approved: 10, dispatched: 10, received: 11));
+
+        await InsertStockTransferItemAsync(connection, transaction, transferId, productId, batchId, requested: 10, approved: 8, dispatched: 8, received: 5);
+        await transaction.RollbackAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task StockTransfer_full_workflow_produces_exact_balanced_stock_movements_via_real_postgresql()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var sourceGodownId = Guid.NewGuid();
+        var destGodownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var batchNumber = Unique("lot");
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, sourceGodownId, isDefault: true);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, destGodownId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(seedConnection, seedTransaction, branchId, productId, batchNumber, batchId, godownId: sourceGodownId);
+        await InsertInventoryAsync(seedConnection, seedTransaction, branchId, sourceGodownId, productId, batchId, 100);
+        var username = Unique("transfer-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        var request = new StockTransferRequest(branchId, sourceGodownId, branchId, destGodownId, DateOnly.FromDateTime(DateTime.UtcNow), "integration test",
+            [new(productId, batchId, 30, null)]);
+
+        StockTransferDetailsDto created;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            created = await ServiceFor(context).CreateTransferAsync(actorId, request);
+        }
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            await ServiceFor(context).RequestTransferAsync(actorId, created.Id);
+        }
+        StockTransferDetailsDto approved;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            approved = await ServiceFor(context).ApproveTransferAsync(actorId, created.Id, new(null));
+        }
+        Assert.Equal(30, approved.Items.Single().QuantityApproved);
+
+        StockTransferDetailsDto dispatched;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            dispatched = await ServiceFor(context).DispatchTransferAsync(actorId, created.Id, new(null));
+        }
+        Assert.Equal(StockTransferStatus.Dispatched, dispatched.Status);
+        Assert.Equal(70, await ScalarAsync<int>(seedConnection, null, "SELECT \"QuantityAvailable\" FROM \"ProductBatches\" WHERE \"Id\" = @id;", ("id", batchId)));
+
+        var itemId = dispatched.Items.Single().Id;
+        StockTransferDetailsDto received;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            received = await ServiceFor(context).ReceiveTransferAsync(actorId, created.Id, new([new(itemId, 30)], null));
+        }
+        Assert.Equal(StockTransferStatus.Received, received.Status);
+
+        // Destination batch was created fresh, carrying the same batch number/expiry/cost, with the exact received quantity.
+        var destBatchRow = await ScalarAsync<Guid>(seedConnection, null,
+            "SELECT \"Id\" FROM \"ProductBatches\" WHERE \"GodownId\" = @godownId AND \"ProductId\" = @productId AND \"BatchNumber\" = @batchNumber;",
+            ("godownId", destGodownId), ("productId", productId), ("batchNumber", batchNumber));
+        Assert.Equal(30, await ScalarAsync<int>(seedConnection, null, "SELECT \"QuantityAvailable\" FROM \"ProductBatches\" WHERE \"Id\" = @id;", ("id", destBatchRow)));
+
+        // StockMovement is the exact, balanced source of truth: -30 TransferOut against the source batch, +30 TransferIn against the destination batch.
+        Assert.Equal(-30, await ScalarAsync<int>(seedConnection, null,
+            "SELECT \"Quantity\" FROM \"StockMovements\" WHERE \"ReferenceId\" = @id AND \"MovementType\" = 7;", ("id", created.Id)));
+        Assert.Equal(30, await ScalarAsync<int>(seedConnection, null,
+            "SELECT \"Quantity\" FROM \"StockMovements\" WHERE \"ReferenceId\" = @id AND \"MovementType\" = 6;", ("id", created.Id)));
+        Assert.StartsWith($"TRF-{DateTime.UtcNow:yyyy}-", created.TransferNumber);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task StockTransfer_edit_partial_receipt_notes_and_discrepancy_reporting_are_real()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var sourceGodownId = Guid.NewGuid();
+        var destGodownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var batchNumber = Unique("lot");
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, sourceGodownId, isDefault: true);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, destGodownId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(seedConnection, seedTransaction, branchId, productId, batchNumber, batchId, godownId: sourceGodownId);
+        await InsertInventoryAsync(seedConnection, seedTransaction, branchId, sourceGodownId, productId, batchId, 100);
+        var username = Unique("transfer-edit-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        var createRequest = new StockTransferRequest(branchId, sourceGodownId, branchId, destGodownId, DateOnly.FromDateTime(DateTime.UtcNow), "initial notes",
+            [new(productId, batchId, 10, null)]);
+        StockTransferDetailsDto created;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            created = await ServiceFor(context).CreateTransferAsync(actorId, createRequest);
+        }
+
+        // Draft edit changes the requested quantity before the transfer is ever requested.
+        var editRequest = new StockTransferRequest(branchId, sourceGodownId, branchId, destGodownId, DateOnly.FromDateTime(DateTime.UtcNow), "edited notes",
+            [new(productId, batchId, 20, null)]);
+        StockTransferDetailsDto edited;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            edited = await ServiceFor(context).UpdateTransferAsync(actorId, created.Id, editRequest);
+        }
+        Assert.Equal("edited notes", edited.Notes);
+        Assert.Equal(20, edited.Items.Single().QuantityRequested);
+
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            await ServiceFor(context).RequestTransferAsync(actorId, created.Id);
+        }
+        // Editing is rejected once the transfer has left Draft.
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            await Assert.ThrowsAsync<RequestValidationException>(() => ServiceFor(context).UpdateTransferAsync(actorId, created.Id, editRequest));
+        }
+        StockTransferDetailsDto approved;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            approved = await ServiceFor(context).ApproveTransferAsync(actorId, created.Id, new(null));
+        }
+        StockTransferDetailsDto dispatched;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            dispatched = await ServiceFor(context).DispatchTransferAsync(actorId, created.Id, new(null));
+        }
+        var itemId = dispatched.Items.Single().Id;
+
+        // Partial receipt with a per-item note and a header note, leaving a shortfall.
+        StockTransferDetailsDto received;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            received = await ServiceFor(context).ReceiveTransferAsync(actorId, created.Id,
+                new([new(itemId, 15, "carton damaged in transit")], "receiving dock note"));
+        }
+        Assert.Equal(StockTransferStatus.PartiallyReceived, received.Status);
+        Assert.Contains("carton damaged in transit", received.Items.Single().Notes);
+        Assert.Contains("receiving dock note", received.Notes);
+        Assert.Contains("edited notes", received.Notes); // header note fix appends rather than replacing.
+
+        StockTransferDetailsDto resolved;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            resolved = await ServiceFor(context).ResolveDiscrepancyAsync(actorId, created.Id, new("short-shipped by supplier"));
+        }
+        Assert.Equal(StockTransferStatus.Received, resolved.Status);
+
+        await using var reportContext = new PharmacyDbContext(Options(connectionString));
+        var reports = new ReportingRepository(reportContext);
+        var from = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var query = new ReportQuery(branchId, from, to, 1, 50, created.TransferNumber);
+
+        var summary = await reports.TransferSummaryAsync(branchId, query, default);
+        Assert.Equal(1, summary.TransferCount);
+        Assert.Equal(1, summary.ReceivedCount);
+        Assert.Equal(20, summary.QuantityDispatched);
+        Assert.Equal(15, summary.QuantityReceived);
+        Assert.Equal(5, summary.QuantityInTransit);
+
+        var discrepancy = await reports.TransferDiscrepancyAsync(branchId, query, null, default);
+        var discrepancyRow = Assert.Single(discrepancy.Items);
+        Assert.Equal(5, discrepancyRow.QuantityUnresolved);
+        Assert.Equal("Resolved", discrepancyRow.ResolutionStatus);
+        Assert.Contains("short-shipped by supplier", discrepancyRow.ResolutionNotes);
+
+        var outstandingOnly = await reports.TransferDiscrepancyAsync(branchId, query, "outstanding", default);
+        Assert.Empty(outstandingOnly.Items);
+
+        var detail = await reports.TransferDetailAsync(branchId, query, default);
+        var detailRow = Assert.Single(detail.Items);
+        Assert.Equal(20, detailRow.QuantityDispatched);
+        Assert.Equal(15, detailRow.QuantityReceived);
+
+        var daily = await reports.DailyTransfersAsync(branchId, query, default);
+        var dailyRow = Assert.Single(daily.Items);
+        Assert.Equal(created.TransferNumber, dailyRow.TransferNumber);
+        Assert.Equal("Received", dailyRow.Status);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Concurrent_dispatch_attempts_against_the_same_batch_never_oversell_stock()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var sourceGodownId = Guid.NewGuid();
+        var destGodownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, sourceGodownId, isDefault: true);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, destGodownId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        // Only 8 units available; two transfers will each try to dispatch 5 concurrently - only one can succeed.
+        await InsertBatchAsync(seedConnection, seedTransaction, branchId, productId, Unique("batch"), batchId, godownId: sourceGodownId);
+        await ExecuteAsync(seedConnection, seedTransaction, "UPDATE \"ProductBatches\" SET \"QuantityAvailable\" = 8 WHERE \"Id\" = @id;", ("id", batchId));
+        await InsertInventoryAsync(seedConnection, seedTransaction, branchId, sourceGodownId, productId, batchId, 8);
+        var username = Unique("concurrent-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        async Task<Guid> PrepareApprovedTransferAsync()
+        {
+            var request = new StockTransferRequest(branchId, sourceGodownId, branchId, destGodownId, DateOnly.FromDateTime(DateTime.UtcNow), null,
+                [new(productId, batchId, 5, null)]);
+            await using var context = new PharmacyDbContext(Options(connectionString));
+            var service = ServiceFor(context);
+            var created = await service.CreateTransferAsync(actorId, request);
+            await service.RequestTransferAsync(actorId, created.Id);
+            await service.ApproveTransferAsync(actorId, created.Id, new(null));
+            return created.Id;
+        }
+
+        var transferAId = await PrepareApprovedTransferAsync();
+        var transferBId = await PrepareApprovedTransferAsync();
+
+        async Task<bool> TryDispatchAsync(Guid transferId)
+        {
+            try
+            {
+                await using var context = new PharmacyDbContext(Options(connectionString));
+                await ServiceFor(context).DispatchTransferAsync(actorId, transferId, new(null));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        var results = await Task.WhenAll(TryDispatchAsync(transferAId), TryDispatchAsync(transferBId));
+        var successCount = results.Count(x => x);
+
+        // Exactly one of the two 5-unit dispatches can succeed against 8 available units; the other must
+        // be rejected rather than allowed to oversell. Serializable isolation plus the row lock on the
+        // source batch guarantees this even when both requests race.
+        Assert.Equal(1, successCount);
+        var remaining = await ScalarAsync<int>(seedConnection, null, "SELECT \"QuantityAvailable\" FROM \"ProductBatches\" WHERE \"Id\" = @id;", ("id", batchId));
+        Assert.Equal(3, remaining);
+        Assert.True(remaining >= 0);
+        Assert.Equal(1L, await ScalarAsync<long>(seedConnection, null, "SELECT count(*) FROM \"StockMovements\" WHERE \"ProductBatchId\" = @id AND \"MovementType\" = 7;", ("id", batchId)));
+    }
+
+    private static StockTransferService ServiceFor(PharmacyDbContext context) =>
+        new(new StockTransferRepository(context), new GodownAccessService(context), JournalPostingFor(context), TimeProvider.System);
+
+    private static async Task InsertStockTransferAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid id,
+        Guid sourceBranchId,
+        Guid sourceGodownId,
+        Guid destinationBranchId,
+        Guid destinationGodownId,
+        Guid createdByUserId) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "StockTransfers"
+                ("Id", "TransferNumber", "SourceBranchId", "SourceGodownId", "DestinationBranchId", "DestinationGodownId",
+                 "TransferDate", "Status", "CreatedByUserId", "CreatedAt", "UpdatedAt")
+            VALUES
+                (@id, @transferNumber, @sourceBranchId, @sourceGodownId, @destinationBranchId, @destinationGodownId,
+                 current_date, 1, @createdBy, now(), now());
+            """,
+            ("id", id), ("transferNumber", Unique("TRF")), ("sourceBranchId", sourceBranchId), ("sourceGodownId", sourceGodownId),
+            ("destinationBranchId", destinationBranchId), ("destinationGodownId", destinationGodownId), ("createdBy", createdByUserId));
+
+    private static async Task InsertInventoryAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        Guid branchId,
+        Guid? godownId,
+        Guid productId,
+        Guid batchId,
+        int quantity) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Inventory"
+                ("Id", "BranchId", "GodownId", "ProductId", "ProductBatchId", "QuantityInStock", "ReorderLevel", "LastCountedAt", "CreatedAt", "UpdatedAt")
+            VALUES
+                (@id, @branchId, @godownId, @productId, @batchId, @quantity, 0, now(), now(), now());
+            """,
+            ("id", Guid.NewGuid()), ("branchId", branchId), ("godownId", godownId.HasValue ? godownId.Value : DBNull.Value),
+            ("productId", productId), ("batchId", batchId), ("quantity", quantity));
+
+    private static async Task InsertStockTransferItemAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid transferId,
+        Guid productId,
+        Guid batchId,
+        int requested,
+        int approved = 0,
+        int dispatched = 0,
+        int received = 0) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "StockTransferItems"
+                ("Id", "StockTransferId", "ProductId", "SourceProductBatchId", "BatchNumber", "ExpiryDate", "UnitCostSnapshot",
+                 "QuantityRequested", "QuantityApproved", "QuantityDispatched", "QuantityReceived", "CreatedAt", "UpdatedAt")
+            VALUES
+                (@id, @transferId, @productId, @batchId, @batchNumber, current_date + 365, 10.00,
+                 @requested, @approved, @dispatched, @received, now(), now());
+            """,
+            ("id", Guid.NewGuid()), ("transferId", transferId), ("productId", productId), ("batchId", batchId), ("batchNumber", Unique("lot")),
+            ("requested", requested), ("approved", approved), ("dispatched", dispatched), ("received", received));
 
     private static async Task InsertUserAsync(
         NpgsqlConnection connection,

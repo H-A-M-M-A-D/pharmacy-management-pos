@@ -50,9 +50,10 @@ public sealed class ReportsController(IReportingService reports) : ControllerBas
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }
 
-public sealed record ReportRequest(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null, string? Option = null)
+public sealed record ReportRequest(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null, string? Option = null,
+    Guid? GodownId = null, Guid? SourceGodownId = null, Guid? DestinationGodownId = null, Guid? ProductId = null, string? Status = null)
 {
-    public ReportQuery Query() => new(BranchId, FromUtc, ToUtc, Page, PageSize, Search);
+    public ReportQuery Query() => new(BranchId, FromUtc, ToUtc, Page, PageSize, Search, GodownId, SourceGodownId, DestinationGodownId, ProductId, Status);
 }
 
 public static class CsvWriter

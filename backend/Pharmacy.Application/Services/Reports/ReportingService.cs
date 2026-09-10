@@ -14,6 +14,7 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
             "sales" => PermissionCatalog.ReportsSales,
             "purchases" => PermissionCatalog.ReportsPurchases,
             "inventory" => PermissionCatalog.ReportsInventory,
+            "transfers" => PermissionCatalog.ReportsInventory,
             "financial" => PermissionCatalog.ReportsFinancial,
             "profitability" => PermissionCatalog.ReportsProfitability,
             _ => throw new RequestValidationException("Unknown report.")
@@ -37,8 +38,16 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
             "purchases/returns" => await repository.PurchaseReturnsAsync(branch, query, ct),
             "inventory/current" => await repository.CurrentStockAsync(branch, option, ct),
             "inventory/batches" or "inventory/expiry" => await repository.BatchStockAsync(branch, query, ParseDays(option), option == "expired", ct),
-            "inventory/movements" => await repository.StockMovementsAsync(branch, query, option, ct),
+            "inventory/movements" or "inventory/godown-movements" => await repository.StockMovementsAsync(branch, query, option, query.GodownId, ct),
             "inventory/valuation" => await repository.InventorySummaryAsync(branch, timeProvider.GetUtcNow().UtcDateTime, ct),
+            "inventory/godown-stock" => await repository.GodownStockAsync(branch, Guid.TryParse(option, out var godownId) ? godownId : null, ct),
+            "inventory/godown-valuation" => await repository.GodownStockAsync(branch, query.GodownId, ct),
+            "inventory/in-transit" => await repository.InTransitStockAsync(branch, ct),
+            "inventory/stock-count-variance" => await repository.StockCountVarianceAsync(branch, query, ct),
+            "transfers/summary" => await repository.TransferSummaryAsync(branch, query, ct),
+            "transfers/daily" => await repository.DailyTransfersAsync(branch, query, ct),
+            "transfers/detail" => await repository.TransferDetailAsync(branch, query, ct),
+            "transfers/discrepancy" => await repository.TransferDiscrepancyAsync(branch, query, option, ct),
             "financial/expenses" => await repository.ExpensesAsync(branch, query, ct),
             "financial/other-income" => await repository.OtherIncomeAsync(branch, query, ct),
             "financial/customer-outstanding" => await repository.CustomerOutstandingAsync(branch, ct),
@@ -92,7 +101,9 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
         {
             IReadOnlyList<ProductSalesDto> rows => rows.Select(HideCost).ToList(),
             IReadOnlyList<StockRowDto> rows => rows.Select(x => x with { InventoryValue = 0 }).ToList(),
+            IReadOnlyList<GodownStockRowDto> rows => rows.Select(x => x with { StockValue = 0 }).ToList(),
             InventorySummaryDto summary => summary with { Value = 0 },
+            StockTransferSummaryDto transferSummary => transferSummary with { DispatchedValue = 0, ReceivedValue = 0 },
             _ => result
         };
     }

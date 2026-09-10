@@ -99,9 +99,9 @@ abstract interface class PharmacyApi {
     required bool increase,
   });
   Future<void> reconcileStockCount(String token, Map<String, dynamic> values);
-  Future<List<ExpiryItem>> listExpiry(String token, {int? days});
-  Future<PagedBatches> listBatches(String token, {String? search});
-  Future<PagedMovements> listMovements(String token, {String? search});
+  Future<List<ExpiryItem>> listExpiry(String token, {int? days, String? godownId});
+  Future<PagedBatches> listBatches(String token, {String? search, String? godownId});
+  Future<PagedMovements> listMovements(String token, {String? search, String? godownId});
   Future<PagedStockCountSessions> listStockCountSessions(
     String token, {
     String? branchId,
@@ -355,6 +355,13 @@ abstract interface class PharmacyApi {
     Map<String, dynamic>? body,
   });
   Future<dynamic> accounting(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  });
+  Future<dynamic> stockTransfers(
     String token,
     String path, {
     String method = 'GET',
@@ -708,9 +715,14 @@ class ApiClient implements PharmacyApi {
   );
 
   @override
-  Future<List<ExpiryItem>> listExpiry(String token, {int? days}) async {
+  Future<List<ExpiryItem>> listExpiry(
+    String token, {
+    int? days,
+    String? godownId,
+  }) async {
     final q = <String, String>{};
     if (days != null) q['days'] = '$days';
+    if (godownId != null) q['godownId'] = godownId;
     final data = await _request(
       'GET',
       Uri(path: '/api/inventory/expiry', queryParameters: q).toString(),
@@ -722,9 +734,14 @@ class ApiClient implements PharmacyApi {
   }
 
   @override
-  Future<PagedBatches> listBatches(String token, {String? search}) async {
+  Future<PagedBatches> listBatches(
+    String token, {
+    String? search,
+    String? godownId,
+  }) async {
     final q = <String, String>{'page': '1', 'pageSize': '100'};
     if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (godownId != null) q['godownId'] = godownId;
     return PagedBatches.fromJson(
       (await _request(
         'GET',
@@ -735,9 +752,14 @@ class ApiClient implements PharmacyApi {
   }
 
   @override
-  Future<PagedMovements> listMovements(String token, {String? search}) async {
+  Future<PagedMovements> listMovements(
+    String token, {
+    String? search,
+    String? godownId,
+  }) async {
     final q = <String, String>{'page': '1', 'pageSize': '100'};
     if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (godownId != null) q['godownId'] = godownId;
     return PagedMovements.fromJson(
       (await _request(
         'GET',
@@ -1724,6 +1746,23 @@ class ApiClient implements PharmacyApi {
   }) => _request(
     method,
     Uri(path: '/api/accounts/$path', queryParameters: query).toString(),
+    token: token,
+    body: body,
+  );
+
+  @override
+  Future<dynamic> stockTransfers(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(
+      path: '/api/stock-transfers${path.isEmpty ? '' : '/$path'}',
+      queryParameters: query,
+    ).toString(),
     token: token,
     body: body,
   );

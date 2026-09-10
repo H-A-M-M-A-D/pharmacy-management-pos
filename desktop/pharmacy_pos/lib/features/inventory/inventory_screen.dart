@@ -22,6 +22,8 @@ class _InventoryScreenState extends State<InventoryScreen>
   PagedMovements? _movements;
   InventoryOptions? _options;
   PagedStockCountSessions? _stockCountSessions;
+  List<GodownLookup> _godowns = [];
+  String? _godownFilter;
   bool _loading = true;
   String? _error;
 
@@ -47,11 +49,18 @@ class _InventoryScreenState extends State<InventoryScreen>
     });
     try {
       final canViewStockCount = can('inventory.stock_count.view');
+      final godowns = await widget.authState.myGodowns();
       final results = await Future.wait([
         widget.authState.listInventory(search: _search.text),
-        widget.authState.listBatches(search: _search.text),
-        widget.authState.listExpiry(days: 30),
-        widget.authState.listMovements(search: _search.text),
+        widget.authState.listBatches(
+          search: _search.text,
+          godownId: _godownFilter,
+        ),
+        widget.authState.listExpiry(days: 30, godownId: _godownFilter),
+        widget.authState.listMovements(
+          search: _search.text,
+          godownId: _godownFilter,
+        ),
         widget.authState.inventoryOptions(productSearch: _search.text),
         canViewStockCount
             ? widget.authState.listStockCountSessions()
@@ -61,6 +70,7 @@ class _InventoryScreenState extends State<InventoryScreen>
       ]);
       if (!mounted) return;
       setState(() {
+        _godowns = godowns;
         _inventory = results[0] as PagedInventory;
         _batches = results[1] as PagedBatches;
         _expiry = results[2] as List<ExpiryItem>;
@@ -104,6 +114,32 @@ class _InventoryScreenState extends State<InventoryScreen>
                   onSubmitted: (_) => _load(),
                 ),
               ),
+              if (_godowns.length > 1)
+                SizedBox(
+                  width: 200,
+                  child: DropdownButtonFormField<String?>(
+                    key: const Key('inventory_godown_filter'),
+                    initialValue: _godownFilter,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Godown'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All permitted godowns'),
+                      ),
+                      ..._godowns.map(
+                        (g) => DropdownMenuItem<String?>(
+                          value: g.id,
+                          child: Text(g.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _godownFilter = v);
+                      _load();
+                    },
+                  ),
+                ),
               IconButton.filledTonal(
                 key: const Key('refresh_inventory'),
                 tooltip: 'Refresh',
@@ -302,6 +338,7 @@ class _BatchTable extends StatelessWidget {
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('Batch')),
         DataColumn(label: Text('Branch')),
+        DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Expiry')),
         DataColumn(label: Text('Qty')),
         DataColumn(label: Text('Purchase')),
@@ -316,6 +353,7 @@ class _BatchTable extends StatelessWidget {
                 DataCell(Text(x.productName)),
                 DataCell(Text(x.batchNumber)),
                 DataCell(Text(x.branchName)),
+                DataCell(Text(x.godownName ?? '-')),
                 DataCell(Text(_date(x.expiryDate))),
                 DataCell(Text('${x.quantityAvailable}')),
                 DataCell(Text(_money(x.purchasePrice))),
@@ -342,6 +380,7 @@ class _ExpiryTable extends StatelessWidget {
       columns: const [
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('Batch')),
+        DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Expiry Date')),
         DataColumn(label: Text('Days')),
         DataColumn(label: Text('Quantity')),
@@ -353,6 +392,7 @@ class _ExpiryTable extends StatelessWidget {
               cells: [
                 DataCell(Text(x.productName)),
                 DataCell(Text(x.batchNumber)),
+                DataCell(Text(x.godownName ?? '-')),
                 DataCell(Text(_date(x.expiryDate))),
                 DataCell(Text('${x.daysRemaining}')),
                 DataCell(Text('${x.quantityAvailable}')),
@@ -378,6 +418,7 @@ class _MovementTable extends StatelessWidget {
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('Batch')),
         DataColumn(label: Text('Branch')),
+        DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Type')),
         DataColumn(label: Text('Quantity')),
       ],
@@ -389,6 +430,7 @@ class _MovementTable extends StatelessWidget {
                 DataCell(Text(x.productName)),
                 DataCell(Text(x.batchNumber)),
                 DataCell(Text(x.branchName)),
+                DataCell(Text(x.godownName ?? '-')),
                 DataCell(Text(x.movementType)),
                 DataCell(Text('${x.quantity}')),
               ],
@@ -411,6 +453,7 @@ class _StockCountSessionTable extends StatelessWidget {
       columns: const [
         DataColumn(label: Text('Count #')),
         DataColumn(label: Text('Branch')),
+        DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Date')),
         DataColumn(label: Text('Scope')),
         DataColumn(label: Text('Status')),
@@ -424,6 +467,7 @@ class _StockCountSessionTable extends StatelessWidget {
               cells: [
                 DataCell(Text(x.countNumber)),
                 DataCell(Text(x.branchName)),
+                DataCell(Text(x.godownName ?? 'Whole branch')),
                 DataCell(Text(_date(x.countDate))),
                 DataCell(Text(_scopeLabel(x.scope))),
                 DataCell(_StatusChip(label: x.status)),
@@ -458,7 +502,26 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
   String? _branchId;
   String _scope = 'Full';
   String? _categoryId;
+  String? _godownId;
+  List<GodownLookup> _godowns = [];
   String? _error;
+
+  Future<void> _reloadGodowns(String? branchId) async {
+    if (branchId == null) {
+      setState(() {
+        _godowns = [];
+        _godownId = null;
+      });
+      return;
+    }
+    final godowns = await widget.authState.myGodowns(branchId: branchId);
+    if (mounted) {
+      setState(() {
+        _godowns = godowns;
+        _godownId = null;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -480,9 +543,42 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
                       (x) => DropdownMenuItem(value: x.id, child: Text(x.name)),
                     )
                     .toList(),
-                onChanged: (v) => setState(() => _branchId = v),
+                onChanged: (v) {
+                  setState(() => _branchId = v);
+                  _reloadGodowns(v);
+                },
                 validator: (v) => v == null ? 'Branch is required' : null,
               ),
+              if (_godowns.isNotEmpty)
+                DropdownButtonFormField<String?>(
+                  initialValue: _godownId,
+                  key: const Key('stock_count_godown'),
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Godown (leave blank for the whole branch)',
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text(
+                        'Whole branch (all godowns)',
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                    ..._godowns.map(
+                      (g) => DropdownMenuItem<String?>(
+                        value: g.id,
+                        child: Text(
+                          g.name,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _godownId = v),
+                ),
               DropdownButtonFormField<String>(
                 initialValue: _scope,
                 key: const Key('stock_count_scope'),
@@ -540,6 +636,7 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
               'scope': _scope,
               'categoryId': _scope == 'Category' ? _categoryId : null,
               'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+              'godownId': _godownId,
             });
             if (context.mounted) Navigator.pop(context, true);
           } on ApiException catch (e) {
@@ -785,6 +882,7 @@ class _StockCountSessionDialogState extends State<_StockCountSessionDialog> {
         children: [
           _StatusChip(label: session.status),
           Text('Branch: ${session.branchName}'),
+          Text('Godown: ${session.godownName ?? 'Whole branch'}'),
           Text(
             'Scope: ${_scopeLabel(session.scope)}'
             '${session.categoryName != null ? ' (${session.categoryName})' : ''}',
@@ -1058,15 +1156,27 @@ class _BatchPickerFields extends StatefulWidget {
 }
 
 class _BatchPickerFieldsState extends State<_BatchPickerFields> {
-  String? _branchId, _productId, _batchId;
+  String? _branchId, _productId, _godownId, _batchId;
 
-  List<BatchItem> get _filtered => widget.batches
+  List<BatchItem> get _branchAndProductFiltered => widget.batches
       .where(
         (b) =>
             (_branchId == null || b.branchId == _branchId) &&
             (_productId == null || b.productId == _productId),
       )
       .toList();
+
+  List<BatchItem> get _filtered => _branchAndProductFiltered
+      .where((b) => _godownId == null || b.godownId == _godownId)
+      .toList();
+
+  List<MapEntry<String, String>> get _availableGodowns {
+    final byId = <String, String>{};
+    for (final b in _branchAndProductFiltered) {
+      if (b.godownId != null) byId[b.godownId!] = b.godownName ?? b.godownId!;
+    }
+    return byId.entries.toList();
+  }
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1081,6 +1191,7 @@ class _BatchPickerFieldsState extends State<_BatchPickerFields> {
             .toList(),
         onChanged: (v) => setState(() {
           _branchId = v;
+          _godownId = null;
           _batchId = null;
           widget.onBatchChanged(null);
         }),
@@ -1100,20 +1211,49 @@ class _BatchPickerFieldsState extends State<_BatchPickerFields> {
             .toList(),
         onChanged: (v) => setState(() {
           _productId = v;
+          _godownId = null;
           _batchId = null;
           widget.onBatchChanged(null);
         }),
         validator: (v) => v == null ? 'Product is required' : null,
       ),
+      if (_availableGodowns.isNotEmpty)
+        DropdownButtonFormField<String?>(
+          initialValue: _godownId,
+          key: const Key('picker_godown'),
+          decoration: const InputDecoration(labelText: 'Godown (optional filter)'),
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('Any godown'),
+            ),
+            ..._availableGodowns.map(
+              (g) => DropdownMenuItem<String?>(
+                value: g.key,
+                child: Text(g.value),
+              ),
+            ),
+          ],
+          onChanged: (v) => setState(() {
+            _godownId = v;
+            _batchId = null;
+            widget.onBatchChanged(null);
+          }),
+        ),
       DropdownButtonFormField<String>(
         initialValue: _batchId,
         key: const Key('picker_batch'),
+        isExpanded: true,
         decoration: const InputDecoration(labelText: 'Batch'),
         items: _filtered
             .map(
               (x) => DropdownMenuItem(
                 value: x.batchId,
-                child: Text('${x.batchNumber} (qty ${x.quantityAvailable})'),
+                child: Text(
+                  '${x.batchNumber} (qty ${x.quantityAvailable}) — ${x.godownName ?? 'No godown'}',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
               ),
             )
             .toList(),

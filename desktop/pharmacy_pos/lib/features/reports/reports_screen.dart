@@ -27,6 +27,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (widget.authState.can('reports.sales')) 'Sales',
     if (widget.authState.can('reports.purchases')) 'Purchases',
     if (widget.authState.can('reports.inventory')) 'Inventory',
+    if (widget.authState.can('reports.inventory')) 'Transfers',
     if (widget.authState.can('reports.financial')) 'Financial',
     if (widget.authState.can('reports.profitability')) 'Profitability',
   ];
@@ -121,6 +122,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
       'Batch Stock': 'inventory/batches',
       'Stock Movements': 'inventory/movements',
       'Valuation': 'inventory/valuation',
+      'Godown-wise Stock': 'inventory/godown-stock',
+      'Godown-wise Movements': 'inventory/godown-movements',
+      'Godown-wise Valuation': 'inventory/godown-valuation',
+      'In-Transit Stock': 'inventory/in-transit',
+      'Stock Count Variance': 'inventory/stock-count-variance',
+    },
+    'Transfers': {
+      'Summary': 'transfers/summary',
+      'Daily Transfers': 'transfers/daily',
+      'Inter-Godown Detail': 'transfers/detail',
+      'Discrepancies': 'transfers/discrepancy',
     },
     'Financial': {
       'Cash Position': 'financial/cash-position',

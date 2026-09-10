@@ -116,6 +116,13 @@ public static class PermissionCatalog
     public const string GodownsDeactivate = "godowns.deactivate";
     public const string GodownsManage = "godowns.manage";
     public const string GodownsSetDefault = "godowns.set_default";
+    public const string StockTransfersView = "stock_transfers.view";
+    public const string StockTransfersCreate = "stock_transfers.create";
+    public const string StockTransfersRequest = "stock_transfers.request";
+    public const string StockTransfersApprove = "stock_transfers.approve";
+    public const string StockTransfersDispatch = "stock_transfers.dispatch";
+    public const string StockTransfersReceive = "stock_transfers.receive";
+    public const string StockTransfersCancel = "stock_transfers.cancel";
     public const string RecycleBinView = "recycle_bin.view";
     public const string RecycleBinRestore = "recycle_bin.restore";
     public const string AuditExport = "audit.export";
@@ -155,6 +162,8 @@ public static class PermissionCatalog
         SystemView, SystemSettingsManage, SystemBackup, BranchesView, BranchesManage,
         GodownsView, GodownsCreate, GodownsUpdate, GodownsActivate, GodownsDeactivate,
         GodownsManage, GodownsSetDefault,
+        StockTransfersView, StockTransfersCreate, StockTransfersRequest, StockTransfersApprove,
+        StockTransfersDispatch, StockTransfersReceive, StockTransfersCancel,
         RecycleBinView, RecycleBinRestore, AuditExport
     ];
 }

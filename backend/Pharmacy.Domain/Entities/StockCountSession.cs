@@ -11,6 +11,11 @@ public class StockCountSession : Entity
     public required string CountNumber { get; set; }
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+
+    /// <summary>Godown this count is scoped to. Null means the count spans the whole branch (all godowns),
+    /// preserved for legacy/unmigrated branches and branch-wide counts alike.</summary>
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public DateOnly CountDate { get; set; }
     public StockCountStatus Status { get; set; } = StockCountStatus.Draft;
     public StockCountScope Scope { get; set; }

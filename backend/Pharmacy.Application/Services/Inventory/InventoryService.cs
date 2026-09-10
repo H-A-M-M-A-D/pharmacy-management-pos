@@ -201,15 +201,17 @@ public sealed class InventoryService(
         if (request.Scope == StockCountScope.SelectedBatches && (request.ProductBatchIds is null || request.ProductBatchIds.Count == 0))
             throw new RequestValidationException("At least one batch is required for a selected-batches stock count.");
 
+        if (request.GodownId.HasValue) await EnsureGodownAccessAsync(actor, request.BranchId, request.GodownId.Value, cancellationToken);
         StockCountSession? session = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            var batches = await repository.GetEligibleBatchesForCountAsync(request.BranchId, request.Scope, request.CategoryId, request.ProductIds, request.ProductBatchIds, ct);
+            var batches = await repository.GetEligibleBatchesForCountAsync(request.BranchId, request.GodownId, request.Scope, request.CategoryId, request.ProductIds, request.ProductBatchIds, ct);
             if (batches.Count == 0) throw new RequestValidationException("No eligible batches were found for the requested stock count scope.");
             session = new StockCountSession
             {
                 CountNumber = await repository.NextStockCountNumberAsync(request.CountDate, ct),
                 BranchId = request.BranchId,
+                GodownId = request.GodownId,
                 CountDate = request.CountDate,
                 Status = StockCountStatus.Draft,
                 Scope = request.Scope,

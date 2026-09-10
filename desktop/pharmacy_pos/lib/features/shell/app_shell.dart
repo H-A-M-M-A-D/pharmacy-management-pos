@@ -12,6 +12,7 @@ import '../purchasing/purchasing_screen.dart';
 import '../reports/reports_screen.dart';
 import '../sales/cashier_shift_screen.dart';
 import '../sales/pos_screen.dart';
+import '../stock_transfers/stock_transfers_screen.dart';
 import '../suppliers/suppliers_screen.dart';
 import '../users/users_screen.dart';
 import '../administration/administration_screen.dart';
@@ -37,6 +38,7 @@ class _AppShellState extends State<AppShell> {
     final canViewManufacturers = widget.authState.can('manufacturers.view');
     final canViewInventory = widget.authState.can('inventory.view');
     final canViewGodowns = widget.authState.can('godowns.view');
+    final canViewStockTransfers = widget.authState.can('stock_transfers.view');
     final canViewSuppliers = widget.authState.can('suppliers.view');
     final canViewCustomers = widget.authState.can('customers.view');
     final canViewPurchasing =
@@ -117,6 +119,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.warehouse),
           label: Text('Godowns'),
         ),
+      if (canViewStockTransfers)
+        const NavigationRailDestination(
+          icon: Icon(Icons.compare_arrows_outlined),
+          selectedIcon: Icon(Icons.compare_arrows),
+          label: Text('Transfers'),
+        ),
       if (canViewSuppliers)
         const NavigationRailDestination(
           icon: Icon(Icons.local_shipping_outlined),
@@ -193,6 +201,8 @@ class _AppShellState extends State<AppShell> {
         ),
       if (canViewInventory) InventoryScreen(authState: widget.authState),
       if (canViewGodowns) GodownsScreen(authState: widget.authState),
+      if (canViewStockTransfers)
+        StockTransfersScreen(authState: widget.authState),
       if (canViewSuppliers) SuppliersScreen(authState: widget.authState),
       if (canViewCustomers) CustomersScreen(authState: widget.authState),
       if (canViewPurchasing) PurchasingScreen(authState: widget.authState),

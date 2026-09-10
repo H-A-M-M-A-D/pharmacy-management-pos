@@ -70,6 +70,8 @@ public class PharmacyDbContext : DbContext
     public DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; set; } = null!;
     public DbSet<Voucher> Vouchers { get; set; } = null!;
     public DbSet<VoucherLine> VoucherLines { get; set; } = null!;
+    public DbSet<StockTransfer> StockTransfers { get; set; } = null!;
+    public DbSet<StockTransferItem> StockTransferItems { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -442,6 +444,7 @@ public class PharmacyDbContext : DbContext
         modelBuilder.HasSequence<long>("BankPaymentVoucherNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("ContraVoucherNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("JournalVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("StockTransferNumberSequence").StartsAt(1);
 
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
@@ -498,6 +501,8 @@ public class PharmacyDbContext : DbContext
         ConfigureSupplierPaymentAllocation(modelBuilder);
         ConfigureVoucher(modelBuilder);
         ConfigureVoucherLine(modelBuilder);
+        ConfigureStockTransfer(modelBuilder);
+        ConfigureStockTransferItem(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -887,6 +892,7 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => e.CountNumber).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.CountDate });
+        entity.HasIndex(e => new { e.GodownId, e.CountDate });
         entity.HasIndex(e => e.Status);
         entity.ToTable(table =>
         {
@@ -895,6 +901,7 @@ public class PharmacyDbContext : DbContext
         });
 
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Category).WithMany().HasForeignKey(e => e.CategoryId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.StartedByUser).WithMany().HasForeignKey(e => e.StartedByUserId).OnDelete(DeleteBehavior.Restrict);
@@ -1123,6 +1130,68 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureStockTransfer(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<StockTransfer>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.TransferNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.TransferDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.CancellationReason).HasMaxLength(500);
+
+        entity.HasIndex(e => e.TransferNumber).IsUnique();
+        entity.HasIndex(e => new { e.SourceBranchId, e.TransferDate });
+        entity.HasIndex(e => new { e.SourceGodownId, e.TransferDate });
+        entity.HasIndex(e => new { e.DestinationBranchId, e.TransferDate });
+        entity.HasIndex(e => new { e.DestinationGodownId, e.TransferDate });
+        entity.HasIndex(e => e.Status);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_StockTransfers_Status", "\"Status\" IN (1, 2, 3, 4, 5, 6, 7)");
+            table.HasCheckConstraint("CK_StockTransfers_Source_Destination_Godown_Different", "\"SourceGodownId\" <> \"DestinationGodownId\"");
+        });
+
+        entity.HasOne(e => e.SourceBranch).WithMany().HasForeignKey(e => e.SourceBranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SourceGodown).WithMany().HasForeignKey(e => e.SourceGodownId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.DestinationGodown).WithMany().HasForeignKey(e => e.DestinationGodownId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.RequestedByUser).WithMany().HasForeignKey(e => e.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ApprovedByUser).WithMany().HasForeignKey(e => e.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.DispatchedByUser).WithMany().HasForeignKey(e => e.DispatchedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReceivedByUser).WithMany().HasForeignKey(e => e.ReceivedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CancelledByUser).WithMany().HasForeignKey(e => e.CancelledByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureStockTransferItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<StockTransferItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.BatchNumber).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.ExpiryDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.UnitCostSnapshot).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+
+        entity.HasIndex(e => e.StockTransferId);
+        entity.HasIndex(e => new { e.StockTransferId, e.SourceProductBatchId }).IsUnique();
+        entity.HasIndex(e => e.ProductId);
+        entity.HasIndex(e => e.SourceProductBatchId);
+        entity.HasIndex(e => e.DestinationProductBatchId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_StockTransferItems_Requested_Positive", "\"QuantityRequested\" > 0");
+            table.HasCheckConstraint("CK_StockTransferItems_Approved_Range", "\"QuantityApproved\" >= 0 AND \"QuantityApproved\" <= \"QuantityRequested\"");
+            table.HasCheckConstraint("CK_StockTransferItems_Dispatched_Range", "\"QuantityDispatched\" >= 0 AND \"QuantityDispatched\" <= \"QuantityApproved\"");
+            table.HasCheckConstraint("CK_StockTransferItems_Received_Range", "\"QuantityReceived\" >= 0 AND \"QuantityReceived\" <= \"QuantityDispatched\"");
+            table.HasCheckConstraint("CK_StockTransferItems_UnitCost_NonNegative", "\"UnitCostSnapshot\" >= 0");
+        });
+
+        entity.HasOne(e => e.StockTransfer).WithMany(t => t.Items).HasForeignKey(e => e.StockTransferId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SourceProductBatch).WithMany().HasForeignKey(e => e.SourceProductBatchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.DestinationProductBatch).WithMany().HasForeignKey(e => e.DestinationProductBatchId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureAuditLog(ModelBuilder modelBuilder)

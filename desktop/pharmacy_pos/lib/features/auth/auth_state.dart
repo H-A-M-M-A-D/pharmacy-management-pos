@@ -154,6 +154,18 @@ class AuthState extends ChangeNotifier {
     query: query,
     body: body,
   );
+  Future<dynamic> stockTransfers(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.stockTransfers(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
   Future<void> signOutEverywhere() async {
     await administration('sessions/revoke', method: 'POST');
     await logout();
@@ -229,12 +241,12 @@ class AuthState extends ChangeNotifier {
   }) => _api.adjustStock(_requiredToken, values, increase: increase);
   Future<void> reconcileStockCount(Map<String, dynamic> values) =>
       _api.reconcileStockCount(_requiredToken, values);
-  Future<List<ExpiryItem>> listExpiry({int? days}) =>
-      _api.listExpiry(_requiredToken, days: days);
-  Future<PagedBatches> listBatches({String? search}) =>
-      _api.listBatches(_requiredToken, search: search);
-  Future<PagedMovements> listMovements({String? search}) =>
-      _api.listMovements(_requiredToken, search: search);
+  Future<List<ExpiryItem>> listExpiry({int? days, String? godownId}) =>
+      _api.listExpiry(_requiredToken, days: days, godownId: godownId);
+  Future<PagedBatches> listBatches({String? search, String? godownId}) =>
+      _api.listBatches(_requiredToken, search: search, godownId: godownId);
+  Future<PagedMovements> listMovements({String? search, String? godownId}) =>
+      _api.listMovements(_requiredToken, search: search, godownId: godownId);
   Future<PagedStockCountSessions> listStockCountSessions({
     String? branchId,
     String? status,

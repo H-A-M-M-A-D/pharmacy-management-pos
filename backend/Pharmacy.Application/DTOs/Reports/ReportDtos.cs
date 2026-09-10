@@ -1,6 +1,7 @@
 namespace Pharmacy.Application.DTOs.Reports;
 
-public sealed record ReportQuery(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null);
+public sealed record ReportQuery(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null,
+    Guid? GodownId = null, Guid? SourceGodownId = null, Guid? DestinationGodownId = null, Guid? ProductId = null, string? Status = null);
 public sealed record PagedReport<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
 public sealed record SalesSummaryDto(decimal GrossSales, decimal Discounts, decimal NetSales, decimal PaymentsAtSale,
@@ -34,8 +35,38 @@ public sealed record StockRowDto(Guid ProductId, string Product, string Sku, str
 public sealed record BatchStockRowDto(string Product, string Sku, string Batch, DateOnly Expiry, int Quantity,
     decimal PurchaseCost, decimal StockValue, string Supplier, string Branch);
 public sealed record StockMovementRowDto(DateTime OccurredAtUtc, string Branch, string Product, string Batch,
-    string MovementType, int Quantity, string User, string? ReferenceType, string? Notes);
+    string MovementType, int Quantity, string User, string? ReferenceType, string? Notes, string? Godown = null);
 public sealed record InventorySummaryDto(decimal Value, int LowStockCount, int OutOfStockCount, int NearExpiryCount);
+
+public sealed record GodownStockRowDto(Guid GodownId, string Godown, string Branch, Guid ProductId, string Product,
+    string Sku, string Category, int CurrentQuantity, int ReorderLevel, string Status, decimal StockValue);
+
+public sealed record InTransitStockRowDto(string TransferNumber, string Product, string Sku, string BatchNumber,
+    string SourceBranch, string SourceGodown, string DestinationBranch, string DestinationGodown,
+    int QuantityDispatched, int QuantityReceived, int QuantityInTransit, DateTime? DispatchedAtUtc);
+
+public sealed record StockTransferSummaryDto(int TransferCount, int DraftCount, int RequestedCount, int ApprovedCount,
+    int DispatchedCount, int PartiallyReceivedCount, int ReceivedCount, int CancelledCount,
+    int QuantityRequested, int QuantityApproved, int QuantityDispatched, int QuantityReceived, int QuantityInTransit,
+    decimal DispatchedValue, decimal ReceivedValue);
+
+public sealed record DailyTransferDto(Guid Id, string TransferNumber, DateOnly TransferDate, string Status,
+    string SourceBranch, string SourceGodown, string DestinationBranch, string DestinationGodown,
+    int QuantityRequested, int QuantityDispatched, int QuantityReceived, string? RequestedBy, string CreatedBy);
+
+public sealed record TransferDetailRowDto(string TransferNumber, DateOnly TransferDate, string Status,
+    string Product, string Sku, string BatchNumber, decimal UnitCostSnapshot,
+    string SourceBranch, string SourceGodown, string DestinationBranch, string DestinationGodown,
+    int QuantityRequested, int QuantityApproved, int QuantityDispatched, int QuantityReceived, int QuantityInTransit);
+
+public sealed record TransferDiscrepancyRowDto(string TransferNumber, DateOnly TransferDate, string Product, string Sku,
+    string BatchNumber, string SourceBranch, string SourceGodown, string DestinationBranch, string DestinationGodown,
+    int QuantityDispatched, int QuantityReceived, int QuantityUnresolved, decimal UnresolvedValue,
+    string ResolutionStatus, string? ResolutionNotes, DateTime? DispatchedAtUtc, DateTime? ResolvedAtUtc);
+
+public sealed record StockCountVarianceRowDto(string CountNumber, DateOnly CountDate, string Branch, string? Godown,
+    string Product, string Sku, string Batch, int SystemQuantity, int CountedQuantity, int VarianceQuantity,
+    decimal UnitCost, decimal VarianceValue, string? Reason);
 
 public sealed record ExpenseReportDto(string Number, DateTime OccurredAtUtc, string Category, string Account,
     string Branch, string User, decimal Amount, string Description);

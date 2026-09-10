@@ -493,6 +493,9 @@ class BatchItem {
     required this.retailPrice,
     required this.estimatedStockValue,
     required this.state,
+    this.godownId,
+    this.godownCode,
+    this.godownName,
   });
   final String batchId,
       productId,
@@ -502,6 +505,7 @@ class BatchItem {
       branchId,
       branchName,
       state;
+  final String? godownId, godownCode, godownName;
   final DateTime expiryDate;
   final int quantityAvailable;
   final double purchasePrice, retailPrice, estimatedStockValue;
@@ -519,6 +523,9 @@ class BatchItem {
     retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
     estimatedStockValue: (json['estimatedStockValue'] as num?)?.toDouble() ?? 0,
     state: json['state'] as String? ?? '',
+    godownId: json['godownId'] as String?,
+    godownCode: json['godownCode'] as String?,
+    godownName: json['godownName'] as String?,
   );
 }
 
@@ -543,8 +550,11 @@ class ExpiryItem {
     required this.daysRemaining,
     required this.quantityAvailable,
     required this.estimatedStockValue,
+    this.godownId,
+    this.godownName,
   });
   final String batchId, productName, batchNumber;
+  final String? godownId, godownName;
   final DateTime expiryDate;
   final int daysRemaining, quantityAvailable;
   final double estimatedStockValue;
@@ -556,6 +566,8 @@ class ExpiryItem {
     daysRemaining: json['daysRemaining'] as int? ?? 0,
     quantityAvailable: json['quantityAvailable'] as int? ?? 0,
     estimatedStockValue: (json['estimatedStockValue'] as num?)?.toDouble() ?? 0,
+    godownId: json['godownId'] as String?,
+    godownName: json['godownName'] as String?,
   );
 }
 
@@ -567,9 +579,12 @@ class StockMovementItem {
     required this.branchName,
     required this.movementType,
     required this.quantity,
+    this.godownId,
+    this.godownName,
   });
   final DateTime createdAt;
   final String productName, batchNumber, branchName, movementType;
+  final String? godownId, godownName;
   final int quantity;
   factory StockMovementItem.fromJson(Map<String, dynamic> json) =>
       StockMovementItem(
@@ -579,6 +594,8 @@ class StockMovementItem {
         branchName: json['branchName'] as String? ?? '',
         movementType: json['movementType'] as String? ?? '',
         quantity: json['quantity'] as int? ?? 0,
+        godownId: json['godownId'] as String?,
+        godownName: json['godownName'] as String?,
       );
 }
 
@@ -664,10 +681,13 @@ class StockCountSession {
     this.completedAtUtc,
     this.cancelledBy,
     this.cancelledAtUtc,
+    this.godownId,
+    this.godownName,
   });
   final String id, countNumber, branchId, branchName, status, scope, createdBy;
   final DateTime countDate;
   final String? categoryId, categoryName, notes, startedBy, completedBy, cancelledBy;
+  final String? godownId, godownName;
   final DateTime? startedAtUtc, completedAtUtc, cancelledAtUtc;
   final int totalItems, countedItems, varianceItems;
   final List<StockCountLine> items;
@@ -696,6 +716,8 @@ class StockCountSession {
         items: (json['items'] as List<dynamic>? ?? [])
             .map((x) => StockCountLine.fromJson(x as Map<String, dynamic>))
             .toList(),
+        godownId: json['godownId'] as String?,
+        godownName: json['godownName'] as String?,
       );
 }
 
@@ -715,10 +737,13 @@ class StockCountSessionSummary {
     required this.createdAt,
     this.categoryName,
     this.completedAtUtc,
+    this.godownId,
+    this.godownName,
   });
   final String id, countNumber, branchId, branchName, status, scope, createdBy;
   final DateTime countDate, createdAt;
   final String? categoryName;
+  final String? godownId, godownName;
   final DateTime? completedAtUtc;
   final int totalItems, countedItems, varianceItems;
   factory StockCountSessionSummary.fromJson(Map<String, dynamic> json) =>
@@ -737,6 +762,8 @@ class StockCountSessionSummary {
         createdBy: json['createdBy'] as String? ?? '',
         createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
         completedAtUtc: _date(json['completedAtUtc']),
+        godownId: json['godownId'] as String?,
+        godownName: json['godownName'] as String?,
       );
 }
 
@@ -2503,4 +2530,208 @@ class DailyCashPosition {
         moneyOut: (json['moneyOut'] as num?)?.toDouble() ?? 0,
         closingBalance: (json['closingBalance'] as num?)?.toDouble() ?? 0,
       );
+}
+
+class StockTransferListItem {
+  const StockTransferListItem({
+    required this.id,
+    required this.transferNumber,
+    required this.transferDate,
+    required this.status,
+    required this.sourceBranchId,
+    required this.sourceBranchName,
+    required this.sourceGodownId,
+    required this.sourceGodownName,
+    required this.destinationBranchId,
+    required this.destinationBranchName,
+    required this.destinationGodownId,
+    required this.destinationGodownName,
+    required this.quantityRequested,
+    required this.quantityApproved,
+    required this.quantityDispatched,
+    required this.quantityReceived,
+    required this.quantityInTransit,
+    required this.createdAt,
+    this.requestedBy,
+  });
+  final String id, transferNumber, status;
+  final String sourceBranchId, sourceBranchName, sourceGodownId, sourceGodownName;
+  final String destinationBranchId, destinationBranchName, destinationGodownId, destinationGodownName;
+  final String? requestedBy;
+  final DateTime transferDate, createdAt;
+  final int quantityRequested, quantityApproved, quantityDispatched, quantityReceived, quantityInTransit;
+  factory StockTransferListItem.fromJson(Map<String, dynamic> json) => StockTransferListItem(
+    id: json['id'] as String,
+    transferNumber: json['transferNumber'] as String? ?? '',
+    transferDate: _date(json['transferDate']) ?? DateTime.now(),
+    status: _enumName(json['status']),
+    sourceBranchId: json['sourceBranchId'] as String? ?? '',
+    sourceBranchName: json['sourceBranchName'] as String? ?? '',
+    sourceGodownId: json['sourceGodownId'] as String? ?? '',
+    sourceGodownName: json['sourceGodownName'] as String? ?? '',
+    destinationBranchId: json['destinationBranchId'] as String? ?? '',
+    destinationBranchName: json['destinationBranchName'] as String? ?? '',
+    destinationGodownId: json['destinationGodownId'] as String? ?? '',
+    destinationGodownName: json['destinationGodownName'] as String? ?? '',
+    quantityRequested: json['quantityRequested'] as int? ?? 0,
+    quantityApproved: json['quantityApproved'] as int? ?? 0,
+    quantityDispatched: json['quantityDispatched'] as int? ?? 0,
+    quantityReceived: json['quantityReceived'] as int? ?? 0,
+    quantityInTransit: json['quantityInTransit'] as int? ?? 0,
+    requestedBy: json['requestedBy'] as String?,
+    createdAt: _date(json['createdAt']) ?? DateTime.now(),
+  );
+}
+
+class PagedStockTransfers {
+  const PagedStockTransfers({required this.items, required this.totalCount});
+  final List<StockTransferListItem> items;
+  final int totalCount;
+  factory PagedStockTransfers.fromJson(Map<String, dynamic> json) => PagedStockTransfers(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => StockTransferListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class StockTransferLineItem {
+  const StockTransferLineItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.sourceProductBatchId,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.unitCostSnapshot,
+    required this.quantityRequested,
+    required this.quantityApproved,
+    required this.quantityDispatched,
+    required this.quantityReceived,
+    required this.quantityInTransit,
+    this.destinationProductBatchId,
+    this.notes,
+  });
+  final String id, productId, productName, sku, sourceProductBatchId, batchNumber;
+  final String? destinationProductBatchId, notes;
+  final DateTime expiryDate;
+  final double unitCostSnapshot;
+  final int quantityRequested, quantityApproved, quantityDispatched, quantityReceived, quantityInTransit;
+  factory StockTransferLineItem.fromJson(Map<String, dynamic> json) => StockTransferLineItem(
+    id: json['id'] as String,
+    productId: json['productId'] as String? ?? '',
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    sourceProductBatchId: json['sourceProductBatchId'] as String? ?? '',
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    unitCostSnapshot: (json['unitCostSnapshot'] as num?)?.toDouble() ?? 0,
+    destinationProductBatchId: json['destinationProductBatchId'] as String?,
+    quantityRequested: json['quantityRequested'] as int? ?? 0,
+    quantityApproved: json['quantityApproved'] as int? ?? 0,
+    quantityDispatched: json['quantityDispatched'] as int? ?? 0,
+    quantityReceived: json['quantityReceived'] as int? ?? 0,
+    quantityInTransit: json['quantityInTransit'] as int? ?? 0,
+    notes: json['notes'] as String?,
+  );
+}
+
+class StockTransferDetails {
+  const StockTransferDetails({
+    required this.id,
+    required this.transferNumber,
+    required this.transferDate,
+    required this.status,
+    required this.sourceBranchId,
+    required this.sourceBranchName,
+    required this.sourceGodownId,
+    required this.sourceGodownName,
+    required this.destinationBranchId,
+    required this.destinationBranchName,
+    required this.destinationGodownId,
+    required this.destinationGodownName,
+    required this.createdAt,
+    required this.items,
+    this.notes,
+    this.createdBy,
+    this.requestedBy,
+    this.requestedAtUtc,
+    this.approvedBy,
+    this.approvedAtUtc,
+    this.dispatchedBy,
+    this.dispatchedAtUtc,
+    this.receivedBy,
+    this.receivedAtUtc,
+    this.cancelledBy,
+    this.cancelledAtUtc,
+    this.cancellationReason,
+  });
+  final String id, transferNumber, status;
+  final String sourceBranchId, sourceBranchName, sourceGodownId, sourceGodownName;
+  final String destinationBranchId, destinationBranchName, destinationGodownId, destinationGodownName;
+  final String? notes, createdBy, requestedBy, approvedBy, dispatchedBy, receivedBy, cancelledBy, cancellationReason;
+  final DateTime transferDate, createdAt;
+  final DateTime? requestedAtUtc, approvedAtUtc, dispatchedAtUtc, receivedAtUtc, cancelledAtUtc;
+  final List<StockTransferLineItem> items;
+  factory StockTransferDetails.fromJson(Map<String, dynamic> json) => StockTransferDetails(
+    id: json['id'] as String,
+    transferNumber: json['transferNumber'] as String? ?? '',
+    transferDate: _date(json['transferDate']) ?? DateTime.now(),
+    status: _enumName(json['status']),
+    notes: json['notes'] as String?,
+    sourceBranchId: json['sourceBranchId'] as String? ?? '',
+    sourceBranchName: json['sourceBranchName'] as String? ?? '',
+    sourceGodownId: json['sourceGodownId'] as String? ?? '',
+    sourceGodownName: json['sourceGodownName'] as String? ?? '',
+    destinationBranchId: json['destinationBranchId'] as String? ?? '',
+    destinationBranchName: json['destinationBranchName'] as String? ?? '',
+    destinationGodownId: json['destinationGodownId'] as String? ?? '',
+    destinationGodownName: json['destinationGodownName'] as String? ?? '',
+    createdBy: json['createdBy'] as String?,
+    createdAt: _date(json['createdAt']) ?? DateTime.now(),
+    requestedBy: json['requestedBy'] as String?,
+    requestedAtUtc: _date(json['requestedAtUtc']),
+    approvedBy: json['approvedBy'] as String?,
+    approvedAtUtc: _date(json['approvedAtUtc']),
+    dispatchedBy: json['dispatchedBy'] as String?,
+    dispatchedAtUtc: _date(json['dispatchedAtUtc']),
+    receivedBy: json['receivedBy'] as String?,
+    receivedAtUtc: _date(json['receivedAtUtc']),
+    cancelledBy: json['cancelledBy'] as String?,
+    cancelledAtUtc: _date(json['cancelledAtUtc']),
+    cancellationReason: json['cancellationReason'] as String?,
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => StockTransferLineItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class TransferableBatch {
+  const TransferableBatch({
+    required this.productBatchId,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.quantityAvailable,
+    required this.purchasePrice,
+    required this.retailPrice,
+  });
+  final String productBatchId, productId, productName, sku, batchNumber;
+  final DateTime expiryDate;
+  final int quantityAvailable;
+  final double purchasePrice, retailPrice;
+  factory TransferableBatch.fromJson(Map<String, dynamic> json) => TransferableBatch(
+    productBatchId: json['productBatchId'] as String,
+    productId: json['productId'] as String? ?? '',
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    batchNumber: json['batchNumber'] as String? ?? '',
+    expiryDate: _date(json['expiryDate']) ?? DateTime.now(),
+    quantityAvailable: json['quantityAvailable'] as int? ?? 0,
+    purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
+    retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
+  );
 }
