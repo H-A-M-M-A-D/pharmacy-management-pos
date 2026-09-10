@@ -157,6 +157,8 @@ public sealed class CustomerManagementTests
         public readonly List<CustomerLedgerEntry> Ledger = [];
         public readonly List<CustomerPayment> Payments = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly List<CustomerPaymentAllocation> Allocations = [];
+        public readonly List<OpenReceivableDto> OpenReceivables = [];
         public readonly FakeJournalPostingService Journal = new();
         public Customer? Customer;
         public CustomerService Service { get; }
@@ -185,6 +187,9 @@ public sealed class CustomerManagementTests
         public Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default) { Customer = customer; return Task.CompletedTask; }
         public Task AddPaymentAsync(CustomerPayment payment, CancellationToken cancellationToken = default) { Payments.Add(payment); return Task.CompletedTask; }
         public Task AddLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) { Ledger.Add(entry); return Task.CompletedTask; }
+        public Task<IReadOnlyList<OpenReceivableDto>> GetOpenReceivablesAsync(Guid customerId, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OpenReceivableDto>>(OpenReceivables.Where(x => x.CustomerId == customerId && (!branchId.HasValue || x.BranchId == branchId)).ToList());
+        public Task AddPaymentAllocationAsync(CustomerPaymentAllocation allocation, CancellationToken cancellationToken = default) { Allocations.Add(allocation); return Task.CompletedTask; }
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task<PagedResult<CustomerListItemDto>> ListCustomersAsync(CustomerListQuery query, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<CustomerListItemDto>([], query.Page, query.PageSize, 0));
         public Task<CustomerDetailsDto?> GetCustomerDetailsAsync(Guid customerId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult<CustomerDetailsDto?>(Customer is null ? null : new(Customer.Id, Customer.CustomerCode, Customer.Name, Customer.PhoneNumber, Customer.AlternatePhone, Customer.Email, Customer.Address, Customer.City, Customer.BusinessName, Customer.NTN, Customer.OpeningBalance, Customer.CreditLimit, Customer.IsActive, Balance > 0 ? Balance : 0, Balance < 0 ? -Balance : 0, Ledger.Where(x => x.EntryType == CustomerLedgerEntryType.Payment).Sum(x => -x.Amount), null, Customer.CreatedAt, Customer.UpdatedAt));

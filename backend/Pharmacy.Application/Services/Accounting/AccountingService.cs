@@ -252,6 +252,38 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
             earnings, totalEquity, decimal.Round(totalAssets - totalLiabilities - totalEquity, 2) == 0);
     }
 
+    public async Task<ArAgingSummaryDto> GetArAgingSummaryAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? customerId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsAgingReceivablesView, cancellationToken);
+        var rows = await repository.GetArAgingSummaryAsync(asOfUtc, Scope(actor, branchId), customerId, cancellationToken);
+        return new ArAgingSummaryDto(asOfUtc, rows,
+            rows.Sum(x => x.Current), rows.Sum(x => x.Days1To30), rows.Sum(x => x.Days31To60),
+            rows.Sum(x => x.Days61To90), rows.Sum(x => x.Over90), rows.Sum(x => x.Total));
+    }
+
+    public async Task<ArAgingDetailDto> GetArAgingDetailAsync(Guid actorId, Guid customerId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsAgingReceivablesView, cancellationToken);
+        return await repository.GetArAgingDetailAsync(customerId, asOfUtc, Scope(actor, branchId), cancellationToken)
+            ?? throw new ResourceNotFoundException("Customer was not found.");
+    }
+
+    public async Task<ApAgingSummaryDto> GetApAgingSummaryAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsAgingPayablesView, cancellationToken);
+        var rows = await repository.GetApAgingSummaryAsync(asOfUtc, Scope(actor, branchId), supplierId, cancellationToken);
+        return new ApAgingSummaryDto(asOfUtc, rows,
+            rows.Sum(x => x.Current), rows.Sum(x => x.Days1To30), rows.Sum(x => x.Days31To60),
+            rows.Sum(x => x.Days61To90), rows.Sum(x => x.Over90), rows.Sum(x => x.Total));
+    }
+
+    public async Task<ApAgingDetailDto> GetApAgingDetailAsync(Guid actorId, Guid supplierId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsAgingPayablesView, cancellationToken);
+        return await repository.GetApAgingDetailAsync(supplierId, asOfUtc, Scope(actor, branchId), cancellationToken)
+            ?? throw new ResourceNotFoundException("Supplier was not found.");
+    }
+
     private static IReadOnlyList<FinancialStatementRowDto> StatementRows(IEnumerable<TrialBalanceRowDto> rows) =>
         rows.Select(x => new FinancialStatementRowDto(x.ChartOfAccountId, x.AccountCode, x.AccountName,
             x.AccountType is AccountType.Asset or AccountType.CostOfSales or AccountType.Expense

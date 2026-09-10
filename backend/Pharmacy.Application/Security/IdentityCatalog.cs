@@ -84,6 +84,12 @@ public static class PermissionCatalog
     public const string AccountsCoaManage = "accounts.coa.manage";
     public const string AccountsJournalView = "accounts.journal.view";
     public const string AccountsJournalPost = "accounts.journal.post";
+    public const string AccountsAgingReceivablesView = "accounts.aging.receivables.view";
+    public const string AccountsAgingPayablesView = "accounts.aging.payables.view";
+    public const string AccountsVoucherView = "accounts.voucher.view";
+    public const string AccountsVoucherCreate = "accounts.voucher.create";
+    public const string AccountsVoucherPost = "accounts.voucher.post";
+    public const string AccountsVoucherReverse = "accounts.voucher.reverse";
     public const string ExpensesView = "expenses.view";
     public const string ExpensesCreate = "expenses.create";
     public const string ExpensesPost = "expenses.post";
@@ -133,6 +139,8 @@ public static class PermissionCatalog
         CashierShiftReconcile, CashierShiftDrawerAdjust,
         AccountsView, AccountsManage, AccountsCoaView, AccountsCoaManage,
         AccountsJournalView, AccountsJournalPost,
+        AccountsAgingReceivablesView, AccountsAgingPayablesView,
+        AccountsVoucherView, AccountsVoucherCreate, AccountsVoucherPost, AccountsVoucherReverse,
         ExpensesView, ExpensesCreate, ExpensesPost,
         FinanceLedgerView, FinanceIncomeCreate, FinanceTransfer, FinanceAdjust,
         ReportsView, ReportsSales, ReportsPurchases, ReportsInventory, ReportsFinancial,

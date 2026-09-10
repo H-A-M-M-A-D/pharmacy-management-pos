@@ -13,6 +13,8 @@ public interface ISupplierRepository
     Task<bool> NormalizedNameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task AddSupplierAsync(Supplier supplier, CancellationToken cancellationToken = default);
     Task AddLedgerEntryAsync(SupplierLedgerEntry entry, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OpenPayableDto>> GetOpenPayablesAsync(Guid supplierId, Guid? branchId, CancellationToken cancellationToken = default);
+    Task AddPaymentAllocationAsync(SupplierPaymentAllocation allocation, CancellationToken cancellationToken = default);
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
     Task<PagedResult<SupplierListItemDto>> ListSuppliersAsync(SupplierListQuery query, CancellationToken cancellationToken = default);
     Task<SupplierDetailsDto?> GetSupplierDetailsAsync(Guid supplierId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);

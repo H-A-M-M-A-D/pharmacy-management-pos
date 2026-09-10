@@ -311,6 +311,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             var balance = await repository.GetCustomerBalanceAsync(customer.Id, sale.BranchId, ct);
             if (balance + sale.CreditAmount > customer.CreditLimit)
                 throw new ResourceConflictException("This sale would exceed the customer's credit limit.");
+            sale.DueDateUtc = sale.PostedAtUtc!.Value.Date.AddDays(customer.CreditDays ?? 0);
             await repository.AddCustomerLedgerEntryAsync(new CustomerLedgerEntry
             {
                 CustomerId = customer.Id,

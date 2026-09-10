@@ -67,5 +67,21 @@ public sealed class AccountingController(IAccountingService accounting) : Contro
     public Task<BalanceSheetDto> BalanceSheet([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
         accounting.GetBalanceSheetAsync(UserId(), asOfUtc, branchId, ct);
 
+    [HttpGet("ar-aging"), HasPermission(PermissionCatalog.AccountsAgingReceivablesView)]
+    public Task<ArAgingSummaryDto> ArAging([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, [FromQuery] Guid? customerId, CancellationToken ct) =>
+        accounting.GetArAgingSummaryAsync(UserId(), asOfUtc, branchId, customerId, ct);
+
+    [HttpGet("ar-aging/detail"), HasPermission(PermissionCatalog.AccountsAgingReceivablesView)]
+    public Task<ArAgingDetailDto> ArAgingDetail([FromQuery] Guid customerId, [FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetArAgingDetailAsync(UserId(), customerId, asOfUtc, branchId, ct);
+
+    [HttpGet("ap-aging"), HasPermission(PermissionCatalog.AccountsAgingPayablesView)]
+    public Task<ApAgingSummaryDto> ApAging([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, [FromQuery] Guid? supplierId, CancellationToken ct) =>
+        accounting.GetApAgingSummaryAsync(UserId(), asOfUtc, branchId, supplierId, ct);
+
+    [HttpGet("ap-aging/detail"), HasPermission(PermissionCatalog.AccountsAgingPayablesView)]
+    public Task<ApAgingDetailDto> ApAgingDetail([FromQuery] Guid supplierId, [FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetApAgingDetailAsync(UserId(), supplierId, asOfUtc, branchId, ct);
+
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

@@ -34,6 +34,10 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
     public async Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default) => await context.Customers.AddAsync(customer, cancellationToken);
     public async Task AddPaymentAsync(CustomerPayment payment, CancellationToken cancellationToken = default) => await context.CustomerPayments.AddAsync(payment, cancellationToken);
     public async Task AddLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) => await context.CustomerLedgerEntries.AddAsync(entry, cancellationToken);
+    public async Task AddPaymentAllocationAsync(CustomerPaymentAllocation allocation, CancellationToken cancellationToken = default) => await context.CustomerPaymentAllocations.AddAsync(allocation, cancellationToken);
+
+    public Task<IReadOnlyList<OpenReceivableDto>> GetOpenReceivablesAsync(Guid customerId, Guid? branchId, CancellationToken cancellationToken = default) =>
+        OpenDocumentQueries.GetOpenReceivablesAsync(context, customerId, branchId, cancellationToken);
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
     public async Task<PagedResult<CustomerListItemDto>> ListCustomersAsync(CustomerListQuery query, CancellationToken cancellationToken = default)
@@ -94,7 +98,7 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         return new(customer.Id, customer.CustomerCode, customer.Name, customer.PhoneNumber, customer.AlternatePhone,
             customer.Email, customer.Address, customer.City, customer.BusinessName, customer.NTN,
             customer.OpeningBalance, customer.CreditLimit, customer.IsActive, balance > 0 ? balance : 0,
-            balance < 0 ? -balance : 0, payments, lastPayment, customer.CreatedAt, customer.UpdatedAt);
+            balance < 0 ? -balance : 0, payments, lastPayment, customer.CreatedAt, customer.UpdatedAt, customer.CreditDays);
     }
 
     public async Task<IReadOnlyList<CustomerLookupDto>> LookupCustomersAsync(string? search, bool activeOnly, Guid? branchId, CancellationToken cancellationToken = default)

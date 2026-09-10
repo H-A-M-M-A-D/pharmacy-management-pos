@@ -22,4 +22,9 @@ public interface IAccountingService
     Task<GeneralLedgerDto> GetGeneralLedgerAsync(Guid actorId, GeneralLedgerQuery query, CancellationToken cancellationToken = default);
     Task<ProfitAndLossDto> GetProfitAndLossAsync(Guid actorId, DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default);
     Task<BalanceSheetDto> GetBalanceSheetAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+
+    Task<ArAgingSummaryDto> GetArAgingSummaryAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? customerId, CancellationToken cancellationToken = default);
+    Task<ArAgingDetailDto> GetArAgingDetailAsync(Guid actorId, Guid customerId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<ApAgingSummaryDto> GetApAgingSummaryAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken = default);
+    Task<ApAgingDetailDto> GetApAgingDetailAsync(Guid actorId, Guid supplierId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
 }

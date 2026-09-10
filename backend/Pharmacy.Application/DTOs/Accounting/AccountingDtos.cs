@@ -66,3 +66,54 @@ public sealed record BalanceSheetDto(
     IReadOnlyList<FinancialStatementRowDto> Liabilities, decimal TotalLiabilities,
     IReadOnlyList<FinancialStatementRowDto> Equity, decimal AccountEquity,
     decimal CurrentPeriodEarnings, decimal TotalEquity, bool IsBalanced);
+
+/// <summary>
+/// Aging bucket relative to <see cref="AgingBucketExtensions.BucketFor"/>'s days-overdue calculation.
+/// Documents with no stored due date (legacy rows predating due-date tracking, and opening-balance
+/// rows which are always "due immediately") age from their own document date instead.
+/// </summary>
+public enum AgingBucket { Current = 0, Days1To30 = 1, Days31To60 = 2, Days61To90 = 3, Over90 = 4 }
+
+public static class AgingBucketExtensions
+{
+    public static AgingBucket BucketFor(int daysOverdue) => daysOverdue switch
+    {
+        <= 0 => AgingBucket.Current,
+        <= 30 => AgingBucket.Days1To30,
+        <= 60 => AgingBucket.Days31To60,
+        <= 90 => AgingBucket.Days61To90,
+        _ => AgingBucket.Over90
+    };
+}
+
+public sealed record ArAgingSummaryRowDto(
+    Guid CustomerId, string CustomerCode, string CustomerName,
+    decimal Current, decimal Days1To30, decimal Days31To60, decimal Days61To90, decimal Over90, decimal Total);
+
+public sealed record ArAgingSummaryDto(
+    DateTime AsOfUtc, IReadOnlyList<ArAgingSummaryRowDto> Rows,
+    decimal Current, decimal Days1To30, decimal Days31To60, decimal Days61To90, decimal Over90, decimal Total);
+
+public sealed record ArAgingDetailRowDto(
+    Guid SaleId, string? InvoiceNumber, DateOnly DocumentDate, DateTime? DueDateUtc,
+    decimal OriginalAmount, decimal SettledAmount, decimal Outstanding, int DaysOverdue, AgingBucket Bucket, bool IsOpeningBalance);
+
+public sealed record ArAgingDetailDto(
+    DateTime AsOfUtc, Guid CustomerId, string CustomerCode, string CustomerName,
+    IReadOnlyList<ArAgingDetailRowDto> Rows, decimal Total);
+
+public sealed record ApAgingSummaryRowDto(
+    Guid SupplierId, string SupplierName,
+    decimal Current, decimal Days1To30, decimal Days31To60, decimal Days61To90, decimal Over90, decimal Total);
+
+public sealed record ApAgingSummaryDto(
+    DateTime AsOfUtc, IReadOnlyList<ApAgingSummaryRowDto> Rows,
+    decimal Current, decimal Days1To30, decimal Days31To60, decimal Days61To90, decimal Over90, decimal Total);
+
+public sealed record ApAgingDetailRowDto(
+    Guid GoodsReceiptId, string? GrnNumber, DateOnly DocumentDate, DateOnly? DueDate,
+    decimal OriginalAmount, decimal SettledAmount, decimal Outstanding, int DaysOverdue, AgingBucket Bucket, bool IsOpeningBalance);
+
+public sealed record ApAgingDetailDto(
+    DateTime AsOfUtc, Guid SupplierId, string SupplierName,
+    IReadOnlyList<ApAgingDetailRowDto> Rows, decimal Total);

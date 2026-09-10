@@ -10,6 +10,7 @@ public class Sale : Entity
     public string? HoldNumber { get; set; }
     public SaleStatus Status { get; set; } = SaleStatus.Held;
     public DateTime? PostedAtUtc { get; set; }
+    public DateTime? DueDateUtc { get; set; }
     public Guid CashierUserId { get; set; }
     public User? CashierUser { get; set; }
     public Guid? CustomerId { get; set; }

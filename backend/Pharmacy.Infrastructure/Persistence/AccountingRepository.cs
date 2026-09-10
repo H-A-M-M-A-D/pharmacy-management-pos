@@ -159,6 +159,155 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
     private static decimal Delta(NormalBalance normalBalance, decimal debit, decimal credit) =>
         normalBalance == NormalBalance.Debit ? debit - credit : credit - debit;
 
+    public async Task<IReadOnlyList<ArAgingSummaryRowDto>> GetArAgingSummaryAsync(DateTime asOfUtc, Guid? branchId, Guid? customerId, CancellationToken cancellationToken = default)
+    {
+        var rows = await ComputeArAgingRowsAsync(asOfUtc, branchId, customerId, cancellationToken);
+        return rows.GroupBy(x => x.CustomerId).Select(g =>
+        {
+            var first = g.First();
+            decimal Sum(AgingBucket b) => g.Where(x => x.Row.Bucket == b).Sum(x => x.Row.Outstanding);
+            return new ArAgingSummaryRowDto(g.Key, first.CustomerCode, first.CustomerName,
+                Sum(AgingBucket.Current), Sum(AgingBucket.Days1To30), Sum(AgingBucket.Days31To60),
+                Sum(AgingBucket.Days61To90), Sum(AgingBucket.Over90), g.Sum(x => x.Row.Outstanding));
+        }).Where(x => x.Total != 0).OrderBy(x => x.CustomerName).ToList();
+    }
+
+    public async Task<ArAgingDetailDto?> GetArAgingDetailAsync(Guid customerId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var customer = await context.Customers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
+        if (customer is null) return null;
+        var rows = await ComputeArAgingRowsAsync(asOfUtc, branchId, customerId, cancellationToken);
+        var detailRows = rows.Select(x => x.Row).OrderBy(x => x.DueDateUtc ?? DateTime.MaxValue).ThenBy(x => x.DocumentDate).ToList();
+        return new ArAgingDetailDto(asOfUtc, customerId, customer.CustomerCode, customer.Name, detailRows, detailRows.Sum(x => x.Outstanding));
+    }
+
+    private async Task<List<(Guid CustomerId, string CustomerCode, string CustomerName, ArAgingDetailRowDto Row)>> ComputeArAgingRowsAsync(
+        DateTime asOfUtc, Guid? branchId, Guid? customerId, CancellationToken cancellationToken)
+    {
+        var asOfDate = DateOnly.FromDateTime(asOfUtc);
+        var sales = await context.Sales.AsNoTracking()
+            .Where(s => s.CustomerId != null && s.Status == SaleStatus.Posted && s.CreditAmount > 0 && s.PostedAtUtc <= asOfUtc)
+            .Where(s => !branchId.HasValue || s.BranchId == branchId)
+            .Where(s => !customerId.HasValue || s.CustomerId == customerId)
+            .Select(s => new { s.Id, s.CustomerId, s.BranchId, s.InvoiceNumber, s.PostedAtUtc, s.DueDateUtc, s.CreditAmount })
+            .ToListAsync(cancellationToken);
+        var saleIds = sales.Select(s => s.Id).ToList();
+        var allocatedMap = saleIds.Count == 0 ? new Dictionary<Guid, decimal>() : (await context.CustomerPaymentAllocations.AsNoTracking()
+            .Where(a => saleIds.Contains(a.SaleId) && a.AllocatedAtUtc <= asOfUtc)
+            .GroupBy(a => a.SaleId).Select(g => new { SaleId = g.Key, Total = g.Sum(x => x.AllocatedAmount) })
+            .ToListAsync(cancellationToken)).ToDictionary(x => x.SaleId, x => x.Total);
+        var returnMap = saleIds.Count == 0 ? new Dictionary<Guid, decimal>() : (await context.SalesReturns.AsNoTracking()
+            .Where(r => saleIds.Contains(r.OriginalSaleId) && r.PostedAtUtc <= asOfUtc)
+            .GroupBy(r => r.OriginalSaleId).Select(g => new { SaleId = g.Key, Total = g.Sum(x => x.CustomerCreditReductionAmount) })
+            .ToListAsync(cancellationToken)).ToDictionary(x => x.SaleId, x => x.Total);
+
+        var result = new List<(Guid CustomerId, string CustomerCode, string CustomerName, ArAgingDetailRowDto Row)>();
+        foreach (var s in sales)
+        {
+            var settled = allocatedMap.GetValueOrDefault(s.Id) + returnMap.GetValueOrDefault(s.Id);
+            var outstanding = decimal.Round(s.CreditAmount - settled, 2);
+            if (outstanding <= 0) continue;
+            var documentDate = DateOnly.FromDateTime(s.PostedAtUtc!.Value);
+            var dueDate = s.DueDateUtc ?? s.PostedAtUtc.Value;
+            var daysOverdue = asOfDate.DayNumber - DateOnly.FromDateTime(dueDate).DayNumber;
+            var row = new ArAgingDetailRowDto(s.Id, s.InvoiceNumber, documentDate, s.DueDateUtc, s.CreditAmount, settled, outstanding, daysOverdue, AgingBucketExtensions.BucketFor(daysOverdue), false);
+            result.Add((s.CustomerId!.Value, string.Empty, string.Empty, row));
+        }
+
+        var openings = await context.CustomerLedgerEntries.AsNoTracking()
+            .Where(e => e.EntryType == CustomerLedgerEntryType.OpeningBalance && e.Amount > 0 && e.EntryDate <= asOfDate)
+            .Where(e => !branchId.HasValue || e.BranchId == branchId)
+            .Where(e => !customerId.HasValue || e.CustomerId == customerId)
+            .Select(e => new { e.Id, e.CustomerId, e.EntryDate, e.Amount })
+            .ToListAsync(cancellationToken);
+        foreach (var o in openings)
+        {
+            var daysOverdue = asOfDate.DayNumber - o.EntryDate.DayNumber;
+            var row = new ArAgingDetailRowDto(o.Id, "Opening Balance", o.EntryDate, o.EntryDate.ToDateTime(TimeOnly.MinValue), o.Amount, 0, o.Amount, daysOverdue, AgingBucketExtensions.BucketFor(daysOverdue), true);
+            result.Add((o.CustomerId, string.Empty, string.Empty, row));
+        }
+
+        if (result.Count == 0) return [];
+        var allCustomerIds = result.Select(x => x.CustomerId).Distinct().ToList();
+        var customerMap = (await context.Customers.AsNoTracking().Where(c => allCustomerIds.Contains(c.Id))
+            .Select(c => new { c.Id, c.CustomerCode, c.Name }).ToListAsync(cancellationToken)).ToDictionary(c => c.Id);
+        return result.Select(x => (x.CustomerId, customerMap[x.CustomerId].CustomerCode, customerMap[x.CustomerId].Name, x.Row)).ToList();
+    }
+
+    public async Task<IReadOnlyList<ApAgingSummaryRowDto>> GetApAgingSummaryAsync(DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken = default)
+    {
+        var rows = await ComputeApAgingRowsAsync(asOfUtc, branchId, supplierId, cancellationToken);
+        return rows.GroupBy(x => x.SupplierId).Select(g =>
+        {
+            var first = g.First();
+            decimal Sum(AgingBucket b) => g.Where(x => x.Row.Bucket == b).Sum(x => x.Row.Outstanding);
+            return new ApAgingSummaryRowDto(g.Key, first.SupplierName,
+                Sum(AgingBucket.Current), Sum(AgingBucket.Days1To30), Sum(AgingBucket.Days31To60),
+                Sum(AgingBucket.Days61To90), Sum(AgingBucket.Over90), g.Sum(x => x.Row.Outstanding));
+        }).Where(x => x.Total != 0).OrderBy(x => x.SupplierName).ToList();
+    }
+
+    public async Task<ApAgingDetailDto?> GetApAgingDetailAsync(Guid supplierId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var supplier = await context.Suppliers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == supplierId, cancellationToken);
+        if (supplier is null) return null;
+        var rows = await ComputeApAgingRowsAsync(asOfUtc, branchId, supplierId, cancellationToken);
+        var detailRows = rows.Select(x => x.Row).OrderBy(x => x.DueDate ?? DateOnly.MaxValue).ThenBy(x => x.DocumentDate).ToList();
+        return new ApAgingDetailDto(asOfUtc, supplierId, supplier.Name, detailRows, detailRows.Sum(x => x.Outstanding));
+    }
+
+    private async Task<List<(Guid SupplierId, string SupplierName, ApAgingDetailRowDto Row)>> ComputeApAgingRowsAsync(
+        DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken)
+    {
+        var asOfDate = DateOnly.FromDateTime(asOfUtc);
+        var receipts = await context.GoodsReceipts.AsNoTracking()
+            .Where(r => r.Status == GoodsReceiptStatus.Posted && r.NetTotal > 0 && r.ReceiptDate <= asOfDate)
+            .Where(r => !branchId.HasValue || r.BranchId == branchId)
+            .Where(r => !supplierId.HasValue || r.SupplierId == supplierId)
+            .Select(r => new { r.Id, r.SupplierId, r.BranchId, r.GrnNumber, r.ReceiptDate, r.DueDate, r.NetTotal })
+            .ToListAsync(cancellationToken);
+        var receiptIds = receipts.Select(r => r.Id).ToList();
+        var allocatedMap = receiptIds.Count == 0 ? new Dictionary<Guid, decimal>() : (await context.SupplierPaymentAllocations.AsNoTracking()
+            .Where(a => receiptIds.Contains(a.GoodsReceiptId) && a.AllocatedAtUtc <= asOfUtc)
+            .GroupBy(a => a.GoodsReceiptId).Select(g => new { GoodsReceiptId = g.Key, Total = g.Sum(x => x.AllocatedAmount) })
+            .ToListAsync(cancellationToken)).ToDictionary(x => x.GoodsReceiptId, x => x.Total);
+        var returnMap = receiptIds.Count == 0 ? new Dictionary<Guid, decimal>() : (await context.PurchaseReturns.AsNoTracking()
+            .Where(r => receiptIds.Contains(r.OriginalGoodsReceiptId) && r.PostedAtUtc <= asOfUtc)
+            .GroupBy(r => r.OriginalGoodsReceiptId).Select(g => new { GoodsReceiptId = g.Key, Total = g.Sum(x => x.NetSupplierCredit) })
+            .ToListAsync(cancellationToken)).ToDictionary(x => x.GoodsReceiptId, x => x.Total);
+
+        var result = new List<(Guid SupplierId, string SupplierName, ApAgingDetailRowDto Row)>();
+        foreach (var r in receipts)
+        {
+            var settled = allocatedMap.GetValueOrDefault(r.Id) + returnMap.GetValueOrDefault(r.Id);
+            var outstanding = decimal.Round(r.NetTotal - settled, 2);
+            if (outstanding <= 0) continue;
+            var dueDate = r.DueDate ?? r.ReceiptDate;
+            var daysOverdue = asOfDate.DayNumber - dueDate.DayNumber;
+            var row = new ApAgingDetailRowDto(r.Id, r.GrnNumber, r.ReceiptDate, r.DueDate, r.NetTotal, settled, outstanding, daysOverdue, AgingBucketExtensions.BucketFor(daysOverdue), false);
+            result.Add((r.SupplierId, string.Empty, row));
+        }
+
+        var openings = await context.SupplierLedgerEntries.AsNoTracking()
+            .Where(e => e.EntryType == SupplierLedgerEntryType.OpeningBalance && e.Amount > 0 && e.EntryDate <= asOfDate)
+            .Where(e => !branchId.HasValue || e.BranchId == branchId)
+            .Where(e => !supplierId.HasValue || e.SupplierId == supplierId)
+            .Select(e => new { e.Id, e.SupplierId, e.EntryDate, e.Amount })
+            .ToListAsync(cancellationToken);
+        foreach (var o in openings)
+        {
+            var daysOverdue = asOfDate.DayNumber - o.EntryDate.DayNumber;
+            var row = new ApAgingDetailRowDto(o.Id, "Opening Balance", o.EntryDate, o.EntryDate, o.Amount, 0, o.Amount, daysOverdue, AgingBucketExtensions.BucketFor(daysOverdue), true);
+            result.Add((o.SupplierId, string.Empty, row));
+        }
+
+        if (result.Count == 0) return [];
+        var allSupplierIds = result.Select(x => x.SupplierId).Distinct().ToList();
+        var supplierMap = (await context.Suppliers.AsNoTracking().Where(s => allSupplierIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Name }).ToListAsync(cancellationToken)).ToDictionary(s => s.Id);
+        return result.Select(x => (x.SupplierId, supplierMap[x.SupplierId].Name, x.Row)).ToList();
+    }
+
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
     public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)

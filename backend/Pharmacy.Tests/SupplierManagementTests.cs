@@ -151,6 +151,8 @@ public sealed class SupplierManagementTests
         public readonly User Actor;
         public readonly List<SupplierLedgerEntry> Ledger = [];
         public readonly List<AuditLog> Audits = [];
+        public readonly List<SupplierPaymentAllocation> Allocations = [];
+        public readonly List<OpenPayableDto> OpenPayables = [];
         public readonly FakeJournalPostingService Journal = new();
         public Supplier? Supplier;
         public bool NameExists;
@@ -177,6 +179,9 @@ public sealed class SupplierManagementTests
         public Task<bool> NormalizedNameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) => Task.FromResult(NameExists);
         public Task AddSupplierAsync(Supplier supplier, CancellationToken cancellationToken = default) { Supplier = supplier; return Task.CompletedTask; }
         public Task AddLedgerEntryAsync(SupplierLedgerEntry entry, CancellationToken cancellationToken = default) { Ledger.Add(entry); return Task.CompletedTask; }
+        public Task<IReadOnlyList<OpenPayableDto>> GetOpenPayablesAsync(Guid supplierId, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OpenPayableDto>>(OpenPayables.Where(x => x.SupplierId == supplierId && (!branchId.HasValue || x.BranchId == branchId)).ToList());
+        public Task AddPaymentAllocationAsync(SupplierPaymentAllocation allocation, CancellationToken cancellationToken = default) { Allocations.Add(allocation); return Task.CompletedTask; }
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task<PagedResult<SupplierListItemDto>> ListSuppliersAsync(SupplierListQuery query, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<SupplierListItemDto>([], query.Page, query.PageSize, 0));
         public Task<SupplierDetailsDto?> GetSupplierDetailsAsync(Guid supplierId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult<SupplierDetailsDto?>(Supplier is null ? null : new(Supplier.Id, Supplier.Name, Supplier.ShortName, Supplier.ContactPerson, Supplier.PhoneNumber, Supplier.AlternatePhone, Supplier.WhatsApp, Supplier.Email, Supplier.Address, Supplier.City, Supplier.TaxNumber, Supplier.STRN, Supplier.OpeningBalance, Supplier.CreditLimit, Supplier.PaymentTermsDays, Supplier.IsActive, Balance, Ledger.Where(x => x.EntryType == SupplierLedgerEntryType.Payment).Sum(x => -x.Amount), null, Supplier.CreatedAt, Supplier.UpdatedAt));

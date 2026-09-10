@@ -23,6 +23,10 @@ public sealed class SupplierRepository(PharmacyDbContext context) : ISupplierRep
         context.Suppliers.AnyAsync(x => x.NormalizedName == normalizedName && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
     public async Task AddSupplierAsync(Supplier supplier, CancellationToken cancellationToken = default) => await context.Suppliers.AddAsync(supplier, cancellationToken);
     public async Task AddLedgerEntryAsync(SupplierLedgerEntry entry, CancellationToken cancellationToken = default) => await context.SupplierLedgerEntries.AddAsync(entry, cancellationToken);
+    public async Task AddPaymentAllocationAsync(SupplierPaymentAllocation allocation, CancellationToken cancellationToken = default) => await context.SupplierPaymentAllocations.AddAsync(allocation, cancellationToken);
+
+    public Task<IReadOnlyList<OpenPayableDto>> GetOpenPayablesAsync(Guid supplierId, Guid? branchId, CancellationToken cancellationToken = default) =>
+        OpenDocumentQueries.GetOpenPayablesAsync(context, supplierId, branchId, cancellationToken);
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
     public async Task<PagedResult<SupplierListItemDto>> ListSuppliersAsync(SupplierListQuery query, CancellationToken cancellationToken = default)

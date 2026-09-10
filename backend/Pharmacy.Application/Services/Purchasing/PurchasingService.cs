@@ -254,6 +254,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
             receipt.NetTotal = Money(receipt.NetTotal);
             if (receipt.NetTotal > 0)
             {
+                receipt.DueDate = receipt.ReceiptDate.AddDays(supplier.PaymentTermsDays ?? 0);
                 await repository.AddSupplierLedgerEntryAsync(new SupplierLedgerEntry
                 {
                     SupplierId = supplier.Id,

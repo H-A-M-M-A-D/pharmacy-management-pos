@@ -17,6 +17,8 @@ public interface ICustomerRepository
     Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default);
     Task AddPaymentAsync(CustomerPayment payment, CancellationToken cancellationToken = default);
     Task AddLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OpenReceivableDto>> GetOpenReceivablesAsync(Guid customerId, Guid? branchId, CancellationToken cancellationToken = default);
+    Task AddPaymentAllocationAsync(CustomerPaymentAllocation allocation, CancellationToken cancellationToken = default);
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
     Task<PagedResult<CustomerListItemDto>> ListCustomersAsync(CustomerListQuery query, CancellationToken cancellationToken = default);
     Task<CustomerDetailsDto?> GetCustomerDetailsAsync(Guid customerId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);

@@ -14,6 +14,7 @@ public class GoodsReceipt : Entity
     public string? SupplierInvoiceNumber { get; set; }
     public string? NormalizedSupplierInvoiceNumber { get; set; }
     public DateOnly ReceiptDate { get; set; }
+    public DateOnly? DueDate { get; set; }
     public GoodsReceiptStatus Status { get; set; } = GoodsReceiptStatus.Posted;
     public decimal Subtotal { get; set; }
     public decimal DiscountTotal { get; set; }

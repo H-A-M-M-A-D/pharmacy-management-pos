@@ -64,6 +64,10 @@ public class PharmacyDbContext : DbContext
     public DbSet<AccountMapping> AccountMappings { get; set; } = null!;
     public DbSet<JournalEntry> JournalEntries { get; set; } = null!;
     public DbSet<JournalEntryLine> JournalEntryLines { get; set; } = null!;
+    public DbSet<CustomerPaymentAllocation> CustomerPaymentAllocations { get; set; } = null!;
+    public DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; set; } = null!;
+    public DbSet<Voucher> Vouchers { get; set; } = null!;
+    public DbSet<VoucherLine> VoucherLines { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -430,6 +434,12 @@ public class PharmacyDbContext : DbContext
         modelBuilder.HasSequence<long>("ExpenseNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("OtherIncomeNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("FinancialTransferNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("CashReceiptVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("CashPaymentVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("BankReceiptVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("BankPaymentVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("ContraVoucherNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("JournalVoucherNumberSequence").StartsAt(1);
 
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
@@ -480,6 +490,10 @@ public class PharmacyDbContext : DbContext
         ConfigureFinancialTransfer(modelBuilder);
         ConfigureSystemSetting(modelBuilder);
         ConfigureBackupRecord(modelBuilder);
+        ConfigureCustomerPaymentAllocation(modelBuilder);
+        ConfigureSupplierPaymentAllocation(modelBuilder);
+        ConfigureVoucher(modelBuilder);
+        ConfigureVoucherLine(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -971,6 +985,85 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
     }
 
+    private void ConfigureCustomerPaymentAllocation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerPaymentAllocation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AllocatedAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.CustomerPaymentId);
+        entity.HasIndex(e => e.SaleId);
+        entity.HasIndex(e => new { e.CustomerId, e.BranchId });
+        entity.ToTable(table => table.HasCheckConstraint("CK_CustomerPaymentAllocations_Amount_Positive", "\"AllocatedAmount\" > 0"));
+        entity.HasOne(e => e.CustomerPayment).WithMany().HasForeignKey(e => e.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Sale).WithMany().HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSupplierPaymentAllocation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SupplierPaymentAllocation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AllocatedAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SupplierLedgerEntryId);
+        entity.HasIndex(e => e.GoodsReceiptId);
+        entity.HasIndex(e => new { e.SupplierId, e.BranchId });
+        entity.ToTable(table => table.HasCheckConstraint("CK_SupplierPaymentAllocations_Amount_Positive", "\"AllocatedAmount\" > 0"));
+        entity.HasOne(e => e.SupplierLedgerEntry).WithMany().HasForeignKey(e => e.SupplierLedgerEntryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.GoodsReceipt).WithMany().HasForeignKey(e => e.GoodsReceiptId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureVoucher(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<Voucher>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.VoucherNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Reference).HasMaxLength(100);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.VoucherNumber).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.VoucherDateUtc });
+        entity.HasIndex(e => new { e.Type, e.Status });
+        entity.HasIndex(e => e.CustomerId);
+        entity.HasIndex(e => e.SupplierId);
+        entity.HasIndex(e => e.JournalEntryId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Vouchers_Type", "\"Type\" BETWEEN 1 AND 6");
+            table.HasCheckConstraint("CK_Vouchers_Status", "\"Status\" BETWEEN 1 AND 3");
+            table.HasCheckConstraint("CK_Vouchers_Posted_HasJournalEntry", "(\"Status\" <> 2) OR (\"JournalEntryId\" IS NOT NULL AND \"PostedByUserId\" IS NOT NULL AND \"PostedAtUtc\" IS NOT NULL)");
+        });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ContraToChartOfAccount).WithMany().HasForeignKey(e => e.ContraToChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PostedByUser).WithMany().HasForeignKey(e => e.PostedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.JournalEntry).WithMany().HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReversalOfVoucher).WithMany().HasForeignKey(e => e.ReversalOfVoucherId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureVoucherLine(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<VoucherLine>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Debit).HasPrecision(18, 2);
+        entity.Property(e => e.Credit).HasPrecision(18, 2);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.VoucherId);
+        entity.ToTable(table => table.HasCheckConstraint("CK_VoucherLines_Amounts",
+            "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)"));
+        entity.HasOne(e => e.Voucher).WithMany(v => v.Lines).HasForeignKey(e => e.VoucherId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+    }
+
     private void ConfigureAuditLog(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<AuditLog>();
@@ -1055,6 +1148,7 @@ public class PharmacyDbContext : DbContext
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Customers_CreditLimit_NonNegative", "\"CreditLimit\" >= 0");
+            table.HasCheckConstraint("CK_Customers_CreditDays_NonNegative", "\"CreditDays\" IS NULL OR \"CreditDays\" >= 0");
         });
     }
 
@@ -1176,6 +1270,7 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.SupplierInvoiceNumber).HasMaxLength(100);
         entity.Property(e => e.NormalizedSupplierInvoiceNumber).HasMaxLength(100);
         entity.Property(e => e.ReceiptDate).HasColumnType("date").IsRequired();
+        entity.Property(e => e.DueDate).HasColumnType("date");
         entity.Property(e => e.Subtotal).HasPrecision(18, 2);
         entity.Property(e => e.DiscountTotal).HasPrecision(18, 2);
         entity.Property(e => e.TaxTotal).HasPrecision(18, 2);
@@ -1186,6 +1281,7 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.BranchId, e.ReceiptDate });
         entity.HasIndex(e => new { e.SupplierId, e.ReceiptDate });
         entity.HasIndex(e => new { e.Status, e.ReceiptDate });
+        entity.HasIndex(e => e.DueDate);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_GoodsReceipts_Status", "\"Status\" IN (1, 2, 3)");
@@ -1313,6 +1409,7 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.CustomerId, e.PostedAtUtc });
         entity.HasIndex(e => new { e.Status, e.CreatedAt });
         entity.HasIndex(e => e.CustomerPhone);
+        entity.HasIndex(e => e.DueDateUtc);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Sales_Status", "\"Status\" IN (1, 2, 3)");

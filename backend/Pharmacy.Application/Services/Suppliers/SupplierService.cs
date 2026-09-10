@@ -6,6 +6,7 @@ using Pharmacy.Application.DTOs.Suppliers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Accounting.PaymentAllocation;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Suppliers;
@@ -163,6 +164,8 @@ public sealed class SupplierService(ISupplierRepository repository, IJournalPost
                 FinancialAccountId = request.FinancialAccountId
             };
             await repository.AddLedgerEntryAsync(entry, ct);
+            await SupplierPaymentAllocator.AllocateFifoAsync(repository.GetOpenPayablesAsync, repository.AddPaymentAllocationAsync,
+                request.SupplierId, request.BranchId, entry.Id, request.Amount, actorId, timeProvider.GetUtcNow().UtcDateTime, ct);
             await PostSupplierPaymentJournalAsync(actor, request, entry, ct);
             await Audit(actorId, "SupplierPaymentRecorded", "Supplier", request.SupplierId, null, new { request.SupplierId, request.BranchId, SupplierLedgerEntryType.Payment, Amount = -request.Amount, request.PaymentDate }, ct);
             await repository.SaveChangesAsync(ct);

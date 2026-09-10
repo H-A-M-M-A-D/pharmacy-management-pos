@@ -228,6 +228,15 @@ public sealed class AccountingManagementTests
             query.ChartOfAccountId, CashAccount.Code, CashAccount.Name, CashAccount.NormalBalance, 0, 0, 0, 0,
             new PagedResult<GeneralLedgerLineDto>([], query.Page, query.PageSize, 0)));
 
+        public Task<IReadOnlyList<ArAgingSummaryRowDto>> GetArAgingSummaryAsync(DateTime asOfUtc, Guid? branchId, Guid? customerId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ArAgingSummaryRowDto>>([]);
+        public Task<ArAgingDetailDto?> GetArAgingDetailAsync(Guid customerId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ArAgingDetailDto?>(null);
+        public Task<IReadOnlyList<ApAgingSummaryRowDto>> GetApAgingSummaryAsync(DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ApAgingSummaryRowDto>>([]);
+        public Task<ApAgingDetailDto?> GetApAgingDetailAsync(Guid supplierId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ApAgingDetailDto?>(null);
+
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

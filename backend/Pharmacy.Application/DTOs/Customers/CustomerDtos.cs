@@ -7,12 +7,12 @@ public enum CustomerAdjustmentType { Debit, Credit }
 public sealed record CustomerRequest(
     string Name, string? PhoneNumber, string? AlternatePhone, string? Email,
     string? Address, string? City, string? BusinessName, string? NTN,
-    decimal OpeningBalance, decimal CreditLimit, bool IsActive = true);
+    decimal OpeningBalance, decimal CreditLimit, bool IsActive = true, int? CreditDays = null);
 
 public sealed record CustomerUpdateRequest(
     string Name, string? PhoneNumber, string? AlternatePhone, string? Email,
     string? Address, string? City, string? BusinessName, string? NTN,
-    decimal CreditLimit);
+    decimal CreditLimit, int? CreditDays = null);
 
 public sealed record CustomerListQuery(
     int Page = 1, int PageSize = 25, string? Search = null, bool? IsActive = null,
@@ -29,7 +29,16 @@ public sealed record CustomerDetailsDto(
     string? Email, string? Address, string? City, string? BusinessName, string? NTN,
     decimal OpeningBalance, decimal CreditLimit, bool IsActive,
     decimal OutstandingBalance, decimal AdvanceBalance, decimal TotalPayments,
-    DateTime? LastPaymentAtUtc, DateTime CreatedAt, DateTime UpdatedAt);
+    DateTime? LastPaymentAtUtc, DateTime CreatedAt, DateTime UpdatedAt, int? CreditDays = null);
+
+/// <summary>
+/// An open credit-sale document (an unsettled or partially settled invoice) used both by the
+/// default FIFO payment-allocation logic and by AR aging drill-down. Outstanding is always
+/// OriginalAmount minus allocated payments minus linked sales-return credit reductions.
+/// </summary>
+public sealed record OpenReceivableDto(
+    Guid SaleId, Guid CustomerId, Guid BranchId, string? InvoiceNumber,
+    DateOnly DocumentDate, DateTime? DueDateUtc, decimal OriginalAmount, decimal Outstanding);
 
 public sealed record CustomerLookupDto(
     Guid Id, string CustomerCode, string Name, string? PhoneNumber, decimal CreditLimit,

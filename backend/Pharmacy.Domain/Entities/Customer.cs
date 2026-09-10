@@ -16,6 +16,7 @@ public class Customer : Entity
     public string? NTN { get; set; }
     public decimal OpeningBalance { get; set; }
     public decimal CreditLimit { get; set; }
+    public int? CreditDays { get; set; }
     public bool IsActive { get; set; } = true;
     public ICollection<CustomerLedgerEntry> LedgerEntries { get; set; } = new List<CustomerLedgerEntry>();
     public ICollection<CustomerPayment> Payments { get; set; } = new List<CustomerPayment>();

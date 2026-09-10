@@ -6,6 +6,7 @@ using Pharmacy.Application.DTOs.Customers;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Accounting.PaymentAllocation;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Customers;
@@ -38,7 +39,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     public async Task<CustomerDetailsDto> CreateCustomerAsync(Guid actorId, CustomerRequest request, CancellationToken cancellationToken = default)
     {
         var actor = await Require(actorId, PermissionCatalog.CustomersCreate, cancellationToken);
-        Validate(request.Name, request.Email, request.CreditLimit);
+        Validate(request.Name, request.Email, request.CreditLimit, request.CreditDays);
         Customer? customer = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
@@ -56,6 +57,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
                 NTN = Clean(request.NTN),
                 OpeningBalance = Money(request.OpeningBalance),
                 CreditLimit = Money(request.CreditLimit),
+                CreditDays = request.CreditDays,
                 IsActive = request.IsActive
             };
             await repository.AddCustomerAsync(customer, ct);
@@ -85,7 +87,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     public async Task<CustomerDetailsDto> UpdateCustomerAsync(Guid actorId, Guid customerId, CustomerUpdateRequest request, CancellationToken cancellationToken = default)
     {
         await Require(actorId, PermissionCatalog.CustomersUpdate, cancellationToken);
-        Validate(request.Name, request.Email, request.CreditLimit);
+        Validate(request.Name, request.Email, request.CreditLimit, request.CreditDays);
         var customer = await RequiredCustomer(customerId, cancellationToken);
         var old = Values(customer);
         customer.Name = request.Name.Trim();
@@ -98,6 +100,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
         customer.BusinessName = Clean(request.BusinessName);
         customer.NTN = Clean(request.NTN);
         customer.CreditLimit = Money(request.CreditLimit);
+        customer.CreditDays = request.CreditDays;
         customer.UpdatedAt = UtcNow();
         await Audit(actorId, "CustomerUpdated", "Customer", customer.Id, old, Values(customer), cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
@@ -166,6 +169,8 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
                 Notes = payment.Notes,
                 CreatedByUserId = actorId
             }, ct);
+            await CustomerPaymentAllocator.AllocateFifoAsync(repository.GetOpenReceivablesAsync, repository.AddPaymentAllocationAsync,
+                request.CustomerId, request.BranchId, payment.Id, payment.Amount, actorId, payment.PaymentDateUtc, ct);
             await PostCustomerPaymentJournalAsync(actor, payment, ct);
             await Audit(actorId, "CustomerPaymentRecorded", "Customer", request.CustomerId, null, new { request.CustomerId, request.BranchId, payment.Amount, payment.PaymentMethod, payment.ReceiptNumber }, ct);
             await repository.SaveChangesAsync(ct);
@@ -276,12 +281,13 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
             throw new ForbiddenOperationException("You do not have access to this branch.");
     }
 
-    private static void Validate(string name, string? email, decimal creditLimit)
+    private static void Validate(string name, string? email, decimal creditLimit, int? creditDays = null)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length < 2) throw new RequestValidationException("Customer name is required.");
         if (!string.IsNullOrWhiteSpace(email) && !Regex.IsMatch(email.Trim(), @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
             throw new RequestValidationException("Enter a valid email address.");
         if (creditLimit < 0) throw new RequestValidationException("Credit limit cannot be negative.");
+        if (creditDays < 0) throw new RequestValidationException("Credit days cannot be negative.");
     }
 
     private DateOnly BusinessDate() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(UtcNow(), TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time")));
@@ -289,7 +295,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static decimal Money(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
-    private static object Values(Customer x) => new { x.CustomerCode, x.Name, x.PhoneNumber, x.AlternatePhone, x.Email, x.Address, x.City, x.BusinessName, x.NTN, x.OpeningBalance, x.CreditLimit, x.IsActive };
+    private static object Values(Customer x) => new { x.CustomerCode, x.Name, x.PhoneNumber, x.AlternatePhone, x.Email, x.Address, x.City, x.BusinessName, x.NTN, x.OpeningBalance, x.CreditLimit, x.CreditDays, x.IsActive };
     private Task Audit(Guid actor, string action, string type, Guid id, object? old, object? current, CancellationToken ct) => repository.AddAuditAsync(new AuditLog
     { UserId = actor, Action = action, EntityType = type, EntityId = id, OldValues = old is null ? null : JsonSerializer.Serialize(old), NewValues = current is null ? null : JsonSerializer.Serialize(current) }, ct);
     private static void ValidatePage(int page, int pageSize)

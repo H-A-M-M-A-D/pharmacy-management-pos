@@ -8,6 +8,7 @@ using Pharmacy.Api.Authorization;
 using Pharmacy.Api.Middleware;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Accounting.Vouchers;
 using Pharmacy.Application.Services.Auth;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Application.Services.Catalog;
@@ -76,6 +77,8 @@ builder.Services.AddScoped<ICashierShiftService, CashierShiftService>();
 builder.Services.AddScoped<IAccountingRepository, AccountingRepository>();
 builder.Services.AddScoped<IAccountingService, AccountingService>();
 builder.Services.AddScoped<IJournalPostingService, JournalPostingService>();
+builder.Services.AddScoped<IVoucherRepository, VoucherRepository>();
+builder.Services.AddScoped<IVoucherService, VoucherService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key not configured. Set Jwt__Key or a user secret.");

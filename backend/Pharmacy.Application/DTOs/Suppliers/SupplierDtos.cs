@@ -56,3 +56,12 @@ public sealed record SupplierPaymentRequest(
 public sealed record SupplierAdjustmentRequest(
     Guid SupplierId, Guid BranchId, SupplierAdjustmentType Type, decimal Amount,
     string Reason, string? Notes);
+
+/// <summary>
+/// An open goods-receipt (GRN) document used both by the default FIFO payment-allocation logic
+/// and by AP aging drill-down. Outstanding is always OriginalAmount minus allocated payments
+/// minus linked purchase-return credit reductions.
+/// </summary>
+public sealed record OpenPayableDto(
+    Guid GoodsReceiptId, Guid SupplierId, Guid BranchId, string GrnNumber,
+    DateOnly DocumentDate, DateOnly? DueDate, decimal OriginalAmount, decimal Outstanding);

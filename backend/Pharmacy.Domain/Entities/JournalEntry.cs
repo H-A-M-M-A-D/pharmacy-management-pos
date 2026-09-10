@@ -65,5 +65,11 @@ public enum JournalSourceType
     SupplierAdjustment = 15,
     FinancialAccountAdjustment = 16,
     CashierDrawerEntry = 17,
-    CashierShiftVariance = 18
+    CashierShiftVariance = 18,
+    CashReceiptVoucher = 19,
+    CashPaymentVoucher = 20,
+    BankReceiptVoucher = 21,
+    BankPaymentVoucher = 22,
+    ContraVoucher = 23,
+    JournalVoucher = 24
 }
