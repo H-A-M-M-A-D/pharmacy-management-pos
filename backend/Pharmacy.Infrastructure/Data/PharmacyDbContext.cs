@@ -17,6 +17,8 @@ public class PharmacyDbContext : DbContext
 
     // DbSet properties for all entities
     public DbSet<Branch> Branches { get; set; } = null!;
+    public DbSet<Godown> Godowns { get; set; } = null!;
+    public DbSet<UserGodown> UserGodowns { get; set; } = null!;
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<Role> Roles { get; set; } = null!;
     public DbSet<Permission> Permissions { get; set; } = null!;
@@ -443,6 +445,8 @@ public class PharmacyDbContext : DbContext
 
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
+        ConfigureGodown(modelBuilder);
+        ConfigureUserGodown(modelBuilder);
         ConfigureRole(modelBuilder);
         ConfigurePermission(modelBuilder);
         ConfigureRolePermission(modelBuilder);
@@ -511,6 +515,45 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => e.NormalizedCode).IsUnique();
         entity.HasIndex(e => e.IsActive);
+    }
+
+    private void ConfigureGodown(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<Godown>();
+
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Code).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.NormalizedCode).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).HasMaxLength(500);
+
+        entity.HasIndex(e => new { e.BranchId, e.NormalizedCode }).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.IsActive });
+        entity.HasIndex(e => e.BranchId).IsUnique().HasFilter("\"IsDefault\" = true").HasDatabaseName("IX_Godowns_BranchId_OneDefault");
+
+        entity.HasOne(e => e.Branch)
+            .WithMany(b => b.Godowns)
+            .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureUserGodown(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<UserGodown>();
+
+        entity.HasKey(e => e.Id);
+        entity.HasIndex(e => new { e.UserId, e.GodownId }).IsUnique();
+        entity.HasIndex(e => new { e.UserId, e.IsDefault });
+
+        entity.HasOne(e => e.User)
+            .WithMany(u => u.UserGodowns)
+            .HasForeignKey(e => e.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(e => e.Godown)
+            .WithMany(g => g.UserGodowns)
+            .HasForeignKey(e => e.GodownId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 
     private void ConfigureRole(ModelBuilder modelBuilder)
@@ -710,10 +753,11 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.ManufacturingDate).HasColumnType("date");
         entity.Property(e => e.ExpiryDate).HasColumnType("date").IsRequired();
 
-        entity.HasIndex(e => new { e.BranchId, e.ProductId, e.BatchNumber }).IsUnique();
+        entity.HasIndex(e => new { e.BranchId, e.GodownId, e.ProductId, e.BatchNumber }).IsUnique();
         entity.HasIndex(e => e.ExpiryDate);
         entity.HasIndex(e => new { e.BranchId, e.ExpiryDate });
         entity.HasIndex(e => new { e.BranchId, e.ProductId });
+        entity.HasIndex(e => new { e.BranchId, e.GodownId, e.ProductId });
         entity.HasIndex(e => new { e.ProductId, e.BatchNumber });
         entity.HasIndex(e => e.IsDisposed);
         entity.HasIndex(e => e.QuantityAvailable);
@@ -739,6 +783,11 @@ public class PharmacyDbContext : DbContext
             .WithMany(b => b.ProductBatches)
             .HasForeignKey(e => e.BranchId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        entity.HasOne(e => e.Godown)
+            .WithMany(g => g.ProductBatches)
+            .HasForeignKey(e => e.GodownId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureInventory(ModelBuilder modelBuilder)
@@ -751,6 +800,7 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.ProductBatchId }).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.ProductId });
+        entity.HasIndex(e => new { e.BranchId, e.GodownId, e.ProductId });
         entity.HasIndex(e => new { e.BranchId, e.ReorderLevel }).HasFilter("\"QuantityInStock\" < \"ReorderLevel\"");
         entity.ToTable(table =>
         {
@@ -762,6 +812,11 @@ public class PharmacyDbContext : DbContext
             .WithMany(b => b.Inventory)
             .HasForeignKey(e => e.BranchId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(e => e.Godown)
+            .WithMany(g => g.Inventory)
+            .HasForeignKey(e => e.GodownId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasOne(e => e.Product)
             .WithMany(p => p.Inventory)
@@ -786,6 +841,7 @@ public class PharmacyDbContext : DbContext
 
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.ProductBatchId });
         entity.HasIndex(e => new { e.BranchId, e.CreatedAt });
+        entity.HasIndex(e => new { e.BranchId, e.GodownId, e.CreatedAt });
         entity.HasIndex(e => new { e.BranchId, e.ProductId, e.CreatedAt });
         entity.HasIndex(e => new { e.ProductBatchId, e.CreatedAt });
         entity.HasIndex(e => new { e.MovementType, e.CreatedAt });
@@ -798,6 +854,11 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.Branch)
             .WithMany(b => b.StockMovements)
             .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        entity.HasOne(e => e.Godown)
+            .WithMany(g => g.StockMovements)
+            .HasForeignKey(e => e.GodownId)
             .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasOne(e => e.Product)
@@ -1289,6 +1350,7 @@ public class PharmacyDbContext : DbContext
         });
 
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.PurchaseOrder).WithMany(o => o.GoodsReceipts).HasForeignKey(e => e.PurchaseOrderId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ReceivedByUser).WithMany().HasForeignKey(e => e.ReceivedByUserId).OnDelete(DeleteBehavior.SetNull);
@@ -1358,6 +1420,7 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.OriginalGoodsReceipt).WithMany().HasForeignKey(e => e.OriginalGoodsReceiptId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ProcessedByUser).WithMany().HasForeignKey(e => e.ProcessedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 
@@ -1419,6 +1482,7 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_Sales_CreditRequiresCustomer", "\"CreditAmount\" = 0 OR \"CustomerId\" IS NOT NULL");
         });
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Customer).WithMany(c => c.Sales).HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -1496,6 +1560,7 @@ public class PharmacyDbContext : DbContext
         });
         entity.HasOne(e => e.OriginalSale).WithMany().HasForeignKey(e => e.OriginalSaleId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ProcessedByUser).WithMany().HasForeignKey(e => e.ProcessedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 

@@ -884,7 +884,8 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
   final _discount = TextEditingController(text: '0');
   final _tax = TextEditingController(text: '0');
   InventoryOptions? _options;
-  String? _branchId, _supplierId, _productId, _orderItemId, _error;
+  List<GodownLookup> _godowns = [];
+  String? _branchId, _supplierId, _productId, _orderItemId, _godownId, _error;
   bool _saving = false;
 
   double get _paidQty => double.tryParse(_paid.text) ?? 0;
@@ -916,6 +917,21 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         _productId = options.products.firstOrNull?.id;
       });
     }
+    await _reloadGodowns();
+  }
+
+  Future<void> _reloadGodowns() async {
+    if (_branchId == null) return;
+    final godowns = await widget.authState.myGodowns(branchId: _branchId);
+    if (!mounted) return;
+    setState(() {
+      _godowns = godowns;
+      _godownId = godowns.isEmpty
+          ? null
+          : godowns
+                .firstWhere((g) => g.isDefault, orElse: () => godowns.first)
+                .id;
+    });
   }
 
   @override
@@ -938,12 +954,28 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
                           '${widget.order!.orderNumber}: ${widget.order!.receivedQuantity}/${widget.order!.orderedQuantity} received',
                         ),
                       ),
-                    _lookup(
-                      'Branch',
-                      _branchId,
-                      _options!.branches,
-                      (v) => _branchId = v,
-                    ),
+                    _lookup('Branch', _branchId, _options!.branches, (v) {
+                      setState(() => _branchId = v);
+                      _reloadGodowns();
+                    }),
+                    if (_godowns.length > 1)
+                      _lookup(
+                        'Godown',
+                        _godownId,
+                        _godowns,
+                        (v) => setState(() => _godownId = v),
+                      )
+                    else if (_godowns.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'No godown is configured for this branch yet. Ask an administrator to set one up before receiving stock.',
+                            style: TextStyle(color: Colors.orange),
+                          ),
+                        ),
+                      ),
                     _lookup(
                       'Supplier',
                       _supplierId,
@@ -1081,6 +1113,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     setState(() => _saving = true);
     final body = {
       'branchId': _branchId,
+      'godownId': _godownId,
       'supplierId': _supplierId,
       'purchaseOrderId': widget.order?.id,
       'supplierInvoiceNumber': _invoice.text.trim().isEmpty

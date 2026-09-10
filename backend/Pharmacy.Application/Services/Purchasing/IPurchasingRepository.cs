@@ -12,7 +12,7 @@ public interface IPurchasingRepository
     Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default);
     Task<Supplier?> GetSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default);
     Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default);
-    Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid productId, string batchNumber, CancellationToken cancellationToken = default);
+    Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid? godownId, Guid productId, string batchNumber, CancellationToken cancellationToken = default);
     Task<Pharmacy.Domain.Entities.Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default);
     Task<PurchaseOrder?> GetPurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default);
     Task<GoodsReceipt?> GetGoodsReceiptAsync(Guid id, CancellationToken cancellationToken = default);

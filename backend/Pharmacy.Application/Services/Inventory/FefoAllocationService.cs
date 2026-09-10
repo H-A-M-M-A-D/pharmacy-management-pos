@@ -16,6 +16,7 @@ public interface IFefoAllocationService
         IEnumerable<ProductBatch> batches,
         Guid productId,
         Guid branchId,
+        Guid? godownId,
         int requestedQuantity,
         DateOnly saleDate,
         CancellationToken cancellationToken = default);
@@ -27,6 +28,7 @@ public sealed class FefoAllocationService : IFefoAllocationService
         IEnumerable<ProductBatch> batches,
         Guid productId,
         Guid branchId,
+        Guid? godownId,
         int requestedQuantity,
         DateOnly saleDate,
         CancellationToken cancellationToken = default)
@@ -39,9 +41,15 @@ public sealed class FefoAllocationService : IFefoAllocationService
         var remaining = requestedQuantity;
         var results = new List<FefoAllocationResult>();
 
+        // Godown scoping: a sale from a given godown must only ever consume batches
+        // physically stored in that same godown, even if another godown holds stock
+        // of the same product that expires sooner. Branches with no godowns configured
+        // (legacy data, or a fresh install before Godown Master is set up) fall back to
+        // the pre-multi-godown behaviour by matching on null == null.
         var eligible = batches
             .Where(b => b.ProductId == productId)
             .Where(b => b.BranchId == branchId)
+            .Where(b => b.GodownId == godownId)
             .Where(b => b.QuantityAvailable > 0)
             .Where(b => !b.IsDisposed)
             .Where(b => b.ExpiryDate >= saleDate)

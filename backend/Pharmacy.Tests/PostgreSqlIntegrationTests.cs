@@ -699,7 +699,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            48L,
+            54L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -962,13 +962,15 @@ public sealed class PostgreSqlIntegrationTests
 
     [PostgreSqlFact]
     [Trait("Category", "PostgreSQL")]
-    public async Task Batch_number_uniqueness_is_scoped_by_branch_and_product()
+    public async Task Batch_number_uniqueness_is_scoped_by_branch_godown_and_product()
     {
         await using var connection = await OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         var categoryId = Guid.NewGuid();
         var branchA = Guid.NewGuid();
         var branchB = Guid.NewGuid();
+        var godownA1 = Guid.NewGuid();
+        var godownA2 = Guid.NewGuid();
         var productA = Guid.NewGuid();
         var productB = Guid.NewGuid();
         var batchNumber = Unique("batch");
@@ -976,18 +978,23 @@ public sealed class PostgreSqlIntegrationTests
         await InsertCategoryAsync(connection, transaction, categoryId);
         await InsertBranchAsync(connection, transaction, branchA);
         await InsertBranchAsync(connection, transaction, branchB);
+        await InsertGodownAsync(connection, transaction, branchA, godownA1, isDefault: true);
+        await InsertGodownAsync(connection, transaction, branchA, godownA2);
         await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productA);
         await InsertProductAsync(connection, transaction, categoryId, Unique("sku"), null, productB);
-        await InsertBatchAsync(connection, transaction, branchA, productA, batchNumber);
+        await InsertBatchAsync(connection, transaction, branchA, productA, batchNumber, godownId: godownA1);
 
         await AssertDatabaseErrorAsync(
             connection,
             transaction,
             "duplicate_batch",
             PostgresErrorCodes.UniqueViolation,
-            () => InsertBatchAsync(connection, transaction, branchA, productA, batchNumber));
+            () => InsertBatchAsync(connection, transaction, branchA, productA, batchNumber, godownId: godownA1));
 
-        await InsertBatchAsync(connection, transaction, branchA, productB, batchNumber);
+        // Same batch number is a distinct, independently-tracked bucket in a different godown of the
+        // same branch, for a different product in the same branch+godown, or in a different branch.
+        await InsertBatchAsync(connection, transaction, branchA, productA, batchNumber, godownId: godownA2);
+        await InsertBatchAsync(connection, transaction, branchA, productB, batchNumber, godownId: godownA1);
         await InsertBatchAsync(connection, transaction, branchB, productA, batchNumber);
         await transaction.RollbackAsync();
     }
@@ -2555,7 +2562,7 @@ public sealed class PostgreSqlIntegrationTests
     }
 
     private static PurchasingService PurchasingServiceFor(PharmacyDbContext context) =>
-        new(new PurchasingRepository(context), JournalPostingFor(context), TimeProvider.System);
+        new(new PurchasingRepository(context), JournalPostingFor(context), new GodownAccessService(context), TimeProvider.System);
 
     private static FinanceService FinanceServiceFor(PharmacyDbContext context) =>
         new(new FinanceRepository(context), JournalPostingFor(context), TimeProvider.System);
@@ -2627,6 +2634,18 @@ public sealed class PostgreSqlIntegrationTests
             VALUES (@id, @code, upper(@code), @name, false, true, now(), now());
             """, ("id", id), ("code", Unique("branch")), ("name", Unique("branch")));
 
+    private static async Task InsertGodownAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid branchId,
+        Guid id,
+        bool isDefault = false) =>
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO "Godowns"
+                ("Id", "BranchId", "Code", "NormalizedCode", "Name", "IsDefault", "IsActive", "CreatedAt", "UpdatedAt")
+            VALUES (@id, @branchId, @code, upper(@code), @name, @isDefault, true, now(), now());
+            """, ("id", id), ("branchId", branchId), ("code", Unique("godown")), ("name", Unique("godown")), ("isDefault", isDefault));
+
     private static async Task InsertProductAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -2660,19 +2679,21 @@ public sealed class PostgreSqlIntegrationTests
         Guid branchId,
         Guid productId,
         string batchNumber,
-        Guid? id = null) =>
+        Guid? id = null,
+        Guid? godownId = null) =>
         await ExecuteAsync(connection, transaction, """
             INSERT INTO "ProductBatches"
-                ("Id", "ProductId", "BranchId", "BatchNumber", "ExpiryDate",
+                ("Id", "ProductId", "BranchId", "GodownId", "BatchNumber", "ExpiryDate",
                  "PurchasePrice", "RetailPrice", "QuantityReceived", "QuantityAvailable",
                  "IsDisposed", "CreatedAt", "UpdatedAt")
             VALUES
-                (@id, @productId, @branchId, @batchNumber, current_date + 365,
+                (@id, @productId, @branchId, @godownId, @batchNumber, current_date + 365,
                  10.00, 12.00, 100, 100, false, now(), now());
             """,
             ("id", id ?? Guid.NewGuid()),
             ("productId", productId),
             ("branchId", branchId),
+            ("godownId", godownId.HasValue ? godownId.Value : DBNull.Value),
             ("batchNumber", batchNumber));
 
     private static async Task InsertSupplierAsync(

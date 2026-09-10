@@ -278,6 +278,44 @@ class AuthState extends ChangeNotifier {
     String branchId,
     DateTime date,
   ) => _api.dailyCashierClosingSummary(_requiredToken, branchId, date);
+  Future<PagedGodowns> listGodowns({
+    String? branchId,
+    String? search,
+    bool? isActive,
+  }) => _api.listGodowns(
+    _requiredToken,
+    branchId: branchId,
+    search: search,
+    isActive: isActive,
+  );
+  Future<List<GodownLookup>> lookupGodowns({
+    String? branchId,
+    bool activeOnly = true,
+  }) => _api.lookupGodowns(
+    _requiredToken,
+    branchId: branchId,
+    activeOnly: activeOnly,
+  );
+  Future<List<GodownLookup>> myGodowns({String? branchId}) =>
+      _api.myGodowns(_requiredToken, branchId: branchId);
+  Future<GodownListItem> createGodown(Map<String, dynamic> values) =>
+      _api.createGodown(_requiredToken, values);
+  Future<GodownListItem> updateGodown(
+    String id,
+    Map<String, dynamic> values,
+  ) => _api.updateGodown(_requiredToken, id, values);
+  Future<void> setGodownActive(String id, bool active) =>
+      _api.setGodownActive(_requiredToken, id, active);
+  Future<GodownListItem> setGodownDefault(String id) =>
+      _api.setGodownDefault(_requiredToken, id);
+  Future<List<UserGodownAssignment>> listGodownUsers(String id) =>
+      _api.listGodownUsers(_requiredToken, id);
+  Future<void> assignUserGodown(String godownId, Map<String, dynamic> values) =>
+      _api.assignUserGodown(_requiredToken, godownId, values);
+  Future<void> unassignUserGodown(String godownId, String userId) =>
+      _api.unassignUserGodown(_requiredToken, godownId, userId);
+  Future<void> setUserDefaultGodown(String godownId, String userId) =>
+      _api.setUserDefaultGodown(_requiredToken, godownId, userId);
   Future<PagedSuppliers> listSuppliers({String? search, bool? isActive}) =>
       _api.listSuppliers(_requiredToken, search: search, isActive: isActive);
   Future<SupplierListItem> createSupplier(Map<String, dynamic> values) =>
@@ -349,8 +387,10 @@ class AuthState extends ChangeNotifier {
   Future<PurchaseReturnDetails> reprintPurchaseReturnNote(String id) =>
       _api.reprintPurchaseReturnNote(_requiredToken, id);
 
-  Future<List<PosProduct>> searchPosProducts({String? query}) =>
-      _api.searchPosProducts(_requiredToken, query: query);
+  Future<List<PosProduct>> searchPosProducts({
+    String? query,
+    String? godownId,
+  }) => _api.searchPosProducts(_requiredToken, query: query, godownId: godownId);
   Future<SaleDetails> holdSale(Map<String, dynamic> values) =>
       _api.holdSale(_requiredToken, values);
   Future<SaleDetails> postSale(Map<String, dynamic> values) =>

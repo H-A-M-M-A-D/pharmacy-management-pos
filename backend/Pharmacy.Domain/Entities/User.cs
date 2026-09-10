@@ -86,4 +86,9 @@ public class User : Entity
     /// Navigation property for stock movements performed by this user.
     /// </summary>
     public ICollection<StockMovement> StockMovements { get; set; } = new List<StockMovement>();
+
+    /// <summary>
+    /// Navigation property for godowns this user is authorized to transact against.
+    /// </summary>
+    public ICollection<UserGodown> UserGodowns { get; set; } = new List<UserGodown>();
 }

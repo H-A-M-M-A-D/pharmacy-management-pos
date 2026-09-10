@@ -48,6 +48,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, IJourn
                 ReturnNumber = await repository.NextReturnNumberAsync(now, ct),
                 OriginalSaleId = sale.Id,
                 BranchId = sale.BranchId,
+                GodownId = sale.GodownId,
                 ProcessedByUserId = actor.Id,
                 ReturnDateUtc = now,
                 PostedAtUtc = now,
@@ -111,14 +112,14 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, IJourn
                 batch.UpdatedAt = now;
                 inventory.QuantityInStock += quantity;
                 inventory.UpdatedAt = now;
-                await repository.AddMovementAsync(Movement(StockMovementType.SaleReturn, posted.Id, sale.BranchId, original.Item.ProductId, batch.Id, quantity, actor.Id, posted.ReturnNumber), ct);
+                await repository.AddMovementAsync(Movement(StockMovementType.SaleReturn, posted.Id, sale.BranchId, batch.GodownId, original.Item.ProductId, batch.Id, quantity, actor.Id, posted.ReturnNumber), ct);
 
                 if (disposition == SalesReturnDisposition.NonResellable)
                 {
                     var removalType = batch.ExpiryDate < businessDate ? StockMovementType.Expired : StockMovementType.Damaged;
                     batch.QuantityAvailable -= quantity;
                     inventory.QuantityInStock -= quantity;
-                    await repository.AddMovementAsync(Movement(removalType, posted.Id, sale.BranchId, original.Item.ProductId, batch.Id, -quantity, actor.Id, posted.ReturnNumber), ct);
+                    await repository.AddMovementAsync(Movement(removalType, posted.Id, sale.BranchId, batch.GodownId, original.Item.ProductId, batch.Id, -quantity, actor.Id, posted.ReturnNumber), ct);
                 }
             }
 
@@ -224,10 +225,11 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, IJourn
 
     private static AccountMappingKey PaymentAccount(SalePaymentMethod method) => method == SalePaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
-    private static StockMovement Movement(StockMovementType type, Guid returnId, Guid branchId, Guid productId, Guid batchId, int quantity, Guid actorId, string returnNumber) => new()
+    private static StockMovement Movement(StockMovementType type, Guid returnId, Guid branchId, Guid? godownId, Guid productId, Guid batchId, int quantity, Guid actorId, string returnNumber) => new()
     {
         MovementType = type,
         BranchId = branchId,
+        GodownId = godownId,
         ProductId = productId,
         ProductBatchId = batchId,
         Quantity = quantity,

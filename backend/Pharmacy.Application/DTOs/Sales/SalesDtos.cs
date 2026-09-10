@@ -2,7 +2,7 @@ using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.DTOs.Sales;
 
-public sealed record PosProductSearchQuery(string? Q = null, Guid? BranchId = null, int Take = 20);
+public sealed record PosProductSearchQuery(string? Q = null, Guid? BranchId = null, int Take = 20, Guid? GodownId = null);
 
 public sealed record PosProductDto(
     Guid ProductId, string Name, string SKU, string? Barcode, string? GenericName,
@@ -14,11 +14,11 @@ public sealed record SalePaymentRequest(SalePaymentMethod Method, decimal Amount
 
 public sealed record HoldSaleRequest(
     Guid? BranchId, string? CustomerName, string? CustomerPhone, string? Notes,
-    IReadOnlyList<SaleLineRequest> Items);
+    IReadOnlyList<SaleLineRequest> Items, Guid? GodownId = null);
 
 public sealed record PostSaleRequest(
     Guid? BranchId, Guid? CustomerId, string? CustomerName, string? CustomerPhone, string? Notes,
-    IReadOnlyList<SaleLineRequest> Items, IReadOnlyList<SalePaymentRequest> Payments);
+    IReadOnlyList<SaleLineRequest> Items, IReadOnlyList<SalePaymentRequest> Payments, Guid? GodownId = null);
 
 public sealed record PostHeldSaleRequest(Guid? CustomerId, IReadOnlyList<SalePaymentRequest> Payments);
 

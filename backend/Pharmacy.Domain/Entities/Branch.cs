@@ -54,6 +54,11 @@ public class Branch : Entity
     public ICollection<User> Users { get; set; } = new List<User>();
 
     /// <summary>
+    /// Navigation property for godowns (warehouses/stock locations) within this branch.
+    /// </summary>
+    public ICollection<Godown> Godowns { get; set; } = new List<Godown>();
+
+    /// <summary>
     /// Navigation property for inventory in this branch.
     /// </summary>
     public ICollection<Inventory> Inventory { get; set; } = new List<Inventory>();

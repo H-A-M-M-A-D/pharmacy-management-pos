@@ -456,6 +456,196 @@ void main() {
     expect(find.widgetWithText(Chip, 'Reconciled'), findsOneWidget);
   });
 
+  testWidgets('godowns navigation follows godowns.view permission', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Godowns'), findsNothing);
+
+    final allowed = TestFixture(permissions: {'godowns.view'});
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Godowns'), findsOneWidget);
+  });
+
+  testWidgets('godown list renders branch, status and default badge', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'godowns.view'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Head Office'), findsWidgets);
+    expect(find.text('Main Store'), findsOneWidget);
+    expect(find.text('Annex Store'), findsOneWidget);
+    expect(find.text('Active'), findsNWidgets(2));
+    expect(find.text('Default'), findsOneWidget);
+  });
+
+  testWidgets('add godown validates required fields and creates a godown', (
+    tester,
+  ) async {
+    final fixture = TestFixture(permissions: {'godowns.view', 'godowns.create'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    // Pre-select the branch filter so the Add Godown form's branch field
+    // (disabled for editing but required on create) is satisfied by
+    // inheriting `defaultBranchId` without needing to drive that dropdown too.
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<String?>, 'Branch'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Head Office').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('add_godown')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('godown_code')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('save_godown')));
+    await tester.pump();
+    expect(find.text('Required'), findsWidgets);
+
+    await tester.enterText(find.byKey(const Key('godown_code')), 'COLD');
+    await tester.enterText(find.byKey(const Key('godown_name')), 'Cold Storage');
+    await tester.tap(find.byKey(const Key('save_godown')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('godown_code')), findsNothing);
+    expect(find.text('Cold Storage'), findsOneWidget);
+  });
+
+  testWidgets('edit godown updates name and description', (tester) async {
+    final fixture = TestFixture(permissions: {'godowns.view', 'godowns.update'});
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byTooltip('Edit'));
+    await tester.tap(find.byTooltip('Edit'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit Godown'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('godown_name')),
+      'Main Store Renamed',
+    );
+    await tester.tap(find.byKey(const Key('save_godown')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Main Store Renamed'), findsOneWidget);
+  });
+
+  testWidgets('deactivate and reactivate a godown via confirm dialog', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'godowns.view', 'godowns.deactivate', 'godowns.activate'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Active'), findsOneWidget);
+
+    await tester.ensureVisible(find.byTooltip('Deactivate'));
+    await tester.tap(find.byTooltip('Deactivate'));
+    await tester.pumpAndSettle();
+    expect(find.text('Deactivate godown'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm_godown_status')));
+    await tester.pumpAndSettle();
+    expect(find.text('Inactive'), findsOneWidget);
+
+    await tester.ensureVisible(find.byTooltip('Activate'));
+    await tester.tap(find.byTooltip('Activate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_godown_status')));
+    await tester.pumpAndSettle();
+    expect(find.text('Active'), findsOneWidget);
+  });
+
+  testWidgets('set default godown moves the default to the selected godown', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'godowns.view', 'godowns.set_default'},
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    expect(fixture.api.defaultGodownFor('branch-1')?.name, 'Main Store');
+
+    await tester.ensureVisible(find.byTooltip('Set as default'));
+    await tester.tap(find.byTooltip('Set as default'));
+    await tester.pumpAndSettle();
+
+    expect(fixture.api.defaultGodownFor('branch-1')?.name, 'Annex Store');
+  });
+
+  testWidgets('assign and unassign a user to a godown', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'godowns.view', 'godowns.manage'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Godowns'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byTooltip('Manage user access'));
+    await tester.tap(find.byTooltip('Manage user access'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No users are assigned to this godown yet.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Assign user'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Second User').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Second User'), findsOneWidget);
+    expect(
+      find.text('No users are assigned to this godown yet.'),
+      findsNothing,
+    );
+
+    await tester.tap(find.byIcon(Icons.remove_circle_outline));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('No users are assigned to this godown yet.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('suppliers navigation follows suppliers.view permission', (
     tester,
   ) async {
@@ -621,6 +811,139 @@ void main() {
     expect(find.textContaining('PKR 5000.00'), findsOneWidget);
   });
 
+  testWidgets(
+    'direct purchase with a single godown auto-selects it on the receipt payload',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'purchases.view',
+          'purchases.create',
+          'purchases.receive',
+        },
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Purchasing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('direct_purchase')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Godown'),
+        findsNothing,
+      );
+
+      await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-100');
+      await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Purchase Price'),
+        '50',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Retail Price'),
+        '60',
+      );
+      await tester.tap(find.byKey(const Key('post_purchase')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.api.lastDirectPurchaseBody?['godownId'], 'godown-1');
+    },
+  );
+
+  testWidgets(
+    'direct purchase godown selection propagates to the receipt payload',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'purchases.view',
+          'purchases.create',
+          'purchases.receive',
+        },
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Purchasing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('direct_purchase')));
+      await tester.pumpAndSettle();
+
+      final godownDropdown = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Godown',
+      );
+      expect(godownDropdown, findsOneWidget);
+      await tester.tap(godownDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-200');
+      await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Purchase Price'),
+        '50',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Retail Price'),
+        '60',
+      );
+      await tester.tap(find.byKey(const Key('post_purchase')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.api.lastDirectPurchaseBody?['godownId'], 'godown-2');
+    },
+  );
+
+  testWidgets(
+    'receiving against a purchase order posts the selected godown',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'purchases.view',
+          'purchase_orders.view',
+          'purchases.receive',
+        },
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Purchasing'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Receive goods'));
+      await tester.tap(find.byTooltip('Receive goods'));
+      await tester.pumpAndSettle();
+
+      final godownDropdown = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Godown',
+      );
+      expect(godownDropdown, findsOneWidget);
+      await tester.tap(godownDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-300');
+      await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Purchase Price'),
+        '50',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Retail Price'),
+        '60',
+      );
+      await tester.tap(find.byKey(const Key('post_purchase')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.api.lastGoodsReceiptBody?['godownId'], 'godown-2');
+    },
+  );
+
   testWidgets('direct purchase duplicate invoice error is safe', (
     tester,
   ) async {
@@ -776,6 +1099,84 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('receipt_preview')), findsOneWidget);
     expect(find.textContaining('INV-2026-000001'), findsOneWidget);
+  });
+
+  testWidgets(
+    'pos with a single godown auto-selects it for search, hold and checkout',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'sales.view', 'sales.create', 'sales.hold'},
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Sales'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pos_godown')), findsNothing);
+
+      await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(fixture.api.lastSearchPosProductsGodownId, 'godown-1');
+
+      await tester.tap(find.byKey(const Key('hold_sale')));
+      await tester.pumpAndSettle();
+      expect(fixture.api.lastHoldSaleBody?['godownId'], 'godown-1');
+    },
+  );
+
+  testWidgets(
+    'pos godown selection propagates to product search and sale payloads',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'sales.view', 'sales.create'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Sales'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pos_godown')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pos_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(fixture.api.lastSearchPosProductsGodownId, 'godown-2');
+
+      await tester.tap(find.byKey(const Key('checkout_sale')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_payment')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.api.lastPostSaleBody?['godownId'], 'godown-2');
+    },
+  );
+
+  testWidgets('pos shows a warning when the user has no godown access', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'sales.view', 'sales.create'},
+      godownCount: 0,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('No godown is assigned to you for this branch'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('sales discount input follows sales.discount permission', (
@@ -1233,6 +1634,7 @@ class TestFixture {
     this.purchaseError = false,
     this.reportError = false,
     this.reportDelay = Duration.zero,
+    this.godownCount = 1,
   }) {
     api = FakeApi(
       user: CurrentUser(
@@ -1250,6 +1652,7 @@ class TestFixture {
       purchaseError: purchaseError,
       reportError: reportError,
       reportDelay: reportDelay,
+      godownCount: godownCount,
     );
     state = AuthState(api, MemoryTokenStore());
   }
@@ -1262,6 +1665,7 @@ class TestFixture {
   final bool purchaseError;
   final bool reportError;
   final Duration reportDelay;
+  final int godownCount;
   final branch = const BranchInfo(
     id: 'branch-1',
     code: 'HQ',
@@ -1283,7 +1687,21 @@ class FakeApi implements PharmacyApi {
     this.purchaseError = false,
     this.reportError = false,
     this.reportDelay = Duration.zero,
+    int godownCount = 1,
   }) {
+    _godowns = List.generate(
+      godownCount,
+      (i) => GodownListItem(
+        id: 'godown-${i + 1}',
+        branchId: user.branch.id,
+        branchName: user.branch.name,
+        code: i == 0 ? 'MAIN' : 'ANNEX',
+        name: i == 0 ? 'Main Store' : 'Annex Store',
+        description: i == 0 ? 'Primary warehouse' : null,
+        isDefault: i == 0,
+        isActive: true,
+      ),
+    );
     _stockCountSession = StockCountSession(
       id: 'session-1',
       countNumber: 'SC-2026-000001',
@@ -1320,6 +1738,34 @@ class FakeApi implements PharmacyApi {
   final bool reportError;
   final Duration reportDelay;
   Map<String, dynamic>? lastPurchaseReturnBody;
+  Map<String, dynamic>? lastGoodsReceiptBody;
+  Map<String, dynamic>? lastDirectPurchaseBody;
+  Map<String, dynamic>? lastHoldSaleBody;
+  Map<String, dynamic>? lastPostSaleBody;
+  String? lastSearchPosProductsGodownId;
+  late final List<GodownListItem> _godowns;
+  final List<UserGodownAssignment> _godownAssignments = [];
+
+  GodownListItem _copyGodown(
+    GodownListItem g, {
+    String? code,
+    String? name,
+    String? description,
+    bool? isDefault,
+    bool? isActive,
+  }) => GodownListItem(
+    id: g.id,
+    branchId: g.branchId,
+    branchName: g.branchName,
+    code: code ?? g.code,
+    name: name ?? g.name,
+    description: description ?? g.description,
+    isDefault: isDefault ?? g.isDefault,
+    isActive: isActive ?? g.isActive,
+  );
+
+  GodownListItem? defaultGodownFor(String branchId) =>
+      _godowns.where((g) => g.branchId == branchId && g.isDefault).firstOrNull;
 
   @override
   Future<LoginSession> login(String username, String password) async {
@@ -1588,35 +2034,45 @@ class FakeApi implements PharmacyApi {
   Future<List<PosProduct>> searchPosProducts(
     String token, {
     String? query,
-  }) async => [posProduct];
+    String? godownId,
+  }) async {
+    lastSearchPosProductsGodownId = godownId;
+    return [posProduct];
+  }
 
   @override
   Future<SaleDetails> holdSale(
     String token,
     Map<String, dynamic> values,
-  ) async => SaleDetails(
-    id: 'hold-1',
-    holdNumber: 'HOLD-2026-000001',
-    status: 'Held',
-    createdAt: DateTime(2026, 9, 3, 10),
-    branchName: user.branch.name,
-    cashierName: user.fullName,
-    subtotal: 0,
-    discountTotal: 0,
-    taxTotal: 0,
-    netTotal: 0,
-    amountPaid: 0,
-    creditAmount: 0,
-    changeGiven: 0,
-    items: const [],
-    payments: const [],
-  );
+  ) async {
+    lastHoldSaleBody = values;
+    return SaleDetails(
+      id: 'hold-1',
+      holdNumber: 'HOLD-2026-000001',
+      status: 'Held',
+      createdAt: DateTime(2026, 9, 3, 10),
+      branchName: user.branch.name,
+      cashierName: user.fullName,
+      subtotal: 0,
+      discountTotal: 0,
+      taxTotal: 0,
+      netTotal: 0,
+      amountPaid: 0,
+      creditAmount: 0,
+      changeGiven: 0,
+      items: const [],
+      payments: const [],
+    );
+  }
 
   @override
   Future<SaleDetails> postSale(
     String token,
     Map<String, dynamic> values,
-  ) async => sale;
+  ) async {
+    lastPostSaleBody = values;
+    return sale;
+  }
 
   @override
   Future<SaleDetails> postHeldSale(
@@ -2236,6 +2692,171 @@ class FakeApi implements PharmacyApi {
     paymentBreakdown: _cashierShift?.paymentBreakdown ?? const [],
   );
 
+  GodownLookup _lookupFor(GodownListItem g) => GodownLookup(
+    id: g.id,
+    branchId: g.branchId,
+    code: g.code,
+    name: g.name,
+    isDefault: g.isDefault,
+    isActive: g.isActive,
+  );
+
+  @override
+  Future<PagedGodowns> listGodowns(
+    String token, {
+    String? branchId,
+    String? search,
+    bool? isActive,
+  }) async {
+    final items = _godowns
+        .where((g) => branchId == null || g.branchId == branchId)
+        .where((g) => isActive == null || g.isActive == isActive)
+        .where(
+          (g) =>
+              search == null ||
+              search.isEmpty ||
+              g.name.toLowerCase().contains(search.toLowerCase()) ||
+              g.code.toLowerCase().contains(search.toLowerCase()),
+        )
+        .toList();
+    return PagedGodowns(items: items, totalCount: items.length);
+  }
+
+  @override
+  Future<List<GodownLookup>> lookupGodowns(
+    String token, {
+    String? branchId,
+    bool activeOnly = true,
+  }) async => _godowns
+      .where((g) => branchId == null || g.branchId == branchId)
+      .where((g) => !activeOnly || g.isActive)
+      .map(_lookupFor)
+      .toList();
+
+  @override
+  Future<List<GodownLookup>> myGodowns(
+    String token, {
+    String? branchId,
+  }) async => lookupGodowns(token, branchId: branchId);
+
+  @override
+  Future<GodownListItem> createGodown(
+    String token,
+    Map<String, dynamic> values,
+  ) async {
+    final created = GodownListItem(
+      id: 'godown-${_godowns.length + 1}',
+      branchId: values['branchId'] as String? ?? user.branch.id,
+      branchName: user.branch.name,
+      code: values['code'] as String? ?? '',
+      name: values['name'] as String? ?? '',
+      description: values['description'] as String?,
+      isDefault: values['isDefault'] as bool? ?? false,
+      isActive: values['isActive'] as bool? ?? true,
+    );
+    _godowns.add(created);
+    return created;
+  }
+
+  @override
+  Future<GodownListItem> updateGodown(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async {
+    final index = _godowns.indexWhere((g) => g.id == id);
+    if (index == -1) throw const ApiException('Godown was not found.');
+    final updated = _copyGodown(
+      _godowns[index],
+      code: values['code'] as String?,
+      name: values['name'] as String?,
+      description: values['description'] as String?,
+    );
+    _godowns[index] = updated;
+    return updated;
+  }
+
+  @override
+  Future<void> setGodownActive(String token, String id, bool active) async {
+    final index = _godowns.indexWhere((g) => g.id == id);
+    if (index == -1) return;
+    _godowns[index] = _copyGodown(_godowns[index], isActive: active);
+  }
+
+  @override
+  Future<GodownListItem> setGodownDefault(String token, String id) async {
+    final index = _godowns.indexWhere((g) => g.id == id);
+    if (index == -1) throw const ApiException('Godown was not found.');
+    final branchId = _godowns[index].branchId;
+    for (var i = 0; i < _godowns.length; i++) {
+      if (_godowns[i].branchId == branchId) {
+        _godowns[i] = _copyGodown(
+          _godowns[i],
+          isDefault: _godowns[i].id == id,
+        );
+      }
+    }
+    return _godowns[index];
+  }
+
+  @override
+  Future<List<UserGodownAssignment>> listGodownUsers(
+    String token,
+    String id,
+  ) async => _godownAssignments.where((a) => a.godownId == id).toList();
+
+  @override
+  Future<void> assignUserGodown(
+    String token,
+    String godownId,
+    Map<String, dynamic> values,
+  ) async {
+    final userId = values['userId'] as String;
+    _godownAssignments.removeWhere(
+      (a) => a.userId == userId && a.godownId == godownId,
+    );
+    _godownAssignments.add(
+      UserGodownAssignment(
+        userId: userId,
+        userFullName: 'Second User',
+        godownId: godownId,
+        godownName: _godowns.firstWhere((g) => g.id == godownId).name,
+        isDefault: values['isDefault'] as bool? ?? false,
+      ),
+    );
+  }
+
+  @override
+  Future<void> unassignUserGodown(
+    String token,
+    String godownId,
+    String userId,
+  ) async {
+    _godownAssignments.removeWhere(
+      (a) => a.userId == userId && a.godownId == godownId,
+    );
+  }
+
+  @override
+  Future<void> setUserDefaultGodown(
+    String token,
+    String godownId,
+    String userId,
+  ) async {
+    for (var i = 0; i < _godownAssignments.length; i++) {
+      final a = _godownAssignments[i];
+      if (a.userId == userId) {
+        _godownAssignments[i] = UserGodownAssignment(
+          userId: a.userId,
+          userFullName: a.userFullName,
+          godownId: a.godownId,
+          godownName: a.godownName,
+          isDefault: a.godownId == godownId,
+        );
+      }
+    }
+  }
+
   SupplierListItem get supplier => const SupplierListItem(
     id: 'supplier-1',
     name: 'ABC Pharma',
@@ -2516,13 +3137,17 @@ class FakeApi implements PharmacyApi {
   Future<PurchaseDetails> postGoodsReceipt(
     String token,
     Map<String, dynamic> values,
-  ) async => purchase;
+  ) async {
+    lastGoodsReceiptBody = values;
+    return purchase;
+  }
 
   @override
   Future<PurchaseDetails> postDirectPurchase(
     String token,
     Map<String, dynamic> values,
   ) async {
+    lastDirectPurchaseBody = values;
     if (purchaseError) {
       throw const ApiException(
         'This supplier invoice has already been recorded.',

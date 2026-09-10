@@ -20,8 +20,8 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
     public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => context.Customers.FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
     public async Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) =>
         await context.CustomerLedgerEntries.Where(x => x.CustomerId == customerId && x.BranchId == branchId).SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
-    public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default) =>
-        await context.ProductBatches.Where(x => x.BranchId == branchId && x.ProductId == productId).OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToListAsync(cancellationToken);
+    public async Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid? godownId, Guid productId, CancellationToken cancellationToken = default) =>
+        await context.ProductBatches.Where(x => x.BranchId == branchId && x.GodownId == godownId && x.ProductId == productId).OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToListAsync(cancellationToken);
     public Task<Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) =>
         context.Inventory.FirstOrDefaultAsync(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId, cancellationToken);
     public Task<Sale?> GetSaleAsync(Guid id, CancellationToken cancellationToken = default) =>
@@ -35,7 +35,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
     public async Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) => await context.StockMovements.AddAsync(movement, cancellationToken);
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
 
-    public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, Guid? godownId, CancellationToken cancellationToken = default)
     {
         var branchId = query.BranchId ?? actorBranchId;
         var term = query.Q?.Trim();
@@ -49,7 +49,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
         var rows = await products.Select(x => new
         {
             Product = x,
-            Batches = x.ProductBatches.Where(b => b.BranchId == branchId && b.QuantityAvailable > 0 && !b.IsDisposed && b.ExpiryDate >= businessDate)
+            Batches = x.ProductBatches.Where(b => b.BranchId == branchId && b.GodownId == godownId && b.QuantityAvailable > 0 && !b.IsDisposed && b.ExpiryDate >= businessDate)
                 .OrderBy(b => b.ExpiryDate).ThenBy(b => b.CreatedAt).ThenBy(b => b.BatchNumber).Select(b => new { b.QuantityAvailable, b.ExpiryDate, b.RetailPrice }).ToList()
         })
         .OrderByDescending(x => !string.IsNullOrWhiteSpace(term) && x.Product.NormalizedBarcode == normalized)

@@ -9,6 +9,10 @@ public class SalesReturn : Entity
     public Sale? OriginalSale { get; set; }
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+
+    /// <summary>Destination godown stock is restored into (inherited from the original sale).</summary>
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public Guid ProcessedByUserId { get; set; }
     public User? ProcessedByUser { get; set; }
     public DateTime ReturnDateUtc { get; set; }

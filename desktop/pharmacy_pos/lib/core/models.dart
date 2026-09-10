@@ -995,6 +995,86 @@ class SupplierListItem {
       );
 }
 
+class GodownLookup {
+  const GodownLookup({
+    required this.id,
+    required this.branchId,
+    required this.code,
+    required this.name,
+    required this.isDefault,
+    required this.isActive,
+  });
+  final String id, branchId, code, name;
+  final bool isDefault, isActive;
+  factory GodownLookup.fromJson(Map<String, dynamic> json) => GodownLookup(
+    id: json['id'] as String,
+    branchId: json['branchId'] as String,
+    code: json['code'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    isDefault: json['isDefault'] as bool? ?? false,
+    isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class GodownListItem {
+  const GodownListItem({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.code,
+    required this.name,
+    required this.isDefault,
+    required this.isActive,
+    this.description,
+  });
+  final String id, branchId, branchName, code, name;
+  final String? description;
+  final bool isDefault, isActive;
+  factory GodownListItem.fromJson(Map<String, dynamic> json) =>
+      GodownListItem(
+        id: json['id'] as String,
+        branchId: json['branchId'] as String,
+        branchName: json['branchName'] as String? ?? '',
+        code: json['code'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        description: json['description'] as String?,
+        isDefault: json['isDefault'] as bool? ?? false,
+        isActive: json['isActive'] as bool? ?? false,
+      );
+}
+
+class PagedGodowns {
+  const PagedGodowns({required this.items, required this.totalCount});
+  final List<GodownListItem> items;
+  final int totalCount;
+  factory PagedGodowns.fromJson(Map<String, dynamic> json) => PagedGodowns(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => GodownListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class UserGodownAssignment {
+  const UserGodownAssignment({
+    required this.userId,
+    required this.userFullName,
+    required this.godownId,
+    required this.godownName,
+    required this.isDefault,
+  });
+  final String userId, userFullName, godownId, godownName;
+  final bool isDefault;
+  factory UserGodownAssignment.fromJson(Map<String, dynamic> json) =>
+      UserGodownAssignment(
+        userId: json['userId'] as String,
+        userFullName: json['userFullName'] as String? ?? '',
+        godownId: json['godownId'] as String,
+        godownName: json['godownName'] as String? ?? '',
+        isDefault: json['isDefault'] as bool? ?? false,
+      );
+}
+
 class PagedSuppliers {
   const PagedSuppliers({required this.items, required this.totalCount});
   final List<SupplierListItem> items;

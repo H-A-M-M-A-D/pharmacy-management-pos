@@ -151,6 +151,45 @@ abstract interface class PharmacyApi {
     String branchId,
     DateTime date,
   );
+  Future<PagedGodowns> listGodowns(
+    String token, {
+    String? branchId,
+    String? search,
+    bool? isActive,
+  });
+  Future<List<GodownLookup>> lookupGodowns(
+    String token, {
+    String? branchId,
+    bool activeOnly = true,
+  });
+  Future<List<GodownLookup>> myGodowns(String token, {String? branchId});
+  Future<GodownListItem> createGodown(
+    String token,
+    Map<String, dynamic> values,
+  );
+  Future<GodownListItem> updateGodown(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  );
+  Future<void> setGodownActive(String token, String id, bool active);
+  Future<GodownListItem> setGodownDefault(String token, String id);
+  Future<List<UserGodownAssignment>> listGodownUsers(String token, String id);
+  Future<void> assignUserGodown(
+    String token,
+    String godownId,
+    Map<String, dynamic> values,
+  );
+  Future<void> unassignUserGodown(
+    String token,
+    String godownId,
+    String userId,
+  );
+  Future<void> setUserDefaultGodown(
+    String token,
+    String godownId,
+    String userId,
+  );
   Future<PagedSuppliers> listSuppliers(
     String token, {
     String? search,
@@ -242,7 +281,11 @@ abstract interface class PharmacyApi {
     String token,
     String id,
   );
-  Future<List<PosProduct>> searchPosProducts(String token, {String? query});
+  Future<List<PosProduct>> searchPosProducts(
+    String token, {
+    String? query,
+    String? godownId,
+  });
   Future<SaleDetails> holdSale(String token, Map<String, dynamic> values);
   Future<SaleDetails> postSale(String token, Map<String, dynamic> values);
   Future<SaleDetails> postHeldSale(
@@ -912,6 +955,134 @@ class ApiClient implements PharmacyApi {
   }
 
   @override
+  Future<PagedGodowns> listGodowns(
+    String token, {
+    String? branchId,
+    String? search,
+    bool? isActive,
+  }) async {
+    final q = <String, String>{'page': '1', 'pageSize': '100'};
+    if (branchId != null) q['branchId'] = branchId;
+    if (search?.trim().isNotEmpty == true) q['search'] = search!.trim();
+    if (isActive != null) q['isActive'] = '$isActive';
+    return PagedGodowns.fromJson(
+      (await _request(
+        'GET',
+        Uri(path: '/api/godowns', queryParameters: q).toString(),
+        token: token,
+      ))!,
+    );
+  }
+
+  @override
+  Future<List<GodownLookup>> lookupGodowns(
+    String token, {
+    String? branchId,
+    bool activeOnly = true,
+  }) async {
+    final q = <String, String>{'activeOnly': '$activeOnly'};
+    if (branchId != null) q['branchId'] = branchId;
+    final data = await _request(
+      'GET',
+      Uri(path: '/api/godowns/lookup', queryParameters: q).toString(),
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => GodownLookup.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<List<GodownLookup>> myGodowns(
+    String token, {
+    String? branchId,
+  }) async {
+    final q = <String, String>{};
+    if (branchId != null) q['branchId'] = branchId;
+    final data = await _request(
+      'GET',
+      Uri(path: '/api/godowns/mine', queryParameters: q).toString(),
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => GodownLookup.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<GodownListItem> createGodown(
+    String token,
+    Map<String, dynamic> values,
+  ) async => GodownListItem.fromJson(
+    (await _request('POST', '/api/godowns', token: token, body: values))!,
+  );
+
+  @override
+  Future<GodownListItem> updateGodown(
+    String token,
+    String id,
+    Map<String, dynamic> values,
+  ) async => GodownListItem.fromJson(
+    (await _request('PUT', '/api/godowns/$id', token: token, body: values))!,
+  );
+
+  @override
+  Future<void> setGodownActive(String token, String id, bool active) async =>
+      _void(
+        'POST',
+        '/api/godowns/$id/${active ? 'activate' : 'deactivate'}',
+        token,
+      );
+
+  @override
+  Future<GodownListItem> setGodownDefault(String token, String id) async =>
+      GodownListItem.fromJson(
+        (await _request(
+          'POST',
+          '/api/godowns/$id/set-default',
+          token: token,
+        ))!,
+      );
+
+  @override
+  Future<List<UserGodownAssignment>> listGodownUsers(
+    String token,
+    String id,
+  ) async {
+    final data = await _request(
+      'GET',
+      '/api/godowns/$id/users',
+      token: token,
+    );
+    return (data as List<dynamic>? ?? [])
+        .map((x) => UserGodownAssignment.fromJson(x as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<void> assignUserGodown(
+    String token,
+    String godownId,
+    Map<String, dynamic> values,
+  ) async =>
+      _request('POST', '/api/godowns/$godownId/users', token: token, body: values);
+
+  @override
+  Future<void> unassignUserGodown(
+    String token,
+    String godownId,
+    String userId,
+  ) async => _void('DELETE', '/api/godowns/$godownId/users/$userId', token);
+
+  @override
+  Future<void> setUserDefaultGodown(
+    String token,
+    String godownId,
+    String userId,
+  ) async =>
+      _void('POST', '/api/godowns/$godownId/users/$userId/default', token);
+
+  @override
   Future<PagedSuppliers> listSuppliers(
     String token, {
     String? search,
@@ -1258,9 +1429,11 @@ class ApiClient implements PharmacyApi {
   Future<List<PosProduct>> searchPosProducts(
     String token, {
     String? query,
+    String? godownId,
   }) async {
     final q = <String, String>{'take': '25'};
     if (query?.trim().isNotEmpty == true) q['q'] = query!.trim();
+    if (godownId != null) q['godownId'] = godownId;
     final data = await _request(
       'GET',
       Uri(path: '/api/pos/products/search', queryParameters: q).toString(),

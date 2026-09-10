@@ -5,12 +5,13 @@ using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Sales;
 
-public sealed class SalesService(ISalesRepository repository, IFefoAllocationService fefo, IJournalPostingService journalPosting, TimeProvider timeProvider) : ISalesService
+public sealed class SalesService(ISalesRepository repository, IFefoAllocationService fefo, IJournalPostingService journalPosting, IGodownAccessService godownAccess, TimeProvider timeProvider) : ISalesService
 {
     public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(Guid actorId, PosProductSearchQuery query, CancellationToken cancellationToken = default)
     {
@@ -18,7 +19,8 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         var branchId = query.BranchId ?? actor.BranchId;
         EnsureBranchAccess(actor, branchId);
         if (query.Take is < 1 or > 50) throw new RequestValidationException("Search size must be between 1 and 50.");
-        return await repository.SearchProductsAsync(query with { BranchId = branchId }, actor.BranchId, CanSelectBranch(actor), BusinessDate(), cancellationToken);
+        var godownId = await ResolveGodownAsync(actor, branchId, query.GodownId, cancellationToken);
+        return await repository.SearchProductsAsync(query with { BranchId = branchId }, actor.BranchId, CanSelectBranch(actor), BusinessDate(), godownId, cancellationToken);
     }
 
     public async Task<SaleDetailsDto> HoldSaleAsync(Guid actorId, HoldSaleRequest request, CancellationToken cancellationToken = default)
@@ -31,9 +33,11 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         await repository.ExecuteInTransactionAsync(async ct =>
         {
             var branch = await RequireActiveBranch(branchId, ct);
+            var godownId = await ResolveGodownAsync(actor, branch.Id, request.GodownId, ct);
             sale = new Sale
             {
                 BranchId = branch.Id,
+                GodownId = godownId,
                 CashierUserId = actorId,
                 HoldNumber = await repository.NextHoldNumberAsync(UtcNow(), ct),
                 Status = SaleStatus.Held,
@@ -123,7 +127,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         Sale? sale = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            sale = await BuildPostedSale(actor, branchId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments, ct);
+            sale = await BuildPostedSale(actor, branchId, request.GodownId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments, ct);
             await repository.AddSaleAsync(sale, ct);
             await Audit(actorId, "SalePosted", "Sale", sale.Id, null, AuditValues(sale), ct);
             await repository.SaveChangesAsync(ct);
@@ -142,7 +146,8 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             EnsureBranchAccess(actor, held.BranchId);
             if (held.Status != SaleStatus.Held) throw new RequestValidationException("Only held sales can be posted.");
             var lines = held.Items.Select(x => new SaleLineRequest(x.ProductId, x.RequestedQuantity, x.DiscountPercent)).ToList();
-            var posted = await BuildPostedSale(actor, held.BranchId, request.CustomerId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments, ct);
+            // A held sale's godown was fixed when it was placed on hold; it cannot be reassigned at post time.
+            var posted = await BuildPostedSale(actor, held.BranchId, held.GodownId, request.CustomerId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments, ct);
             held.Status = SaleStatus.Cancelled;
             held.UpdatedAt = UtcNow();
             await repository.AddSaleAsync(posted, ct);
@@ -177,13 +182,15 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         return new ReceiptDto(sale.InvoiceNumber, sale.BranchName, sale.BranchAddress, sale.BranchPhone, sale.PostedAtUtc.Value, sale.CashierName, sale.CustomerName, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Items, sale.Payments);
     }
 
-    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, Guid? customerId, string? customerName, string? customerPhone, string? notes, IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
+    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, Guid? requestedGodownId, Guid? customerId, string? customerName, string? customerPhone, string? notes, IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
     {
         var branch = await RequireActiveBranch(branchId, ct);
+        var godownId = await ResolveGodownAsync(actor, branch.Id, requestedGodownId, ct);
         var now = UtcNow();
         var sale = new Sale
         {
             BranchId = branch.Id,
+            GodownId = godownId,
             CashierUserId = actor.Id,
             InvoiceNumber = await repository.NextInvoiceNumberAsync(now, ct),
             Status = SaleStatus.Posted,
@@ -198,9 +205,9 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         {
             var product = await RequireActiveProduct(line.ProductId, ct);
             ValidateDiscount(actor, product, line.DiscountPercent);
-            var batches = await repository.GetEligibleBatchesAsync(branch.Id, product.Id, ct);
+            var batches = await repository.GetEligibleBatchesAsync(branch.Id, godownId, product.Id, ct);
             IReadOnlyList<FefoAllocationResult> fefoResults;
-            try { fefoResults = fefo.Allocate(batches, product.Id, branch.Id, line.Quantity, BusinessDate(), ct); }
+            try { fefoResults = fefo.Allocate(batches, product.Id, branch.Id, godownId, line.Quantity, BusinessDate(), ct); }
             catch (InvalidOperationException) { throw new ResourceConflictException($"Only {batches.Where(x => x.QuantityAvailable > 0 && !x.IsDisposed && x.ExpiryDate >= BusinessDate()).Sum(x => x.QuantityAvailable)} units are currently available."); }
 
             var saleItem = new SaleItem { ProductId = product.Id, RequestedQuantity = line.Quantity, DiscountPercent = line.DiscountPercent };
@@ -235,6 +242,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
                 {
                     MovementType = StockMovementType.Sale,
                     BranchId = branch.Id,
+                    GodownId = godownId,
                     ProductId = product.Id,
                     ProductBatchId = batch.Id,
                     Quantity = -result.AllocatedQuantity,
@@ -345,6 +353,33 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
     {
         var branch = await repository.GetBranchAsync(branchId, ct);
         return branch is { IsActive: true } ? branch : throw new RequestValidationException("Branch is invalid or inactive.");
+    }
+
+    /// <summary>
+    /// Resolves the godown a sale should operate against: an explicit, access-checked request, or the
+    /// branch's default godown. Returns null when the branch has no godowns configured yet, preserving
+    /// pre-multi-godown behaviour for legacy/unmigrated installs.
+    /// </summary>
+    private async Task<Guid?> ResolveGodownAsync(User actor, Guid branchId, Guid? requestedGodownId, CancellationToken ct)
+    {
+        if (requestedGodownId.HasValue)
+        {
+            await EnsureGodownAccessAsync(actor, branchId, requestedGodownId.Value, ct);
+            return requestedGodownId;
+        }
+        var defaultId = await godownAccess.GetDefaultGodownIdAsync(branchId, ct);
+        if (defaultId.HasValue) await EnsureGodownAccessAsync(actor, branchId, defaultId.Value, ct);
+        return defaultId;
+    }
+
+    private async Task EnsureGodownAccessAsync(User actor, Guid branchId, Guid godownId, CancellationToken ct)
+    {
+        var godown = await godownAccess.GetGodownAsync(godownId, ct) ?? throw new RequestValidationException("Godown is invalid.");
+        if (godown.BranchId != branchId) throw new RequestValidationException("Godown does not belong to the selected branch.");
+        if (!godown.IsActive) throw new RequestValidationException("Godown is inactive.");
+        if (CanSelectBranch(actor)) return;
+        if (!await godownAccess.UserHasAccessAsync(actor.Id, godownId, ct))
+            throw new ForbiddenOperationException("You do not have access to this godown.");
     }
 
     private async Task<Product> RequireActiveProduct(Guid productId, CancellationToken ct)

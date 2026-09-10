@@ -5,6 +5,7 @@ using Pharmacy.Application.DTOs.Inventory;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Inventory;
@@ -13,6 +14,7 @@ public sealed class InventoryService(
     IInventoryRepository repository,
     IFefoAllocationService fefo,
     IJournalPostingService journalPosting,
+    IGodownAccessService godownAccess,
     TimeProvider timeProvider) : IInventoryService
 {
     public async Task<PagedResult<InventoryListItemDto>> ListInventoryAsync(Guid actorId, InventoryListQuery query, CancellationToken cancellationToken = default)
@@ -70,13 +72,15 @@ public sealed class InventoryService(
             if (product is null || !product.IsActive) throw new RequestValidationException("Product is invalid or inactive.");
             if (request.SupplierId.HasValue && await repository.GetSupplierAsync(request.SupplierId.Value, ct) is null)
                 throw new RequestValidationException("Supplier is invalid.");
+            var godownId = await ResolveGodownAsync(actor, request.BranchId, request.GodownId, ct);
 
-            batch = await repository.GetBatchByNumberAsync(request.BranchId, request.ProductId, request.BatchNumber.Trim(), ct);
+            batch = await repository.GetBatchByNumberAsync(request.BranchId, godownId, request.ProductId, request.BatchNumber.Trim(), ct);
             if (batch is null)
             {
                 batch = new ProductBatch
                 {
                     BranchId = request.BranchId,
+                    GodownId = godownId,
                     ProductId = request.ProductId,
                     SupplierId = request.SupplierId,
                     BatchNumber = request.BatchNumber.Trim(),
@@ -165,8 +169,9 @@ public sealed class InventoryService(
     {
         var actor = await Require(actorId, PermissionCatalog.InventoryView, cancellationToken);
         EnsureBranchAccess(actor, request.BranchId);
+        // Preview is a diagnostic/branch-wide tool; it does not scope to a specific godown.
         var results = fefo.Allocate(await repository.GetEligibleBatchesAsync(request.BranchId, request.ProductId, cancellationToken),
-            request.ProductId, request.BranchId, request.Quantity, request.BusinessDate ?? BusinessDate(), cancellationToken);
+            request.ProductId, request.BranchId, null, request.Quantity, request.BusinessDate ?? BusinessDate(), cancellationToken);
         return new FefoPreviewDto(results.Select(x => new FefoPreviewItemDto(x.BatchId, x.BatchNumber, x.AllocatedQuantity, x.ExpiryDate)).ToList());
     }
 
@@ -363,6 +368,7 @@ public sealed class InventoryService(
         {
             var batch = await RequiredBatch(request.ProductBatchId, ct);
             EnsureBatchMatches(batch, request.BranchId, request.ProductId);
+            if (batch.GodownId.HasValue) await EnsureGodownAccessAsync(actor, batch.BranchId, batch.GodownId.Value, ct);
             var inventory = await RequiredInventory(batch, ct);
             if (movementType is StockMovementType.AdjustmentDecrease or StockMovementType.Damaged) EnsureAvailable(batch, request.Quantity);
             var priorAvailable = batch.QuantityAvailable;
@@ -411,6 +417,33 @@ public sealed class InventoryService(
             throw new ForbiddenOperationException("The current user is not permitted to manage this branch.");
     }
 
+    /// <summary>
+    /// Resolves the godown a new opening-stock batch should be created in: an explicit, access-checked
+    /// request, or the branch's default godown. Returns null when the branch has no godowns configured
+    /// yet, preserving pre-multi-godown behaviour for legacy/unmigrated installs.
+    /// </summary>
+    private async Task<Guid?> ResolveGodownAsync(User actor, Guid branchId, Guid? requestedGodownId, CancellationToken ct)
+    {
+        if (requestedGodownId.HasValue)
+        {
+            await EnsureGodownAccessAsync(actor, branchId, requestedGodownId.Value, ct);
+            return requestedGodownId;
+        }
+        var defaultId = await godownAccess.GetDefaultGodownIdAsync(branchId, ct);
+        if (defaultId.HasValue) await EnsureGodownAccessAsync(actor, branchId, defaultId.Value, ct);
+        return defaultId;
+    }
+
+    private async Task EnsureGodownAccessAsync(User actor, Guid branchId, Guid godownId, CancellationToken ct)
+    {
+        var godown = await godownAccess.GetGodownAsync(godownId, ct) ?? throw new RequestValidationException("Godown is invalid.");
+        if (godown.BranchId != branchId) throw new RequestValidationException("Godown does not belong to the selected branch.");
+        if (!godown.IsActive) throw new RequestValidationException("Godown is inactive.");
+        if (CanSelectBranch(actor)) return;
+        if (!await godownAccess.UserHasAccessAsync(actor.Id, godownId, ct))
+            throw new ForbiddenOperationException("You do not have access to this godown.");
+    }
+
     private static void ValidateOpening(OpeningStockRequest request, DateOnly businessDate)
     {
         if (string.IsNullOrWhiteSpace(request.BatchNumber)) throw new RequestValidationException("Batch number is required.");
@@ -444,7 +477,7 @@ public sealed class InventoryService(
     {
         var inventory = await repository.GetInventoryAsync(batch.BranchId, batch.ProductId, batch.Id, ct);
         if (inventory is not null) return inventory;
-        inventory = new Pharmacy.Domain.Entities.Inventory { BranchId = batch.BranchId, ProductId = batch.ProductId, ProductBatchId = batch.Id, ReorderLevel = product.ReorderLevel, QuantityInStock = 0, LastCountedAt = timeProvider.GetUtcNow().UtcDateTime };
+        inventory = new Pharmacy.Domain.Entities.Inventory { BranchId = batch.BranchId, GodownId = batch.GodownId, ProductId = batch.ProductId, ProductBatchId = batch.Id, ReorderLevel = product.ReorderLevel, QuantityInStock = 0, LastCountedAt = timeProvider.GetUtcNow().UtcDateTime };
         await repository.AddInventoryAsync(inventory, ct);
         return inventory;
     }
@@ -465,6 +498,7 @@ public sealed class InventoryService(
         {
             MovementType = movementType,
             BranchId = batch.BranchId,
+            GodownId = batch.GodownId,
             ProductId = batch.ProductId,
             ProductBatchId = batch.Id,
             Quantity = signed,

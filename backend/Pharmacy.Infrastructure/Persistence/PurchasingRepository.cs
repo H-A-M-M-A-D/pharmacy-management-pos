@@ -18,8 +18,8 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
     public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => context.Branches.FirstOrDefaultAsync(x => x.Id == branchId, cancellationToken);
     public Task<Supplier?> GetSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default) => context.Suppliers.FirstOrDefaultAsync(x => x.Id == supplierId, cancellationToken);
     public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => context.Products.Include(x => x.Manufacturer).FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
-    public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) =>
-        context.ProductBatches.FirstOrDefaultAsync(x => x.BranchId == branchId && x.ProductId == productId && x.BatchNumber == batchNumber, cancellationToken);
+    public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid? godownId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) =>
+        context.ProductBatches.FirstOrDefaultAsync(x => x.BranchId == branchId && x.GodownId == godownId && x.ProductId == productId && x.BatchNumber == batchNumber, cancellationToken);
     public Task<Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) =>
         context.Inventory.FirstOrDefaultAsync(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId, cancellationToken);
     public Task<PurchaseOrder?> GetPurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default) =>

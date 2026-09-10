@@ -6,6 +6,10 @@ public class Sale : Entity
 {
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+
+    /// <summary>Source godown stock was deducted from. Nullable for legacy/unscoped branches.</summary>
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public string? InvoiceNumber { get; set; }
     public string? HoldNumber { get; set; }
     public SaleStatus Status { get; set; } = SaleStatus.Held;

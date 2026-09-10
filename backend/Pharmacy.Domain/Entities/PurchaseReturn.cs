@@ -11,6 +11,10 @@ public class PurchaseReturn : Entity
     public Supplier? Supplier { get; set; }
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+
+    /// <summary>Source godown stock was removed from (inherited from the original goods receipt).</summary>
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public Guid ProcessedByUserId { get; set; }
     public User? ProcessedByUser { get; set; }
     public DateTime ReturnDateUtc { get; set; }

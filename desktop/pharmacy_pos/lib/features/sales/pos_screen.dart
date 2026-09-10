@@ -22,6 +22,8 @@ class _PosScreenState extends State<PosScreen>
   CustomerLookup? _selectedCustomer;
   List<CustomerLookup> _customerMatches = [];
   List<PosProduct> _products = [];
+  List<GodownLookup> _godowns = [];
+  String? _godownId;
   PagedSales? _history;
   PagedSales? _held;
   SaleDetails? _receipt;
@@ -39,6 +41,22 @@ class _PosScreenState extends State<PosScreen>
   void initState() {
     super.initState();
     _loadHistory();
+    _loadGodowns();
+  }
+
+  Future<void> _loadGodowns() async {
+    try {
+      final godowns = await widget.authState.myGodowns();
+      if (!mounted) return;
+      setState(() {
+        _godowns = godowns;
+        _godownId = godowns.isEmpty
+            ? null
+            : godowns.firstWhere((g) => g.isDefault, orElse: () => godowns.first).id;
+      });
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    }
   }
 
   @override
@@ -58,6 +76,7 @@ class _PosScreenState extends State<PosScreen>
     try {
       final products = await widget.authState.searchPosProducts(
         query: _search.text,
+        godownId: _godownId,
       );
       if (mounted) {
         setState(() => _products = products);
@@ -121,6 +140,7 @@ class _PosScreenState extends State<PosScreen>
     required List<Map<String, dynamic>> payments,
   }) => {
     'branchId': widget.authState.currentUser?.branch.id,
+    'godownId': _godownId,
     'customerId': _selectedCustomer?.id,
     'customerName': _emptyToNull(_customer.text),
     'customerPhone': _emptyToNull(_phone.text),
@@ -145,6 +165,7 @@ class _PosScreenState extends State<PosScreen>
     try {
       _receipt = await widget.authState.holdSale({
         'branchId': widget.authState.currentUser?.branch.id,
+        'godownId': _godownId,
         'customerName': _emptyToNull(_customer.text),
         'customerPhone': _emptyToNull(_phone.text),
         'items': _cart
@@ -279,6 +300,42 @@ class _PosScreenState extends State<PosScreen>
     ),
   );
 
+  Widget _godownSelector() {
+    if (_godowns.isEmpty) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          'No godown is assigned to you for this branch. Ask an administrator to grant godown access before selling.',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onErrorContainer,
+          ),
+        ),
+      );
+    }
+    if (_godowns.length == 1) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DropdownButtonFormField<String>(
+        key: const Key('pos_godown'),
+        initialValue: _godownId,
+        decoration: const InputDecoration(labelText: 'Selling from godown'),
+        items: _godowns
+            .map((g) => DropdownMenuItem(value: g.id, child: Text(g.name)))
+            .toList(),
+        onChanged: (v) => setState(() {
+          _godownId = v;
+          _products = [];
+        }),
+      ),
+    );
+  }
+
   Widget _pos() => Row(
     children: [
       Expanded(
@@ -287,6 +344,7 @@ class _PosScreenState extends State<PosScreen>
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
+              _godownSelector(),
               TextField(
                 key: const Key('pos_search'),
                 controller: _search,

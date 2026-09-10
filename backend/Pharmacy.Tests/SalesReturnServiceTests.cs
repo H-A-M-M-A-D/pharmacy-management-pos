@@ -206,6 +206,24 @@ public sealed class SalesReturnServiceTests
         Assert.Equal(posted.Id, reduction.ReferenceId);
     }
 
+    [Fact]
+    public async Task Return_restores_stock_to_the_original_sales_godown()
+    {
+        var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund);
+        var godownId = Guid.NewGuid();
+        f.Sale.GodownId = godownId;
+        var allocation = f.AddOriginalSaleAllocation("A", 5, 100, 90);
+        f.Batch.GodownId = godownId;
+
+        var result = await f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(
+            SalesReturnReason.CustomerReturn, null,
+            [new(allocation.Id, 5, SalesReturnDisposition.Restockable)],
+            [new(SalePaymentMethod.Cash, 450)]));
+
+        Assert.Equal(godownId, f.Returns.Single(x => x.Id == result.Id).GodownId);
+        Assert.Equal(godownId, f.Movements.Single().GodownId);
+    }
+
     private sealed class Fixture : ISalesReturnRepository
     {
         public readonly DateOnly Today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time")));

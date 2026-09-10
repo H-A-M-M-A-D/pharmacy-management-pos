@@ -588,7 +588,7 @@ public class PharmacyFoundationTests
             new() { Id = Guid.NewGuid(), ProductId = productId, BranchId = branchId, BatchNumber = "C", ExpiryDate = new DateOnly(2025, 12, 1), QuantityAvailable = 20, CreatedAt = new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc) }
         };
 
-        var allocations = service.Allocate(batches, productId, branchId, 5, new DateOnly(2026, 8, 29));
+        var allocations = service.Allocate(batches, productId, branchId, null, 5, new DateOnly(2026, 8, 29));
 
         Assert.Equal(2, allocations.Count);
         Assert.Equal("A", allocations[0].BatchNumber);
@@ -614,7 +614,7 @@ public class PharmacyFoundationTests
             new ProductBatch { Id = eligibleId, ProductId = productId, BranchId = branchId, BatchNumber = "eligible", ExpiryDate = saleDate, QuantityAvailable = 5 }
         };
 
-        var allocation = Assert.Single(service.Allocate(batches, productId, branchId, 5, saleDate));
+        var allocation = Assert.Single(service.Allocate(batches, productId, branchId, null, 5, saleDate));
         Assert.Equal(eligibleId, allocation.BatchId);
     }
 
@@ -630,7 +630,7 @@ public class PharmacyFoundationTests
         };
 
         var error = Assert.Throws<InvalidOperationException>(() =>
-            service.Allocate(batches, productId, branchId, 5, new DateOnly(2026, 8, 30)));
+            service.Allocate(batches, productId, branchId, null, 5, new DateOnly(2026, 8, 30)));
         Assert.Contains("Insufficient eligible stock", error.Message);
     }
 }

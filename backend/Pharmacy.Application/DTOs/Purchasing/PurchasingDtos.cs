@@ -29,7 +29,7 @@ public sealed record PurchaseOrderDetailsDto(
 
 public sealed record GoodsReceiptRequest(
     Guid BranchId, Guid SupplierId, Guid? PurchaseOrderId, string? SupplierInvoiceNumber,
-    DateOnly ReceiptDate, string? Notes, IReadOnlyList<GoodsReceiptItemRequest> Items);
+    DateOnly ReceiptDate, string? Notes, IReadOnlyList<GoodsReceiptItemRequest> Items, Guid? GodownId = null);
 
 public sealed record GoodsReceiptItemRequest(
     Guid ProductId, Guid? PurchaseOrderItemId, string BatchNumber,

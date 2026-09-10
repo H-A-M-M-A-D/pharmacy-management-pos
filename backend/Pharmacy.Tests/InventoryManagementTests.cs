@@ -4,6 +4,7 @@ using Pharmacy.Application.DTOs.Inventory;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Domain.Entities;
 
@@ -242,6 +243,45 @@ public sealed class InventoryManagementTests
         await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.StartStockCountSessionAsync(f.Actor.Id, draft.Id));
     }
 
+    [Fact]
+    public async Task Opening_stock_creates_batch_in_the_selected_godown()
+    {
+        var f = new Fixture(PermissionCatalog.InventoryOpeningStock);
+        await f.Service.AddOpeningStockAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, "B-1", null, f.Today.AddDays(30), 10, 8, 12, null, "initial", f.SecondGodown.Id));
+        Assert.Equal(f.SecondGodown.Id, f.Batch!.GodownId);
+        Assert.Equal(f.SecondGodown.Id, f.Inventory!.GodownId);
+    }
+
+    [Fact]
+    public async Task Same_product_tracks_independent_stock_in_two_godowns()
+    {
+        var f = new Fixture(PermissionCatalog.InventoryOpeningStock);
+        await f.Service.AddOpeningStockAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, "B-1", null, f.Today.AddDays(30), 10, 8, 12, null, null, f.MainGodown.Id));
+        await f.Service.AddOpeningStockAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, "B-1", null, f.Today.AddDays(30), 25, 8, 12, null, null, f.SecondGodown.Id));
+        Assert.Equal(2, f.Batches.Count);
+        Assert.Equal(10, f.Batches.Single(x => x.GodownId == f.MainGodown.Id).QuantityAvailable);
+        Assert.Equal(25, f.Batches.Single(x => x.GodownId == f.SecondGodown.Id).QuantityAvailable);
+    }
+
+    [Fact]
+    public async Task Opening_stock_into_unauthorized_godown_is_forbidden()
+    {
+        var f = new Fixture(PermissionCatalog.InventoryOpeningStock);
+        f.Actor.Role!.Name = RoleCatalog.StoreKeeper; // non-branch-selecting role: godown access is actually enforced
+        f.GodownAccess.AccessPredicate = (_, godownId) => godownId != f.SecondGodown.Id;
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.AddOpeningStockAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, "B-1", null, f.Today.AddDays(30), 10, 8, 12, null, null, f.SecondGodown.Id)));
+    }
+
+    [Fact]
+    public async Task Adjustment_changes_only_the_batchs_own_godown_and_checks_access()
+    {
+        var f = new Fixture(PermissionCatalog.InventoryAdjust, PermissionCatalog.InventoryOpeningStock);
+        await f.Service.AddOpeningStockAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, "B-1", null, f.Today.AddDays(30), 10, 8, 12, null, null, f.SecondGodown.Id));
+        f.Actor.Role!.Name = RoleCatalog.StoreKeeper; // non-branch-selecting role: godown access is actually enforced
+        f.GodownAccess.AccessPredicate = (_, godownId) => godownId != f.SecondGodown.Id;
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.AdjustStockIncreaseAsync(f.Actor.Id, new(f.Branch.Id, f.Product.Id, f.Batch!.Id, 5, AdjustmentReason.PhysicalCountCorrection, null)));
+    }
+
     private sealed class Fixture : IInventoryRepository
     {
         public readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5));
@@ -255,15 +295,24 @@ public sealed class InventoryManagementTests
         public ProductBatch? Batch;
         public Pharmacy.Domain.Entities.Inventory? Inventory;
         public RecordingJournalPostingService Journal { get; } = new();
+        public readonly FakeGodownAccessService GodownAccess = new();
+        public readonly Godown MainGodown;
+        public readonly Godown SecondGodown;
         public InventoryService Service { get; }
 
         public Fixture(params string[] permissions)
         {
+            MainGodown = new Godown { BranchId = Branch.Id, Code = "MAIN", Name = "Main Godown", IsActive = true, IsDefault = true };
+            SecondGodown = new Godown { BranchId = Branch.Id, Code = "SECOND", Name = "Second Godown", IsActive = true };
+            GodownAccess.Godowns[MainGodown.Id] = MainGodown;
+            GodownAccess.Godowns[SecondGodown.Id] = SecondGodown;
+            GodownAccess.DefaultBranchId = Branch.Id;
+            GodownAccess.DefaultGodownId = MainGodown.Id;
             Product = new Product { SKU = "SKU-1", NormalizedSku = "SKU-1", Name = "Panadol", CategoryId = Category.Id, Category = Category, Unit = "Tablet", PackSize = 1, PurchasePrice = 8, RetailPrice = 12, MaximumDiscountPercent = 0, ReorderLevel = 5, IsActive = true };
             var role = new Role { Name = RoleCatalog.Manager };
             foreach (var permission in permissions) role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, new FefoAllocationService(), Journal, TimeProvider.System);
+            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, TimeProvider.System);
         }
 
         public void ExistingBatch(int quantity, DateOnly expiry)
@@ -286,7 +335,7 @@ public sealed class InventoryManagementTests
         public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Branch?>(Branch.Id == branchId ? Branch : null);
         public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<Product?>(Product.Id == productId ? Product : null);
         public Task<ProductBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) => Task.FromResult<ProductBatch?>(Batches.FirstOrDefault(x => x.Id == batchId));
-        public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) => Task.FromResult<ProductBatch?>(Batches.FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.BatchNumber == batchNumber));
+        public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid? godownId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) => Task.FromResult<ProductBatch?>(Batches.FirstOrDefault(x => x.BranchId == branchId && x.GodownId == godownId && x.ProductId == productId && x.BatchNumber == batchNumber));
         public Task<Pharmacy.Domain.Entities.Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) =>
             Task.FromResult(AllInventory().FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId));
         private IEnumerable<Pharmacy.Domain.Entities.Inventory> AllInventory() => (Inventory is null ? [] : new[] { Inventory }).Concat(SecondaryInventory);
@@ -352,5 +401,17 @@ public sealed class InventoryManagementTests
             Posted.Add(request);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeGodownAccessService : IGodownAccessService
+    {
+        public readonly Dictionary<Guid, Godown> Godowns = [];
+        public Guid DefaultBranchId;
+        public Guid? DefaultGodownId;
+        public Func<Guid, Guid, bool> AccessPredicate = (_, _) => true;
+
+        public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
+        public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
+        public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
     }
 }

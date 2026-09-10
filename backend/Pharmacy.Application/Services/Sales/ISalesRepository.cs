@@ -13,7 +13,7 @@ public interface ISalesRepository
     Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default);
     Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default);
     Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid? godownId, Guid productId, CancellationToken cancellationToken = default);
     Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default);
     Task<Sale?> GetSaleAsync(Guid id, CancellationToken cancellationToken = default);
     Task<string> NextInvoiceNumberAsync(DateTime postedAtUtc, CancellationToken cancellationToken = default);
@@ -25,7 +25,7 @@ public interface ISalesRepository
     Task<PagedResult<SaleListItemDto>> ListSalesAsync(SalesHistoryQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task<PagedResult<SaleListItemDto>> ListHeldSalesAsync(HeldSalesQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task<SaleDetailsDto?> GetSaleDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, Guid? godownId, CancellationToken cancellationToken = default);
     Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

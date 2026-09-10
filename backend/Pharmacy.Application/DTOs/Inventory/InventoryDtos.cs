@@ -20,7 +20,7 @@ public enum AdjustmentReason
 public sealed record OpeningStockRequest(
     Guid BranchId, Guid ProductId, string BatchNumber, DateOnly? ManufacturingDate,
     DateOnly ExpiryDate, int Quantity, decimal PurchasePrice, decimal RetailPrice,
-    Guid? SupplierId, string? Notes);
+    Guid? SupplierId, string? Notes, Guid? GodownId = null);
 
 public sealed record StockAdjustmentRequest(
     Guid BranchId, Guid ProductId, Guid ProductBatchId, int Quantity,
@@ -40,12 +40,13 @@ public sealed record InventoryListQuery(
 public sealed record BatchListQuery(
     int Page = 1, int PageSize = 25, Guid? BranchId = null, Guid? ProductId = null,
     string? Search = null, DateOnly? ExpiryFrom = null, DateOnly? ExpiryTo = null,
-    BatchState? State = null, bool HasStockOnly = false);
+    BatchState? State = null, bool HasStockOnly = false, Guid? GodownId = null);
 
 public sealed record StockMovementListQuery(
     int Page = 1, int PageSize = 25, Guid? BranchId = null, Guid? ProductId = null,
     Guid? ProductBatchId = null, StockMovementType? MovementType = null,
-    DateTime? FromUtc = null, DateTime? ToUtc = null, Guid? UserId = null, string? Search = null);
+    DateTime? FromUtc = null, DateTime? ToUtc = null, Guid? UserId = null, string? Search = null,
+    Guid? GodownId = null);
 
 public sealed record ExpiryQuery(Guid? BranchId = null, int? Days = null, DateOnly? From = null, DateOnly? To = null);
 

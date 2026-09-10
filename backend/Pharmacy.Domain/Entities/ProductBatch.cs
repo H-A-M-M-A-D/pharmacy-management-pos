@@ -49,9 +49,20 @@ public class ProductBatch : Entity
     public Branch? Branch { get; set; }
 
     /// <summary>
+    /// Foreign key to the godown (stock location) within the branch where this batch physically sits.
+    /// Nullable for records created before multi-godown support (legacy/unscoped stock).
+    /// </summary>
+    public Guid? GodownId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the godown.
+    /// </summary>
+    public Godown? Godown { get; set; }
+
+    /// <summary>
     /// Unique batch/lot number from supplier.
     /// Note: Batch numbers may repeat across branches and products, so
-    /// (BranchId + ProductId + BatchNumber) is unique.
+    /// (BranchId + GodownId + ProductId + BatchNumber) is unique.
     /// </summary>
     public required string BatchNumber { get; set; }
 

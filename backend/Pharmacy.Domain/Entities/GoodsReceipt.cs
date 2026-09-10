@@ -6,6 +6,10 @@ public class GoodsReceipt : Entity
 {
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+
+    /// <summary>Destination godown stock was received into. Nullable for legacy/unscoped branches.</summary>
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public Guid SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
     public Guid? PurchaseOrderId { get; set; }

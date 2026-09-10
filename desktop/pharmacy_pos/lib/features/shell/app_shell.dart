@@ -6,6 +6,7 @@ import '../catalog/products_screen.dart';
 import '../catalog/catalog_masters_screen.dart';
 import '../customers/customers_screen.dart';
 import '../finance/finance_screen.dart';
+import '../godowns/godowns_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../purchasing/purchasing_screen.dart';
 import '../reports/reports_screen.dart';
@@ -35,6 +36,7 @@ class _AppShellState extends State<AppShell> {
     final canViewCategories = widget.authState.can('categories.view');
     final canViewManufacturers = widget.authState.can('manufacturers.view');
     final canViewInventory = widget.authState.can('inventory.view');
+    final canViewGodowns = widget.authState.can('godowns.view');
     final canViewSuppliers = widget.authState.can('suppliers.view');
     final canViewCustomers = widget.authState.can('customers.view');
     final canViewPurchasing =
@@ -108,6 +110,12 @@ class _AppShellState extends State<AppShell> {
           icon: Icon(Icons.inventory_2_outlined),
           selectedIcon: Icon(Icons.inventory_2),
           label: Text('Inventory'),
+        ),
+      if (canViewGodowns)
+        const NavigationRailDestination(
+          icon: Icon(Icons.warehouse_outlined),
+          selectedIcon: Icon(Icons.warehouse),
+          label: Text('Godowns'),
         ),
       if (canViewSuppliers)
         const NavigationRailDestination(
@@ -184,6 +192,7 @@ class _AppShellState extends State<AppShell> {
           mode: CatalogMasterMode.manufacturers,
         ),
       if (canViewInventory) InventoryScreen(authState: widget.authState),
+      if (canViewGodowns) GodownsScreen(authState: widget.authState),
       if (canViewSuppliers) SuppliersScreen(authState: widget.authState),
       if (canViewCustomers) CustomersScreen(authState: widget.authState),
       if (canViewPurchasing) PurchasingScreen(authState: widget.authState),

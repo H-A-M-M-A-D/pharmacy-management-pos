@@ -4,6 +4,7 @@ using Pharmacy.Application.DTOs.Sales;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Application.Services.Inventory;
 using Pharmacy.Application.Services.Sales;
 using Pharmacy.Domain.Entities;
@@ -251,6 +252,67 @@ public sealed class SalesServiceTests
             [new(SalePaymentMethod.Cash, 12, 12)])));
     }
 
+    [Fact]
+    public async Task Sale_from_selected_godown_ignores_earlier_expiring_batch_in_another_godown()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        // Retail Counter's batch expires sooner globally, but the sale is from Main Godown.
+        var mainBatch = f.AddBatch("MAIN-A", 5, f.Today.AddDays(30), 8, 12, godownId: f.MainGodown.Id);
+        f.AddBatch("RETAIL-A", 5, f.Today.AddDays(5), 8, 12, godownId: f.RetailGodown.Id);
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, null, null, null, [new(f.Product.Id, 3)], [new(SalePaymentMethod.Cash, 36, 36)], f.MainGodown.Id));
+
+        var allocation = Assert.Single(sale.Items.Single().Allocations);
+        Assert.Equal("MAIN-A", allocation.BatchNumber);
+        Assert.Equal(2, mainBatch.QuantityAvailable);
+    }
+
+    [Fact]
+    public async Task Sale_fails_when_selected_godown_lacks_stock_even_if_another_godown_has_it()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("RETAIL-A", 50, f.Today.AddDays(10), 8, 12, godownId: f.RetailGodown.Id);
+
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, null, null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 12, 12)], f.MainGodown.Id)));
+    }
+
+    [Fact]
+    public async Task Sale_from_unauthorized_godown_is_forbidden()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("A", 5, f.Today.AddDays(30), 8, 12);
+        f.GodownAccess.AccessPredicate = (_, godownId) => godownId != f.RetailGodown.Id;
+
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, null, null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 12, 12)], f.RetailGodown.Id)));
+    }
+
+    [Fact]
+    public async Task Sale_from_cross_branch_godown_is_rejected()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        var otherGodown = new Godown { BranchId = Guid.NewGuid(), Code = "OTHER", Name = "Other Branch Godown", IsActive = true };
+        f.GodownAccess.Godowns[otherGodown.Id] = otherGodown;
+        f.AddBatch("A", 5, f.Today.AddDays(30), 8, 12);
+
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, null, null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 12, 12)], otherGodown.Id)));
+    }
+
+    [Fact]
+    public async Task Held_sale_keeps_its_original_godown_when_posted()
+    {
+        var f = new Fixture(PermissionCatalog.SalesHold, PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("RETAIL-A", 5, f.Today.AddDays(30), 8, 12, godownId: f.RetailGodown.Id);
+
+        var held = await f.Service.HoldSaleAsync(f.Actor.Id, new(f.Branch.Id, "Ali", null, null, [new(f.Product.Id, 2)], f.RetailGodown.Id));
+        var posted = await f.Service.PostHeldSaleAsync(f.Actor.Id, held.Id, new(null, [new(SalePaymentMethod.Cash, 24, 24)]));
+
+        Assert.Equal("RETAIL-A", posted.Items.Single().Allocations.Single().BatchNumber);
+    }
+
     private sealed class Fixture : ISalesRepository
     {
         public readonly DateOnly Today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time")));
@@ -258,6 +320,8 @@ public sealed class SalesServiceTests
         public readonly ProductCategory Category = new() { Name = "Medicine", NormalizedName = "MEDICINE" };
         public readonly Product Product;
         public readonly User Actor;
+        public readonly Godown MainGodown;
+        public readonly Godown RetailGodown;
         public readonly List<Sale> Sales = [];
         public readonly List<ProductBatch> Batches = [];
         public readonly List<DomainInventory> Inventory = [];
@@ -266,10 +330,17 @@ public sealed class SalesServiceTests
         public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
         public readonly FakeJournalPostingService Journal = new();
+        public readonly FakeGodownAccessService GodownAccess = new();
         public SalesService Service { get; }
 
         public Fixture(params string[] permissions)
         {
+            MainGodown = new Godown { BranchId = Branch.Id, Code = "MAIN", Name = "Main Godown", IsActive = true, IsDefault = true };
+            RetailGodown = new Godown { BranchId = Branch.Id, Code = "RETAIL", Name = "Retail Counter", IsActive = true };
+            GodownAccess.Godowns[MainGodown.Id] = MainGodown;
+            GodownAccess.Godowns[RetailGodown.Id] = RetailGodown;
+            GodownAccess.DefaultBranchId = Branch.Id;
+            GodownAccess.DefaultGodownId = MainGodown.Id;
             Product = new Product
             {
                 SKU = "SKU-1",
@@ -294,16 +365,17 @@ public sealed class SalesServiceTests
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             }
             Actor = new User { Username = "cashier", NormalizedUsername = "CASHIER", FullName = "Cashier User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
-            Service = new(this, new FefoAllocationService(), Journal, TimeProvider.System);
+            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, TimeProvider.System);
         }
 
-        public ProductBatch AddBatch(string number, int quantity, DateOnly expiry, decimal purchasePrice, decimal retailPrice, bool disposed = false, Guid? branchId = null)
+        public ProductBatch AddBatch(string number, int quantity, DateOnly expiry, decimal purchasePrice, decimal retailPrice, bool disposed = false, Guid? branchId = null, Guid? godownId = null)
         {
             var batch = new ProductBatch
             {
                 ProductId = Product.Id,
                 Product = Product,
                 BranchId = branchId ?? Branch.Id,
+                GodownId = godownId ?? MainGodown.Id,
                 BatchNumber = number,
                 ExpiryDate = expiry,
                 PurchasePrice = purchasePrice,
@@ -313,7 +385,7 @@ public sealed class SalesServiceTests
                 IsDisposed = disposed
             };
             Batches.Add(batch);
-            Inventory.Add(new DomainInventory { BranchId = batch.BranchId, ProductId = Product.Id, ProductBatchId = batch.Id, ProductBatch = batch, QuantityInStock = quantity, ReorderLevel = Product.ReorderLevel });
+            Inventory.Add(new DomainInventory { BranchId = batch.BranchId, GodownId = batch.GodownId, ProductId = Product.Id, ProductBatchId = batch.Id, ProductBatch = batch, QuantityInStock = quantity, ReorderLevel = Product.ReorderLevel });
             return batch;
         }
 
@@ -336,7 +408,7 @@ public sealed class SalesServiceTests
         public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<Product?>(Product.Id == productId ? Product : null);
         public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => Task.FromResult<Customer?>(Customers.FirstOrDefault(x => x.Id == customerId));
         public Task<decimal> GetCustomerBalanceAsync(Guid customerId, Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(CustomerLedger.Where(x => x.CustomerId == customerId && x.BranchId == branchId).Sum(x => x.Amount));
-        public Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ProductBatch>>(Batches.OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToList());
+        public Task<IReadOnlyList<ProductBatch>> GetEligibleBatchesAsync(Guid branchId, Guid? godownId, Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ProductBatch>>(Batches.OrderBy(x => x.ExpiryDate).ThenBy(x => x.CreatedAt).ThenBy(x => x.BatchNumber).ThenBy(x => x.Id).ToList());
         public Task<DomainInventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) => Task.FromResult<DomainInventory?>(Inventory.FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId));
         public Task<Sale?> GetSaleAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Sale?>(Sales.FirstOrDefault(x => x.Id == id));
         public Task<string> NextInvoiceNumberAsync(DateTime postedAtUtc, CancellationToken cancellationToken = default) => Task.FromResult($"INV-{postedAtUtc.Year}-{Sales.Count(x => x.Status == SaleStatus.Posted) + 1:000000}");
@@ -345,7 +417,7 @@ public sealed class SalesServiceTests
         public Task AddCustomerLedgerEntryAsync(CustomerLedgerEntry entry, CancellationToken cancellationToken = default) { CustomerLedger.Add(entry); return Task.CompletedTask; }
         public Task AddMovementAsync(StockMovement movement, CancellationToken cancellationToken = default) { Movements.Add(movement); return Task.CompletedTask; }
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
-        public Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<PosProductDto>>([]);
+        public Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(PosProductSearchQuery query, Guid actorBranchId, bool canSelectBranch, DateOnly businessDate, Guid? godownId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<PosProductDto>>([]);
         public Task<PagedResult<SaleListItemDto>> ListSalesAsync(SalesHistoryQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<SaleListItemDto>([], query.Page, query.PageSize, 0));
         public Task<PagedResult<SaleListItemDto>> ListHeldSalesAsync(HeldSalesQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => Task.FromResult(new PagedResult<SaleListItemDto>([], query.Page, query.PageSize, 0));
         public Task<SaleDetailsDto?> GetSaleDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
@@ -381,5 +453,17 @@ public sealed class SalesServiceTests
             Posted.Add(request);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeGodownAccessService : IGodownAccessService
+    {
+        public readonly Dictionary<Guid, Godown> Godowns = [];
+        public Guid DefaultBranchId;
+        public Guid? DefaultGodownId;
+        public Func<Guid, Guid, bool> AccessPredicate = (_, _) => true;
+
+        public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
+        public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
+        public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
     }
 }

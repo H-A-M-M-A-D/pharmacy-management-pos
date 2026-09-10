@@ -5,11 +5,12 @@ using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Purchasing;
 
-public sealed class PurchasingService(IPurchasingRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : IPurchasingService
+public sealed class PurchasingService(IPurchasingRepository repository, IJournalPostingService journalPosting, IGodownAccessService godownAccess, TimeProvider timeProvider) : IPurchasingService
 {
     public async Task<PagedResult<PurchaseOrderListItemDto>> ListPurchaseOrdersAsync(Guid actorId, PurchaseOrderListQuery query, CancellationToken cancellationToken = default)
     {
@@ -168,6 +169,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         await repository.ExecuteInTransactionAsync(async ct =>
         {
             var branch = await RequireActiveBranch(request.BranchId, ct);
+            var godownId = await ResolveGodownAsync(actor, branch.Id, request.GodownId, ct);
             var supplier = await RequireActiveSupplier(request.SupplierId, ct);
             var normalizedInvoice = NormalizeOptional(request.SupplierInvoiceNumber);
             if (normalizedInvoice is not null && await repository.SupplierInvoiceExistsAsync(supplier.Id, normalizedInvoice, ct))
@@ -184,6 +186,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
             receipt = new GoodsReceipt
             {
                 BranchId = branch.Id,
+                GodownId = godownId,
                 SupplierId = supplier.Id,
                 PurchaseOrderId = order?.Id,
                 GrnNumber = await repository.NextGrnNumberAsync(request.ReceiptDate, ct),
@@ -202,7 +205,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 var orderItem = ResolveOrderItem(order, item);
                 if (orderItem is not null && orderItem.ReceivedQuantity + item.PurchasedQuantity > orderItem.OrderedQuantity)
                     throw new RequestValidationException("Received paid quantity cannot exceed ordered quantity.");
-                var batch = await BatchForReceipt(branch, supplier, product, item, ct);
+                var batch = await BatchForReceipt(branch, godownId, supplier, product, item, ct);
                 var totals = CalculateLine(item);
                 var inventoryQuantity = item.PurchasedQuantity + item.BonusQuantity;
                 var inventory = await InventoryFor(batch, product, ct);
@@ -237,6 +240,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 {
                     MovementType = StockMovementType.Purchase,
                     BranchId = branch.Id,
+                    GodownId = godownId,
                     ProductId = product.Id,
                     ProductBatchId = batch.Id,
                     Quantity = inventoryQuantity,
@@ -303,6 +307,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         {
             var receipt = await repository.GetGoodsReceiptAsync(goodsReceiptId, ct) ?? throw new ResourceNotFoundException("Purchase was not found.");
             EnsureBranchAccess(actor, receipt.BranchId);
+            if (receipt.GodownId.HasValue) await EnsureGodownAccessAsync(actor, receipt.BranchId, receipt.GodownId.Value, ct);
             if (receipt.Status != GoodsReceiptStatus.Posted) throw new RequestValidationException("Only posted goods receipts can be returned to supplier.");
             if (request.Items.Any(x => receipt.Items.All(i => i.Id != x.OriginalGoodsReceiptItemId)))
                 throw new RequestValidationException("This item does not belong to the selected Goods Receipt.");
@@ -314,6 +319,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 OriginalGoodsReceiptId = receipt.Id,
                 SupplierId = receipt.SupplierId,
                 BranchId = receipt.BranchId,
+                GodownId = receipt.GodownId,
                 ProcessedByUserId = actorId,
                 ReturnNumber = await repository.NextPurchaseReturnNumberAsync(now, ct),
                 ReturnDateUtc = now,
@@ -370,6 +376,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 {
                     MovementType = StockMovementType.PurchaseReturn,
                     BranchId = receipt.BranchId,
+                    GodownId = receipt.GodownId,
                     ProductId = original.ProductId,
                     ProductBatchId = batch.Id,
                     Quantity = -physical,
@@ -493,6 +500,33 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         return branch is { IsActive: true } ? branch : throw new RequestValidationException("Branch is invalid or inactive.");
     }
 
+    /// <summary>
+    /// Resolves the destination godown for a goods receipt / direct purchase: an explicit,
+    /// access-checked request, or the branch's default godown. Returns null when the branch has no
+    /// godowns configured yet, preserving pre-multi-godown behaviour for legacy/unmigrated installs.
+    /// </summary>
+    private async Task<Guid?> ResolveGodownAsync(User actor, Guid branchId, Guid? requestedGodownId, CancellationToken ct)
+    {
+        if (requestedGodownId.HasValue)
+        {
+            await EnsureGodownAccessAsync(actor, branchId, requestedGodownId.Value, ct);
+            return requestedGodownId;
+        }
+        var defaultId = await godownAccess.GetDefaultGodownIdAsync(branchId, ct);
+        if (defaultId.HasValue) await EnsureGodownAccessAsync(actor, branchId, defaultId.Value, ct);
+        return defaultId;
+    }
+
+    private async Task EnsureGodownAccessAsync(User actor, Guid branchId, Guid godownId, CancellationToken ct)
+    {
+        var godown = await godownAccess.GetGodownAsync(godownId, ct) ?? throw new RequestValidationException("Godown is invalid.");
+        if (godown.BranchId != branchId) throw new RequestValidationException("Godown does not belong to the selected branch.");
+        if (!godown.IsActive) throw new RequestValidationException("Godown is inactive.");
+        if (CanSelectBranch(actor)) return;
+        if (!await godownAccess.UserHasAccessAsync(actor.Id, godownId, ct))
+            throw new ForbiddenOperationException("You do not have access to this godown.");
+    }
+
     private async Task<Supplier> RequireActiveSupplier(Guid supplierId, CancellationToken ct)
     {
         var supplier = await repository.GetSupplierAsync(supplierId, ct);
@@ -522,15 +556,16 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         return orderItem;
     }
 
-    private async Task<ProductBatch> BatchForReceipt(Branch branch, Supplier supplier, Product product, GoodsReceiptItemRequest item, CancellationToken ct)
+    private async Task<ProductBatch> BatchForReceipt(Branch branch, Guid? godownId, Supplier supplier, Product product, GoodsReceiptItemRequest item, CancellationToken ct)
     {
         var batchNumber = item.BatchNumber.Trim();
-        var batch = await repository.GetBatchByNumberAsync(branch.Id, product.Id, batchNumber, ct);
+        var batch = await repository.GetBatchByNumberAsync(branch.Id, godownId, product.Id, batchNumber, ct);
         if (batch is null)
         {
             batch = new ProductBatch
             {
                 BranchId = branch.Id,
+                GodownId = godownId,
                 ProductId = product.Id,
                 SupplierId = supplier.Id,
                 BatchNumber = batchNumber,
@@ -557,7 +592,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
     {
         var inventory = await repository.GetInventoryAsync(batch.BranchId, batch.ProductId, batch.Id, ct);
         if (inventory is not null) return inventory;
-        inventory = new Pharmacy.Domain.Entities.Inventory { BranchId = batch.BranchId, ProductId = batch.ProductId, ProductBatchId = batch.Id, ReorderLevel = product.ReorderLevel, QuantityInStock = 0, LastCountedAt = UtcNow() };
+        inventory = new Pharmacy.Domain.Entities.Inventory { BranchId = batch.BranchId, GodownId = batch.GodownId, ProductId = batch.ProductId, ProductBatchId = batch.Id, ReorderLevel = product.ReorderLevel, QuantityInStock = 0, LastCountedAt = UtcNow() };
         await repository.AddInventoryAsync(inventory, ct);
         return inventory;
     }

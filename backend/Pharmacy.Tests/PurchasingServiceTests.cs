@@ -4,6 +4,7 @@ using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Users;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Application.Services.Purchasing;
 using Pharmacy.Domain.Entities;
 
@@ -207,6 +208,51 @@ public sealed class PurchasingServiceTests
         Assert.Equal(10, item.PurchasedQuantity);
         Assert.Equal(PurchaseOrderStatus.Completed, f.Orders.Single().Status);
     }
+    [Fact]
+    public async Task Direct_purchase_receives_stock_only_into_the_selected_godown()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
+        var receipt = await f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(50, 0, 10, 0, 0, godownId: f.SecondGodown.Id));
+
+        var batch = f.Batches.Single();
+        Assert.Equal(f.SecondGodown.Id, batch.GodownId);
+        Assert.Equal(f.SecondGodown.Id, f.Inventory.Single().GodownId);
+        Assert.Equal(f.SecondGodown.Id, f.Movements.Single(x => x.MovementType == StockMovementType.Purchase).GodownId);
+        Assert.Equal(f.SecondGodown.Id, f.Receipts.Single(x => x.Id == receipt.Id).GodownId);
+    }
+
+    [Fact]
+    public async Task Same_batch_number_is_tracked_independently_per_godown()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
+        await f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(10, 0, 10, 0, 0, batch: "SHARED", godownId: f.MainGodown.Id));
+        await f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(20, 0, 10, 0, 0, batch: "SHARED", godownId: f.SecondGodown.Id));
+
+        Assert.Equal(2, f.Batches.Count);
+        Assert.Equal(10, f.Batches.Single(x => x.GodownId == f.MainGodown.Id).QuantityAvailable);
+        Assert.Equal(20, f.Batches.Single(x => x.GodownId == f.SecondGodown.Id).QuantityAvailable);
+    }
+
+    [Fact]
+    public async Task Direct_purchase_into_unauthorized_godown_is_forbidden()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
+        f.Actor.Role!.Name = RoleCatalog.StoreKeeper; // non-branch-selecting role: godown access is actually enforced
+        f.GodownAccess.AccessPredicate = (_, godownId) => godownId != f.SecondGodown.Id;
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(10, 0, 10, 0, 0, godownId: f.SecondGodown.Id)));
+    }
+
+    [Fact]
+    public async Task Purchase_return_inherits_the_original_receipts_godown()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate, PermissionCatalog.PurchaseReturnsCreate);
+        var receipt = await f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(10, 0, 50, 0, 0, godownId: f.SecondGodown.Id));
+        var itemId = f.Receipts.Single().Items.Single().Id;
+        var posted = await f.Service.PostPurchaseReturnAsync(f.Actor.Id, receipt.Id, new(PurchaseReturnReason.Damaged, null, [new(itemId, 2, 0)]));
+        Assert.Equal(f.SecondGodown.Id, f.PurchaseReturns.Single(x => x.Id == posted.Id).GodownId);
+        Assert.Equal(f.SecondGodown.Id, f.Movements.Single(x => x.MovementType == StockMovementType.PurchaseReturn).GodownId);
+    }
+
     private sealed class Fixture : IPurchasingRepository
     {
         public readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5));
@@ -224,21 +270,30 @@ public sealed class PurchasingServiceTests
         public readonly List<PurchaseReturn> PurchaseReturns = [];
         public readonly List<AuditLog> Audits = [];
         public readonly FakeJournalPostingService Journal = new();
+        public readonly FakeGodownAccessService GodownAccess = new();
+        public readonly Godown MainGodown;
+        public readonly Godown SecondGodown;
         public bool FailOnSave;
         public PurchasingService Service { get; }
 
         public Fixture(params string[] permissions)
         {
+            MainGodown = new Godown { BranchId = Branch.Id, Code = "MAIN", Name = "Main Godown", IsActive = true, IsDefault = true };
+            SecondGodown = new Godown { BranchId = Branch.Id, Code = "SECOND", Name = "Second Godown", IsActive = true };
+            GodownAccess.Godowns[MainGodown.Id] = MainGodown;
+            GodownAccess.Godowns[SecondGodown.Id] = SecondGodown;
+            GodownAccess.DefaultBranchId = Branch.Id;
+            GodownAccess.DefaultGodownId = MainGodown.Id;
             Product = new Product { SKU = "SKU-1", NormalizedSku = "SKU-1", Name = "Panadol", CategoryId = Category.Id, Category = Category, Unit = "Tablet", PackSize = 1, PurchasePrice = 50, RetailPrice = 60, MaximumDiscountPercent = 0, ReorderLevel = 5, IsActive = true };
             var role = new Role { Name = RoleCatalog.Manager };
             foreach (var permission in permissions) role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, Journal, TimeProvider.System);
+            Service = new(this, Journal, GodownAccess, TimeProvider.System);
         }
 
         public PurchaseOrderRequest OrderRequest(int quantity) => new(Branch.Id, Supplier.Id, Today, Today.AddDays(3), null, null, [new(Product.Id, quantity, 50, null)]);
-        public GoodsReceiptRequest DirectRequest(int paid, int bonus, decimal price, decimal discount, decimal tax, string? invoice = null, string batch = "B-1", DateOnly? expiry = null) =>
-            new(Branch.Id, Supplier.Id, null, invoice, Today, "direct", [new(Product.Id, null, batch, null, expiry ?? Today.AddDays(365), paid, bonus, price, 60, discount, tax)]);
+        public GoodsReceiptRequest DirectRequest(int paid, int bonus, decimal price, decimal discount, decimal tax, string? invoice = null, string batch = "B-1", DateOnly? expiry = null, Guid? godownId = null) =>
+            new(Branch.Id, Supplier.Id, null, invoice, Today, "direct", [new(Product.Id, null, batch, null, expiry ?? Today.AddDays(365), paid, bonus, price, 60, discount, tax)], godownId);
         public GoodsReceiptRequest OrderedReceipt(Guid orderId, Guid orderItemId, int paid, string batch) =>
             new(Branch.Id, Supplier.Id, orderId, Unique("inv"), Today, "ordered", [new(Product.Id, orderItemId, batch, null, Today.AddDays(365), paid, 0, 50, 60, 0, 0)]);
 
@@ -246,7 +301,7 @@ public sealed class PurchasingServiceTests
         public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Branch?>(Branch.Id == branchId ? Branch : null);
         public Task<Supplier?> GetSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default) => Task.FromResult<Supplier?>(Supplier.Id == supplierId ? Supplier : null);
         public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<Product?>(Product.Id == productId ? Product : null);
-        public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) => Task.FromResult<ProductBatch?>(Batches.FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.BatchNumber == batchNumber));
+        public Task<ProductBatch?> GetBatchByNumberAsync(Guid branchId, Guid? godownId, Guid productId, string batchNumber, CancellationToken cancellationToken = default) => Task.FromResult<ProductBatch?>(Batches.FirstOrDefault(x => x.BranchId == branchId && x.GodownId == godownId && x.ProductId == productId && x.BatchNumber == batchNumber));
         public Task<Pharmacy.Domain.Entities.Inventory?> GetInventoryAsync(Guid branchId, Guid productId, Guid batchId, CancellationToken cancellationToken = default) => Task.FromResult<Pharmacy.Domain.Entities.Inventory?>(Inventory.FirstOrDefault(x => x.BranchId == branchId && x.ProductId == productId && x.ProductBatchId == batchId));
         public Task<PurchaseOrder?> GetPurchaseOrderAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<PurchaseOrder?>(Orders.FirstOrDefault(x => x.Id == id));
         public Task<GoodsReceipt?> GetGoodsReceiptAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<GoodsReceipt?>(Receipts.FirstOrDefault(x => x.Id == id));
@@ -320,5 +375,17 @@ public sealed class PurchasingServiceTests
             Posted.Add(request);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeGodownAccessService : IGodownAccessService
+    {
+        public readonly Dictionary<Guid, Godown> Godowns = [];
+        public Guid DefaultBranchId;
+        public Guid? DefaultGodownId;
+        public Func<Guid, Guid, bool> AccessPredicate = (_, _) => true;
+
+        public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
+        public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
+        public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
     }
 }

@@ -20,6 +20,17 @@ public class Inventory : Entity
     public Branch? Branch { get; set; }
 
     /// <summary>
+    /// Foreign key to the godown (stock location) this balance belongs to.
+    /// Nullable for records created before multi-godown support (legacy/unscoped stock).
+    /// </summary>
+    public Guid? GodownId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the godown.
+    /// </summary>
+    public Godown? Godown { get; set; }
+
+    /// <summary>
     /// Foreign key to product.
     /// </summary>
     public Guid ProductId { get; set; }
