@@ -26,18 +26,36 @@ class _JournalViewState extends State<JournalView> {
   Future<void> _load({int? page}) async {
     setState(() { _loading = true; _error = null; _page = page ?? _page; });
     final query = <String, String>{'page': '$_page', 'pageSize': '25'};
-    if (_search.text.trim().isNotEmpty) query['search'] = _search.text.trim();
-    if (_source != null) query['sourceType'] = _source!;
-    if (_from != null) query['fromUtc'] = DateTime(_from!.year, _from!.month, _from!.day).toUtc().toIso8601String();
-    if (_to != null) query['toUtc'] = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59).toUtc().toIso8601String();
+    if (_search.text.trim().isNotEmpty) {
+      query['search'] = _search.text.trim();
+    }
+    if (_source != null) {
+      query['sourceType'] = _source!;
+    }
+    if (_from != null) {
+      query['fromUtc'] = DateTime(_from!.year, _from!.month, _from!.day).toUtc().toIso8601String();
+    }
+    if (_to != null) {
+      query['toUtc'] = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59).toUtc().toIso8601String();
+    }
     try {
       final data = await widget.authState.accounting('journal', query: query) as Map<String, dynamic>;
-      if (mounted) setState(() {
-        _items = (data['items'] as List<dynamic>? ?? []).map((x) => JournalListItem.fromJson(x as Map<String, dynamic>)).toList();
-        _total = data['totalCount'] as int? ?? 0;
-      });
-    } on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
-    finally { if (mounted) setState(() => _loading = false); }
+      if (mounted) {
+        setState(() {
+          _items = (data['items'] as List<dynamic>? ?? []).map((x) => JournalListItem.fromJson(x as Map<String, dynamic>)).toList();
+          _total = data['totalCount'] as int? ?? 0;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _error = e.message);
+      }
+    }
+    finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   @override

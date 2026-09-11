@@ -1313,29 +1313,29 @@ class _AdjustmentDialogState extends State<_AdjustmentDialog> {
                     child: Text('Current quantity: ${_batch!.quantityAvailable}'),
                   ),
                 ),
-              Row(
-                children: [
-                  Expanded(
-                    child: RadioListTile<bool>(
-                      key: const Key('adjust_direction_increase'),
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Increase'),
-                      value: true,
-                      groupValue: _increase,
-                      onChanged: (v) => setState(() => _increase = v ?? true),
+              RadioGroup<bool>(
+                groupValue: _increase,
+                onChanged: (v) => setState(() => _increase = v ?? _increase),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<bool>(
+                        key: const Key('adjust_direction_increase'),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Increase'),
+                        value: true,
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: RadioListTile<bool>(
-                      key: const Key('adjust_direction_decrease'),
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Decrease'),
-                      value: false,
-                      groupValue: _increase,
-                      onChanged: (v) => setState(() => _increase = v ?? false),
+                    Expanded(
+                      child: RadioListTile<bool>(
+                        key: const Key('adjust_direction_decrease'),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Decrease'),
+                        value: false,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               TextFormField(
                 key: const Key('adjust_quantity'),
