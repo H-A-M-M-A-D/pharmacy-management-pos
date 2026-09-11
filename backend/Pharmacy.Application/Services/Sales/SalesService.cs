@@ -7,11 +7,22 @@ using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Godowns;
 using Pharmacy.Application.Services.Inventory;
+using Pharmacy.Application.Services.Pricing;
+using Pharmacy.Application.Services.Quotations;
+using Pharmacy.Application.Services.SalesOrders;
 using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Sales;
 
-public sealed class SalesService(ISalesRepository repository, IFefoAllocationService fefo, IJournalPostingService journalPosting, IGodownAccessService godownAccess, TimeProvider timeProvider) : ISalesService
+public sealed class SalesService(
+    ISalesRepository repository,
+    IFefoAllocationService fefo,
+    IJournalPostingService journalPosting,
+    IGodownAccessService godownAccess,
+    IPriceResolutionService priceResolver,
+    ISalesOrderRepository salesOrderRepository,
+    ISalesQuotationRepository salesQuotationRepository,
+    TimeProvider timeProvider) : ISalesService
 {
     public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(Guid actorId, PosProductSearchQuery query, CancellationToken cancellationToken = default)
     {
@@ -120,6 +131,8 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
     public async Task<SaleDetailsDto> PostSaleAsync(Guid actorId, PostSaleRequest request, CancellationToken cancellationToken = default)
     {
         var actor = await Require(actorId, PermissionCatalog.SalesCreate, cancellationToken);
+        if (request.SaleType == SaleType.Wholesale && actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesWholesale) != true)
+            throw new ForbiddenOperationException("The current user is not permitted to create wholesale sales.");
         var branchId = request.BranchId ?? actor.BranchId;
         EnsureBranchAccess(actor, branchId);
         ValidateLines(request.Items, actor);
@@ -127,7 +140,8 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         Sale? sale = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
-            sale = await BuildPostedSale(actor, branchId, request.GodownId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments, ct);
+            sale = await BuildPostedSale(actor, branchId, request.GodownId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments,
+                request.SaleType, request.PriceLevelId, request.QuotationId, request.SalesOrderId, request.CustomerPoNumber, request.DueDateOverride, request.CreditLimitOverrideReason, ct);
             await repository.AddSaleAsync(sale, ct);
             await Audit(actorId, "SalePosted", "Sale", sale.Id, null, AuditValues(sale), ct);
             await repository.SaveChangesAsync(ct);
@@ -147,7 +161,9 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             if (held.Status != SaleStatus.Held) throw new RequestValidationException("Only held sales can be posted.");
             var lines = held.Items.Select(x => new SaleLineRequest(x.ProductId, x.RequestedQuantity, x.DiscountPercent)).ToList();
             // A held sale's godown was fixed when it was placed on hold; it cannot be reassigned at post time.
-            var posted = await BuildPostedSale(actor, held.BranchId, held.GodownId, request.CustomerId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments, ct);
+            // Held sales are always plain retail POS sales - Phase 3 wholesale/quotation/order flows post directly via PostSaleAsync.
+            var posted = await BuildPostedSale(actor, held.BranchId, held.GodownId, request.CustomerId, held.CustomerName, held.CustomerPhone, held.Notes, lines, request.Payments,
+                SaleType.Retail, null, null, null, null, null, null, ct);
             held.Status = SaleStatus.Cancelled;
             held.UpdatedAt = UtcNow();
             await repository.AddSaleAsync(posted, ct);
@@ -182,8 +198,46 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         return new ReceiptDto(sale.InvoiceNumber, sale.BranchName, sale.BranchAddress, sale.BranchPhone, sale.PostedAtUtc.Value, sale.CashierName, sale.CustomerName, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Items, sale.Payments);
     }
 
-    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, Guid? requestedGodownId, Guid? customerId, string? customerName, string? customerPhone, string? notes, IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
+    private async Task<Sale> BuildPostedSale(User actor, Guid branchId, Guid? requestedGodownId, Guid? customerId, string? customerName, string? customerPhone, string? notes,
+        IReadOnlyList<SaleLineRequest> lines, IReadOnlyList<SalePaymentRequest> payments,
+        SaleType saleType, Guid? priceLevelId, Guid? quotationId, Guid? salesOrderId, string? customerPoNumber, DateOnly? dueDateOverride, string? creditLimitOverrideReason, CancellationToken ct)
     {
+        SalesOrder? sourceOrder = null;
+        Dictionary<Guid, SalesOrderItem>? orderItemsByProduct = null;
+        SalesQuotation? sourceQuotation = null;
+        Dictionary<Guid, SalesQuotationItem>? quotationItemsByProduct = null;
+
+        // Document-linked sales never trust client-supplied price/quantity beyond which product/how
+        // many: the authoritative line data always comes fresh from the SalesOrder/Quotation row
+        // itself, preserving the price the customer already agreed to (see class doc on
+        // SalesOrderService/SalesQuotationService for why).
+        if (salesOrderId.HasValue)
+        {
+            sourceOrder = await salesOrderRepository.GetOrderForUpdateAsync(salesOrderId.Value, ct) ?? throw new ResourceNotFoundException("Sales order was not found.");
+            if (sourceOrder.Status is not (SalesOrderStatus.Confirmed or SalesOrderStatus.PartiallyFulfilled))
+                throw new RequestValidationException("Only confirmed or partially fulfilled sales orders can be fulfilled.");
+            orderItemsByProduct = sourceOrder.Items.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.First());
+            branchId = sourceOrder.BranchId;
+            customerId = sourceOrder.CustomerId;
+            requestedGodownId = sourceOrder.GodownId;
+            priceLevelId = sourceOrder.PriceLevelId;
+            quotationId = sourceOrder.QuotationId;
+            saleType = SaleType.Wholesale;
+        }
+        else if (quotationId.HasValue)
+        {
+            sourceQuotation = await salesQuotationRepository.GetQuotationForUpdateAsync(quotationId.Value, ct) ?? throw new ResourceNotFoundException("Quotation was not found.");
+            if (sourceQuotation.ConvertedToSaleId.HasValue || sourceQuotation.ConvertedToSalesOrderId.HasValue)
+                throw new ResourceConflictException("This quotation has already been converted.");
+            if (sourceQuotation.Status != SalesQuotationStatus.Accepted) throw new RequestValidationException("Only accepted quotations can be converted to a sale.");
+            quotationItemsByProduct = sourceQuotation.Items.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.First());
+            branchId = sourceQuotation.BranchId;
+            customerId = sourceQuotation.CustomerId;
+            requestedGodownId = sourceQuotation.GodownId;
+            priceLevelId = sourceQuotation.PriceLevelId;
+            saleType = SaleType.Wholesale;
+        }
+
         var branch = await RequireActiveBranch(branchId, ct);
         var godownId = await ResolveGodownAsync(actor, branch.Id, requestedGodownId, ct);
         var now = UtcNow();
@@ -198,26 +252,108 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
             CustomerId = customerId,
             CustomerName = Clean(customerName),
             CustomerPhone = Clean(customerPhone),
-            Notes = Clean(notes)
+            Notes = Clean(notes),
+            SaleType = saleType,
+            PriceLevelId = priceLevelId,
+            QuotationId = quotationId,
+            SalesOrderId = salesOrderId,
+            CustomerPoNumber = Clean(customerPoNumber)
         };
 
         foreach (var line in lines)
         {
             var product = await RequireActiveProduct(line.ProductId, ct);
-            ValidateDiscount(actor, product, line.DiscountPercent);
+            decimal? overridePrice;
+            var priceSource = PriceSource.Default;
+            var effectiveDiscountPercent = line.DiscountPercent;
+            var isManualOverride = false;
+            string? priceOverrideReason = null;
+            var isDiscountOverride = false;
+            string? discountOverrideReason = null;
+            var checkBelowCost = false;
+
+            if (orderItemsByProduct is not null)
+            {
+                if (!orderItemsByProduct.TryGetValue(product.Id, out var orderItem))
+                    throw new RequestValidationException($"{product.Name} is not part of this sales order.");
+                var remaining = orderItem.OrderedQuantity - orderItem.FulfilledQuantity;
+                if (line.Quantity <= 0 || line.Quantity > remaining)
+                    throw new RequestValidationException($"Cannot fulfill more than the {remaining} unit(s) remaining for {product.Name}.");
+                overridePrice = orderItem.UnitPrice;
+                effectiveDiscountPercent = orderItem.DiscountPercent;
+                priceSource = PriceSource.DocumentSnapshot;
+                orderItem.FulfilledQuantity += line.Quantity;
+                orderItem.UpdatedAt = now;
+            }
+            else if (quotationItemsByProduct is not null)
+            {
+                if (!quotationItemsByProduct.TryGetValue(product.Id, out var qItem))
+                    throw new RequestValidationException($"{product.Name} is not part of this quotation.");
+                if (line.Quantity != qItem.Quantity)
+                    throw new RequestValidationException($"Quantity for {product.Name} must match the quotation.");
+                overridePrice = qItem.UnitPrice;
+                effectiveDiscountPercent = qItem.DiscountPercent;
+                priceSource = PriceSource.DocumentSnapshot;
+            }
+            else
+            {
+                if (line.UnitPriceOverride.HasValue)
+                {
+                    if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesPriceOverride) != true)
+                        throw new ForbiddenOperationException("The current user is not permitted to override the selling price.");
+                    if (string.IsNullOrWhiteSpace(line.PriceOverrideReason)) throw new RequestValidationException("A reason is required to override the selling price.");
+                    overridePrice = Money(line.UnitPriceOverride.Value);
+                    priceSource = PriceSource.ManualOverride;
+                    isManualOverride = true;
+                    priceOverrideReason = line.PriceOverrideReason.Trim();
+                }
+                else
+                {
+                    var resolved = await priceResolver.ResolveAsync(customerId, product.Id, line.Quantity, priceLevelId, cancellationToken: ct);
+                    overridePrice = resolved.Price;
+                    priceSource = resolved.Source;
+                }
+                checkBelowCost = priceSource != PriceSource.Default;
+
+                ValidateDiscountPermission(actor, effectiveDiscountPercent);
+                if (effectiveDiscountPercent > product.MaximumDiscountPercent)
+                {
+                    if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesDiscountOverride) != true)
+                        throw new RequestValidationException("Discount exceeds the product maximum.");
+                    if (string.IsNullOrWhiteSpace(line.DiscountOverrideReason)) throw new RequestValidationException("A reason is required to exceed the maximum discount.");
+                    isDiscountOverride = true;
+                    discountOverrideReason = line.DiscountOverrideReason.Trim();
+                }
+            }
+
             var batches = await repository.GetEligibleBatchesAsync(branch.Id, godownId, product.Id, ct);
             IReadOnlyList<FefoAllocationResult> fefoResults;
             try { fefoResults = fefo.Allocate(batches, product.Id, branch.Id, godownId, line.Quantity, BusinessDate(), ct); }
             catch (InvalidOperationException) { throw new ResourceConflictException($"Only {batches.Where(x => x.QuantityAvailable > 0 && !x.IsDisposed && x.ExpiryDate >= BusinessDate()).Sum(x => x.QuantityAvailable)} units are currently available."); }
 
-            var saleItem = new SaleItem { ProductId = product.Id, RequestedQuantity = line.Quantity, DiscountPercent = line.DiscountPercent };
+            var saleItem = new SaleItem
+            {
+                ProductId = product.Id,
+                RequestedQuantity = line.Quantity,
+                DiscountPercent = effectiveDiscountPercent,
+                PriceSource = priceSource,
+                ResolvedUnitPrice = overridePrice,
+                IsManualPriceOverride = isManualOverride,
+                PriceOverrideReason = priceOverrideReason,
+                IsDiscountOverride = isDiscountOverride,
+                DiscountOverrideReason = discountOverrideReason,
+                BelowCostOverrideReason = Clean(line.BelowCostOverrideReason)
+            };
+            var lineBelowCost = false;
             foreach (var result in fefoResults)
             {
                 var batch = batches.Single(x => x.Id == result.BatchId);
                 var inventory = await repository.GetInventoryAsync(branch.Id, product.Id, batch.Id, ct) ?? throw new ResourceConflictException("Inventory balance is unavailable for selected stock.");
                 if (batch.QuantityAvailable < result.AllocatedQuantity || inventory.QuantityInStock < result.AllocatedQuantity) throw new ResourceConflictException("Stock changed while completing the sale. The cart has been refreshed.");
-                var gross = Money(batch.RetailPrice * result.AllocatedQuantity);
-                var discount = Money(gross * line.DiscountPercent / 100m);
+                var unitPrice = overridePrice ?? batch.RetailPrice;
+                if (checkBelowCost && unitPrice < batch.PurchasePrice) lineBelowCost = true;
+                var gross = Money(unitPrice * result.AllocatedQuantity);
+                var discount = Money(gross * effectiveDiscountPercent / 100m);
                 var net = Money(gross - discount);
                 batch.QuantityAvailable -= result.AllocatedQuantity;
                 batch.UpdatedAt = now;
@@ -231,7 +367,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
                     ProductBatchId = batch.Id,
                     Quantity = result.AllocatedQuantity,
                     UnitRetailPriceSnapshot = batch.RetailPrice,
-                    UnitSalePriceSnapshot = Money(batch.RetailPrice * (1 - line.DiscountPercent / 100m)),
+                    UnitSalePriceSnapshot = Money(unitPrice * (1 - effectiveDiscountPercent / 100m)),
                     UnitCostPriceSnapshot = batch.PurchasePrice,
                     ExpiryDateSnapshot = batch.ExpiryDate,
                     GrossAmount = gross,
@@ -252,6 +388,12 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
                     PerformedByUserId = actor.Id
                 }, ct);
             }
+            if (lineBelowCost)
+            {
+                if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesSellBelowCost) != true)
+                    throw new RequestValidationException($"Selling {product.Name} below cost requires the sell-below-cost permission.");
+                saleItem.IsBelowCost = true;
+            }
             saleItem.GrossAmount = Money(saleItem.GrossAmount);
             saleItem.DiscountAmount = Money(saleItem.DiscountAmount);
             saleItem.NetAmount = Money(saleItem.NetAmount);
@@ -265,8 +407,23 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
         sale.DiscountTotal = Money(sale.DiscountTotal);
         sale.TaxTotal = 0;
         sale.NetTotal = Money(sale.NetTotal);
-        await ApplyPayments(actor, sale, payments, ct);
+        await ApplyPayments(actor, sale, payments, dueDateOverride, creditLimitOverrideReason, ct);
         await PostSaleJournalAsync(actor, sale, ct);
+
+        if (sourceOrder is not null)
+        {
+            var totalOrdered = sourceOrder.Items.Sum(x => x.OrderedQuantity);
+            var totalFulfilled = sourceOrder.Items.Sum(x => x.FulfilledQuantity);
+            sourceOrder.Status = totalFulfilled >= totalOrdered ? SalesOrderStatus.Fulfilled : SalesOrderStatus.PartiallyFulfilled;
+            sourceOrder.UpdatedAt = now;
+        }
+        if (sourceQuotation is not null)
+        {
+            sourceQuotation.Status = SalesQuotationStatus.Converted;
+            sourceQuotation.ConvertedToSaleId = sale.Id;
+            sourceQuotation.UpdatedAt = now;
+        }
+
         return sale;
     }
 
@@ -293,7 +450,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
 
     private static AccountMappingKey PaymentAccount(SalePaymentMethod method) => method == SalePaymentMethod.Cash ? AccountMappingKey.Cash : AccountMappingKey.Bank;
 
-    private async Task ApplyPayments(User actor, Sale sale, IReadOnlyList<SalePaymentRequest> payments, CancellationToken ct)
+    private async Task ApplyPayments(User actor, Sale sale, IReadOnlyList<SalePaymentRequest> payments, DateOnly? dueDateOverride, string? creditLimitOverrideReason, CancellationToken ct)
     {
         var applied = Money(payments.Sum(x => x.AmountApplied));
         if (applied > sale.NetTotal) throw new RequestValidationException("Payment total cannot exceed sale net total.");
@@ -314,12 +471,29 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
                 throw new ForbiddenOperationException("The current user is not permitted to post credit sales.");
             var customer = await repository.GetCustomerAsync(sale.CustomerId.Value, ct);
             if (customer is not { IsActive: true }) throw new RequestValidationException("Customer is invalid or inactive.");
+            if (!customer.CreditAllowed) throw new RequestValidationException("This customer is not allowed credit sales.");
             sale.CustomerName = customer.Name;
             sale.CustomerPhone = customer.PhoneNumber;
             var balance = await repository.GetCustomerBalanceAsync(customer.Id, sale.BranchId, ct);
-            if (balance + sale.CreditAmount > customer.CreditLimit)
-                throw new ResourceConflictException("This sale would exceed the customer's credit limit.");
-            sale.DueDateUtc = sale.PostedAtUtc!.Value.Date.AddDays(customer.CreditDays ?? 0);
+            var projected = balance + sale.CreditAmount;
+            if (projected > customer.CreditLimit)
+            {
+                if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesCreditLimitOverride) != true)
+                    throw new ResourceConflictException("This sale would exceed the customer's credit limit.");
+                if (string.IsNullOrWhiteSpace(creditLimitOverrideReason))
+                    throw new RequestValidationException("A reason is required to exceed the customer's credit limit.");
+                await Audit(actor.Id, "CreditLimitOverridden", "Sale", sale.Id, null,
+                    new { CustomerId = customer.Id, customer.CreditLimit, PreviousOutstanding = balance, sale.CreditAmount, ProjectedOutstanding = projected, Reason = creditLimitOverrideReason.Trim() }, ct);
+            }
+            if (dueDateOverride.HasValue)
+            {
+                if (dueDateOverride.Value < DateOnly.FromDateTime(sale.PostedAtUtc!.Value)) throw new RequestValidationException("Due date cannot be before the invoice date.");
+                sale.DueDateUtc = dueDateOverride.Value.ToDateTime(TimeOnly.MinValue);
+            }
+            else
+            {
+                sale.DueDateUtc = sale.PostedAtUtc!.Value.Date.AddDays(customer.CreditDays ?? 0);
+            }
             await repository.AddCustomerLedgerEntryAsync(new CustomerLedgerEntry
             {
                 CustomerId = customer.Id,
@@ -412,10 +586,15 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
 
     private static void ValidateDiscount(User actor, Product product, decimal discountPercent)
     {
-        if (discountPercent > 0 && actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesDiscount) != true)
-            throw new ForbiddenOperationException("The current user is not permitted to discount sales.");
+        ValidateDiscountPermission(actor, discountPercent);
         if (discountPercent > product.MaximumDiscountPercent)
             throw new RequestValidationException("Discount exceeds the product maximum.");
+    }
+
+    private static void ValidateDiscountPermission(User actor, decimal discountPercent)
+    {
+        if (discountPercent > 0 && actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.SalesDiscount) != true)
+            throw new ForbiddenOperationException("The current user is not permitted to discount sales.");
     }
 
     private static (Guid? BranchId, bool CanSelectBranch) Scope(User actor, Guid? requestedBranchId)
@@ -436,7 +615,7 @@ public sealed class SalesService(ISalesRepository repository, IFefoAllocationSer
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static decimal Money(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
     private Task Audit(Guid actor, string action, string type, Guid id, object? old, object? current, CancellationToken ct) => repository.AddAuditAsync(new AuditLog { UserId = actor, Action = action, EntityType = type, EntityId = id, OldValues = old is null ? null : JsonSerializer.Serialize(old), NewValues = current is null ? null : JsonSerializer.Serialize(current) }, ct);
-    private static object AuditValues(Sale sale) => new { sale.InvoiceNumber, sale.HoldNumber, sale.BranchId, sale.CashierUserId, sale.CustomerId, ItemCount = sale.Items.Count, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, PaymentSummary = string.Join(", ", sale.Payments.Select(x => $"{x.Method}:{x.AmountApplied}")) };
+    private static object AuditValues(Sale sale) => new { sale.InvoiceNumber, sale.HoldNumber, sale.BranchId, sale.CashierUserId, sale.CustomerId, ItemCount = sale.Items.Count, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, PaymentSummary = string.Join(", ", sale.Payments.Select(x => $"{x.Method}:{x.AmountApplied}")), sale.SaleType, sale.QuotationId, sale.SalesOrderId };
     private static void ValidatePage(int page, int pageSize)
     {
         if (page < 1 || pageSize is < 1 or > 100) throw new RequestValidationException("Page must be positive and page size must be between 1 and 100.");

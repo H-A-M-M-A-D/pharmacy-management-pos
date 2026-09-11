@@ -30,6 +30,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (widget.authState.can('reports.inventory')) 'Transfers',
     if (widget.authState.can('reports.financial')) 'Financial',
     if (widget.authState.can('reports.profitability')) 'Profitability',
+    if (widget.authState.can('quotations.view')) 'Quotations',
+    if (widget.authState.can('sales_orders.view')) 'Sales Orders',
   ];
 
   @override
@@ -103,6 +105,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
       'Payments': 'sales/payments',
       'Discounts': 'sales/discounts',
       'Credit Sales': 'sales/credit',
+      'By Customer': 'sales/by-customer',
+      'Retail vs Wholesale': 'sales/retail-vs-wholesale',
+      'By Price Level': 'sales/by-price-level',
+      'Price Overrides': 'sales/price-overrides',
+      'Below-Cost Sales': 'sales/below-cost',
+      'Daily Wholesale Sales': 'sales/daily-wholesale',
     },
     'Purchases': {
       'Summary': 'purchases/summary',
@@ -141,10 +149,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
       'Customer Outstanding': 'financial/customer-outstanding',
       'Supplier Outstanding': 'financial/supplier-outstanding',
       'Account Ledger': 'financial/account-ledger',
+      'Credit Limit Utilization': 'financial/credit-limit-utilization',
     },
     'Profitability': {
       'Gross Profit': 'profitability/summary',
       'Product Profitability': 'profitability/products',
+      'By Customer': 'profitability/by-customer',
+    },
+    'Quotations': {'Summary': 'quotations/summary'},
+    'Sales Orders': {
+      'Summary': 'sales_orders/summary',
+      'Open Orders': 'sales_orders/open',
     },
   };
 

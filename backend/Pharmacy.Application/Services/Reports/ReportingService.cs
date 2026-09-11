@@ -17,6 +17,8 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
             "transfers" => PermissionCatalog.ReportsInventory,
             "financial" => PermissionCatalog.ReportsFinancial,
             "profitability" => PermissionCatalog.ReportsProfitability,
+            "quotations" => PermissionCatalog.QuotationsView,
+            "sales_orders" => PermissionCatalog.SalesOrdersView,
             _ => throw new RequestValidationException("Unknown report.")
         };
         var actor = await Require(actorId, permission, ct);
@@ -54,7 +56,18 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
             "financial/supplier-outstanding" => await repository.SupplierOutstandingAsync(branch, ct),
             "financial/account-ledger" => await repository.AccountLedgerAsync(branch, Guid.TryParse(option, out var id) ? id : null, query, ct),
             "financial/cash-position" => await repository.CashPositionAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "financial/credit-limit-utilization" => await repository.CreditLimitUtilizationAsync(branch, ct),
             "profitability/summary" => await ProfitabilitySummary(branch, query, ct),
+            "profitability/by-customer" => await repository.GrossProfitByCustomerAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales/by-customer" => await repository.SalesByCustomerAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales/retail-vs-wholesale" => await repository.SalesByTypeAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales/by-price-level" => await repository.SalesByPriceLevelAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales/price-overrides" => await repository.PriceOverridesAsync(branch, query, ct),
+            "sales/below-cost" => await repository.BelowCostSalesAsync(branch, query, ct),
+            "sales/daily-wholesale" => await repository.DailySalesAsync(branch, query with { SaleType = SaleType.Wholesale }, ct),
+            "quotations/summary" => await repository.QuotationSummaryAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales_orders/summary" => await repository.SalesOrderSummaryAsync(branch, query.FromUtc, query.ToUtc, ct),
+            "sales_orders/open" => await repository.OpenSalesOrdersAsync(branch, query, ct),
             _ => throw new RequestValidationException("Unknown report.")
         };
         return ProtectCostFields(result, actor);
@@ -96,7 +109,7 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
     }
     private static object ProtectCostFields(object result, User actor)
     {
-        if (Has(actor, PermissionCatalog.ReportsProfitability)) return result;
+        if (Has(actor, PermissionCatalog.ReportsProfitability) || Has(actor, PermissionCatalog.SalesCostView)) return result;
         return result switch
         {
             IReadOnlyList<ProductSalesDto> rows => rows.Select(HideCost).ToList(),
@@ -104,6 +117,8 @@ public sealed class ReportingService(IReportingRepository repository, TimeProvid
             IReadOnlyList<GodownStockRowDto> rows => rows.Select(x => x with { StockValue = 0 }).ToList(),
             InventorySummaryDto summary => summary with { Value = 0 },
             StockTransferSummaryDto transferSummary => transferSummary with { DispatchedValue = 0, ReceivedValue = 0 },
+            IReadOnlyList<CustomerProfitDto> rows => rows.Select(x => x with { Cost = 0, GrossProfit = 0, GrossMarginPercent = 0 }).ToList(),
+            PagedReport<BelowCostSaleRowDto> paged => paged with { Items = paged.Items.Select(x => x with { UnitCost = 0, LossPerUnit = 0, TotalLoss = 0 }).ToList() },
             _ => result
         };
     }

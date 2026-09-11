@@ -21,6 +21,8 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         context.Customers.FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
     public Task<bool> CustomerCodeExistsAsync(string customerCode, Guid? excludingId = null, CancellationToken cancellationToken = default) =>
         context.Customers.AnyAsync(x => x.CustomerCode == customerCode && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
+    public Task<bool> PriceLevelIsValidAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.PriceLevels.AnyAsync(x => x.Id == id && x.IsActive, cancellationToken);
     public async Task<string> NextCustomerCodeAsync(CancellationToken cancellationToken = default)
     {
         var next = await context.Database.SqlQueryRaw<long>("SELECT nextval('\"CustomerCodeSequence\"'::regclass) AS \"Value\"").SingleAsync(cancellationToken);
@@ -55,9 +57,11 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         }
         if (query.IsActive.HasValue) customers = customers.Where(x => x.IsActive == query.IsActive);
         if (!string.IsNullOrWhiteSpace(query.City)) customers = customers.Where(x => x.City != null && EF.Functions.ILike(x.City, $"%{query.City.Trim()}%"));
+        if (query.CustomerType.HasValue) customers = customers.Where(x => x.CustomerType == query.CustomerType);
         var projected = customers.Select(x => new
         {
             Customer = x,
+            PriceLevelName = x.PriceLevel != null ? x.PriceLevel.Name : null,
             Outstanding = context.CustomerLedgerEntries.Where(e => e.CustomerId == x.Id).Sum(e => (decimal?)e.Amount) ?? 0
         });
         if (query.HasOutstandingBalance.HasValue) projected = projected.Where(x => query.HasOutstandingBalance.Value ? x.Outstanding > 0 : x.Outstanding <= 0);
@@ -77,14 +81,15 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         var items = await projected.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new CustomerListItemDto(x.Customer.Id, x.Customer.CustomerCode, x.Customer.Name, x.Customer.PhoneNumber,
                 x.Customer.Email, x.Customer.City, x.Customer.BusinessName, x.Customer.CreditLimit,
-                x.Outstanding > 0 ? x.Outstanding : 0, x.Outstanding < 0 ? -x.Outstanding : 0, x.Customer.IsActive))
+                x.Outstanding > 0 ? x.Outstanding : 0, x.Outstanding < 0 ? -x.Outstanding : 0, x.Customer.IsActive,
+                x.Customer.CustomerType, x.Customer.PriceLevelId, x.PriceLevelName))
             .ToListAsync(cancellationToken);
         return new(items, query.Page, query.PageSize, total);
     }
 
     public async Task<CustomerDetailsDto?> GetCustomerDetailsAsync(Guid customerId, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
-        var customer = await context.Customers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
+        var customer = await context.Customers.AsNoTracking().Include(x => x.PriceLevel).FirstOrDefaultAsync(x => x.Id == customerId, cancellationToken);
         if (customer is null) return null;
         var ledger = context.CustomerLedgerEntries.AsNoTracking().Where(x => x.CustomerId == customerId);
         if (!canSelectBranch && actorBranchId.HasValue) ledger = ledger.Where(x => x.BranchId == actorBranchId);
@@ -95,10 +100,14 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
             .OrderByDescending(x => x.PaymentDateUtc)
             .Select(x => (DateTime?)x.PaymentDateUtc)
             .FirstOrDefaultAsync(cancellationToken);
+        var outstanding = balance > 0 ? balance : 0;
         return new(customer.Id, customer.CustomerCode, customer.Name, customer.PhoneNumber, customer.AlternatePhone,
             customer.Email, customer.Address, customer.City, customer.BusinessName, customer.NTN,
-            customer.OpeningBalance, customer.CreditLimit, customer.IsActive, balance > 0 ? balance : 0,
-            balance < 0 ? -balance : 0, payments, lastPayment, customer.CreatedAt, customer.UpdatedAt, customer.CreditDays);
+            customer.OpeningBalance, customer.CreditLimit, customer.IsActive, outstanding,
+            balance < 0 ? -balance : 0, payments, lastPayment, customer.CreatedAt, customer.UpdatedAt, customer.CreditDays,
+            customer.CustomerType, customer.CreditAllowed, customer.PriceLevelId, customer.PriceLevel?.Name,
+            customer.ContactPerson, customer.ShippingAddress, customer.Notes,
+            customer.CreditLimit - outstanding);
     }
 
     public async Task<IReadOnlyList<CustomerLookupDto>> LookupCustomersAsync(string? search, bool activeOnly, Guid? branchId, CancellationToken cancellationToken = default)

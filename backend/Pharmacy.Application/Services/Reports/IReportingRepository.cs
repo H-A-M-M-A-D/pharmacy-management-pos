@@ -36,4 +36,14 @@ public interface IReportingRepository
     Task<PagedReport<TransferDetailRowDto>> TransferDetailAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
     Task<PagedReport<TransferDiscrepancyRowDto>> TransferDiscrepancyAsync(Guid? branchId, ReportQuery query, string? resolutionFilter, CancellationToken ct);
     Task<PagedReport<StockCountVarianceRowDto>> StockCountVarianceAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<IReadOnlyList<NamedSalesDto>> SalesByCustomerAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyList<NamedSalesDto>> SalesByTypeAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyList<NamedSalesDto>> SalesByPriceLevelAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<PagedReport<PriceOverrideRowDto>> PriceOverridesAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<PagedReport<BelowCostSaleRowDto>> BelowCostSalesAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
+    Task<IReadOnlyList<CustomerProfitDto>> GrossProfitByCustomerAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyList<CreditUtilizationRowDto>> CreditLimitUtilizationAsync(Guid? branchId, CancellationToken ct);
+    Task<QuotationSummaryDto> QuotationSummaryAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<SalesOrderSummaryDto> SalesOrderSummaryAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
+    Task<PagedReport<OpenSalesOrderRowDto>> OpenSalesOrdersAsync(Guid? branchId, ReportQuery query, CancellationToken ct);
 }

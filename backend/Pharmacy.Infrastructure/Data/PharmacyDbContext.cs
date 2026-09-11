@@ -72,6 +72,13 @@ public class PharmacyDbContext : DbContext
     public DbSet<VoucherLine> VoucherLines { get; set; } = null!;
     public DbSet<StockTransfer> StockTransfers { get; set; } = null!;
     public DbSet<StockTransferItem> StockTransferItems { get; set; } = null!;
+    public DbSet<PriceLevel> PriceLevels { get; set; } = null!;
+    public DbSet<ProductPriceLevel> ProductPriceLevels { get; set; } = null!;
+    public DbSet<ProductPriceBreak> ProductPriceBreaks { get; set; } = null!;
+    public DbSet<SalesQuotation> SalesQuotations { get; set; } = null!;
+    public DbSet<SalesQuotationItem> SalesQuotationItems { get; set; } = null!;
+    public DbSet<SalesOrder> SalesOrders { get; set; } = null!;
+    public DbSet<SalesOrderItem> SalesOrderItems { get; set; } = null!;
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -445,6 +452,8 @@ public class PharmacyDbContext : DbContext
         modelBuilder.HasSequence<long>("ContraVoucherNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("JournalVoucherNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("StockTransferNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("QuotationNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("SalesOrderNumberSequence").StartsAt(1);
 
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
@@ -503,6 +512,13 @@ public class PharmacyDbContext : DbContext
         ConfigureVoucherLine(modelBuilder);
         ConfigureStockTransfer(modelBuilder);
         ConfigureStockTransferItem(modelBuilder);
+        ConfigurePriceLevel(modelBuilder);
+        ConfigureProductPriceLevel(modelBuilder);
+        ConfigureProductPriceBreak(modelBuilder);
+        ConfigureSalesQuotation(modelBuilder);
+        ConfigureSalesQuotationItem(modelBuilder);
+        ConfigureSalesOrder(modelBuilder);
+        ConfigureSalesOrderItem(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -1194,6 +1210,145 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.DestinationProductBatch).WithMany().HasForeignKey(e => e.DestinationProductBatchId).OnDelete(DeleteBehavior.Restrict);
     }
 
+    private void ConfigurePriceLevel(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PriceLevel>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.Code).IsRequired().HasMaxLength(30);
+        entity.HasIndex(e => e.Code).IsUnique();
+        entity.HasIndex(e => e.BranchId);
+        entity.HasIndex(e => e.IsDefault).HasFilter("\"IsDefault\" = true");
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureProductPriceLevel(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<ProductPriceLevel>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.SellingPrice).HasPrecision(18, 2);
+        entity.HasIndex(e => new { e.ProductId, e.PriceLevelId }).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_ProductPriceLevels_SellingPrice_NonNegative", "\"SellingPrice\" >= 0"));
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.PriceLevel).WithMany(l => l.ProductPrices).HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private void ConfigureProductPriceBreak(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<ProductPriceBreak>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.SellingPrice).HasPrecision(18, 2);
+        entity.HasIndex(e => new { e.ProductId, e.PriceLevelId, e.MinimumQuantity }).IsUnique();
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ProductPriceBreaks_SellingPrice_NonNegative", "\"SellingPrice\" >= 0");
+            table.HasCheckConstraint("CK_ProductPriceBreaks_MinimumQuantity_Positive", "\"MinimumQuantity\" > 0");
+        });
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.PriceLevel).WithMany(l => l.ProductPriceBreaks).HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private void ConfigureSalesQuotation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesQuotation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.QuotationNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Notes).HasMaxLength(1000);
+        entity.Property(e => e.CancellationReason).HasMaxLength(500);
+        entity.Property(e => e.Subtotal).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountTotal).HasPrecision(18, 2);
+        entity.Property(e => e.NetTotal).HasPrecision(18, 2);
+        entity.HasIndex(e => e.QuotationNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.QuotationDate });
+        entity.HasIndex(e => new { e.BranchId, e.QuotationDate });
+        entity.HasIndex(e => e.Status);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesQuotations_Status", "\"Status\" IN (1, 2, 3, 4, 5, 6, 7)");
+            table.HasCheckConstraint("CK_SalesQuotations_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"NetTotal\" >= 0");
+        });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.SetNull);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ApprovedByUser).WithMany().HasForeignKey(e => e.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ConvertedToSalesOrder).WithMany().HasForeignKey(e => e.ConvertedToSalesOrderId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ConvertedToSale).WithMany().HasForeignKey(e => e.ConvertedToSaleId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesQuotationItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesQuotationItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.UnitPrice).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountPercent).HasPrecision(5, 2);
+        entity.Property(e => e.GrossAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
+        entity.Property(e => e.NetAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SalesQuotationId);
+        entity.HasIndex(e => e.ProductId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesQuotationItems_Quantity_Positive", "\"Quantity\" > 0");
+            table.HasCheckConstraint("CK_SalesQuotationItems_Discount_Range", "\"DiscountPercent\" >= 0 AND \"DiscountPercent\" <= 100");
+            table.HasCheckConstraint("CK_SalesQuotationItems_Money_NonNegative", "\"UnitPrice\" >= 0 AND \"GrossAmount\" >= 0 AND \"DiscountAmount\" >= 0 AND \"NetAmount\" >= 0");
+        });
+        entity.HasOne(e => e.SalesQuotation).WithMany(q => q.Items).HasForeignKey(e => e.SalesQuotationId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesOrder(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesOrder>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Notes).HasMaxLength(1000);
+        entity.Property(e => e.CancellationReason).HasMaxLength(500);
+        entity.Property(e => e.Subtotal).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountTotal).HasPrecision(18, 2);
+        entity.Property(e => e.NetTotal).HasPrecision(18, 2);
+        entity.HasIndex(e => e.OrderNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.OrderDate });
+        entity.HasIndex(e => new { e.BranchId, e.OrderDate });
+        entity.HasIndex(e => e.Status);
+        entity.HasIndex(e => e.QuotationId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesOrders_Status", "\"Status\" IN (1, 2, 3, 4, 5)");
+            table.HasCheckConstraint("CK_SalesOrders_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"NetTotal\" >= 0");
+        });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.SetNull);
+        entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ConfirmedByUser).WithMany().HasForeignKey(e => e.ConfirmedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSalesOrderItem(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SalesOrderItem>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.UnitPrice).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountPercent).HasPrecision(5, 2);
+        entity.Property(e => e.GrossAmount).HasPrecision(18, 2);
+        entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
+        entity.Property(e => e.NetAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SalesOrderId);
+        entity.HasIndex(e => e.ProductId);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SalesOrderItems_Quantity_Positive", "\"OrderedQuantity\" > 0");
+            table.HasCheckConstraint("CK_SalesOrderItems_Fulfilled_Range", "\"FulfilledQuantity\" >= 0 AND \"FulfilledQuantity\" <= \"OrderedQuantity\"");
+            table.HasCheckConstraint("CK_SalesOrderItems_Discount_Range", "\"DiscountPercent\" >= 0 AND \"DiscountPercent\" <= 100");
+            table.HasCheckConstraint("CK_SalesOrderItems_Money_NonNegative", "\"UnitPrice\" >= 0 AND \"GrossAmount\" >= 0 AND \"DiscountAmount\" >= 0 AND \"NetAmount\" >= 0");
+        });
+        entity.HasOne(e => e.SalesOrder).WithMany(o => o.Items).HasForeignKey(e => e.SalesOrderId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+    }
+
     private void ConfigureAuditLog(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<AuditLog>();
@@ -1272,14 +1427,23 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => e.Name);
         entity.HasIndex(e => e.NormalizedName);
         entity.HasIndex(e => e.PhoneNumber);
+        entity.Property(e => e.ContactPerson).HasMaxLength(200);
+        entity.Property(e => e.ShippingAddress).HasMaxLength(500);
+        entity.Property(e => e.Notes).HasMaxLength(1000);
+        entity.Property(e => e.CreditAllowed).HasDefaultValue(true);
+        entity.Property(e => e.CustomerType).HasDefaultValue(CustomerType.Retail);
         entity.HasIndex(e => e.Email);
         entity.HasIndex(e => e.City);
         entity.HasIndex(e => e.IsActive);
+        entity.HasIndex(e => e.CustomerType);
+        entity.HasIndex(e => e.PriceLevelId);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Customers_CreditLimit_NonNegative", "\"CreditLimit\" >= 0");
             table.HasCheckConstraint("CK_Customers_CreditDays_NonNegative", "\"CreditDays\" IS NULL OR \"CreditDays\" >= 0");
+            table.HasCheckConstraint("CK_Customers_CustomerType", "\"CustomerType\" IN (1, 2, 3)");
         });
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.SetNull);
     }
 
     private void ConfigureCustomerLedgerEntry(ModelBuilder modelBuilder)
@@ -1534,6 +1698,8 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.AmountPaid).HasPrecision(18, 2);
         entity.Property(e => e.CreditAmount).HasPrecision(18, 2);
         entity.Property(e => e.ChangeGiven).HasPrecision(18, 2);
+        entity.Property(e => e.CustomerPoNumber).HasMaxLength(100);
+        entity.Property(e => e.SaleType).HasDefaultValue(SaleType.Retail);
         entity.HasIndex(e => e.InvoiceNumber).IsUnique().HasFilter("\"InvoiceNumber\" IS NOT NULL");
         entity.HasIndex(e => e.HoldNumber).IsUnique().HasFilter("\"HoldNumber\" IS NOT NULL");
         entity.HasIndex(e => new { e.BranchId, e.PostedAtUtc });
@@ -1542,6 +1708,9 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.Status, e.CreatedAt });
         entity.HasIndex(e => e.CustomerPhone);
         entity.HasIndex(e => e.DueDateUtc);
+        entity.HasIndex(e => e.SaleType);
+        entity.HasIndex(e => e.QuotationId);
+        entity.HasIndex(e => e.SalesOrderId);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Sales_Status", "\"Status\" IN (1, 2, 3)");
@@ -1549,11 +1718,15 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_Sales_Money_NonNegative", "\"Subtotal\" >= 0 AND \"DiscountTotal\" >= 0 AND \"TaxTotal\" >= 0 AND \"NetTotal\" >= 0 AND \"AmountPaid\" >= 0 AND \"CreditAmount\" >= 0 AND \"ChangeGiven\" >= 0");
             table.HasCheckConstraint("CK_Sales_Posted_Settled", "(\"Status\" <> 2) OR (\"AmountPaid\" + \"CreditAmount\" = \"NetTotal\")");
             table.HasCheckConstraint("CK_Sales_CreditRequiresCustomer", "\"CreditAmount\" = 0 OR \"CustomerId\" IS NOT NULL");
+            table.HasCheckConstraint("CK_Sales_SaleType", "\"SaleType\" IN (1, 2)");
         });
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Customer).WithMany(c => c.Sales).HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.SetNull);
+        entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SalesOrder).WithMany().HasForeignKey(e => e.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureSaleItem(ModelBuilder modelBuilder)
@@ -1565,6 +1738,11 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.DiscountAmount).HasPrecision(18, 2);
         entity.Property(e => e.TaxAmount).HasPrecision(18, 2);
         entity.Property(e => e.NetAmount).HasPrecision(18, 2);
+        entity.Property(e => e.ResolvedUnitPrice).HasPrecision(18, 2);
+        entity.Property(e => e.PriceSource).HasDefaultValue(PriceSource.Default);
+        entity.Property(e => e.PriceOverrideReason).HasMaxLength(500);
+        entity.Property(e => e.DiscountOverrideReason).HasMaxLength(500);
+        entity.Property(e => e.BelowCostOverrideReason).HasMaxLength(500);
         entity.HasIndex(e => e.SaleId);
         entity.HasIndex(e => e.ProductId);
         entity.ToTable(table =>
@@ -1572,6 +1750,7 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_SaleItems_Quantity_Positive", "\"RequestedQuantity\" > 0");
             table.HasCheckConstraint("CK_SaleItems_Discount_Range", "\"DiscountPercent\" >= 0 AND \"DiscountPercent\" <= 100 AND \"DiscountAmount\" >= 0");
             table.HasCheckConstraint("CK_SaleItems_Money_NonNegative", "\"GrossAmount\" >= 0 AND \"TaxAmount\" >= 0 AND \"NetAmount\" >= 0");
+            table.HasCheckConstraint("CK_SaleItems_PriceSource", "\"PriceSource\" IN (1, 2, 3, 4, 5)");
         });
         entity.HasOne(e => e.Sale).WithMany(s => s.Items).HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Cascade);
         entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);

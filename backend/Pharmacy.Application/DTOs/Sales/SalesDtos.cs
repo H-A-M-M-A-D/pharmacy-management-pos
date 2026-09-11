@@ -9,7 +9,10 @@ public sealed record PosProductDto(
     string? BrandName, string Unit, int AvailableQuantity, DateOnly? NearestExpiryDate,
     decimal? IndicativeRetailPrice, decimal MaximumDiscountPercent, bool IsActive);
 
-public sealed record SaleLineRequest(Guid ProductId, int Quantity, decimal DiscountPercent = 0);
+public sealed record SaleLineRequest(
+    Guid ProductId, int Quantity, decimal DiscountPercent = 0,
+    decimal? UnitPriceOverride = null, string? PriceOverrideReason = null,
+    string? DiscountOverrideReason = null, string? BelowCostOverrideReason = null);
 public sealed record SalePaymentRequest(SalePaymentMethod Method, decimal AmountApplied, decimal? TenderedAmount = null, string? ReferenceNumber = null, Guid? FinancialAccountId = null);
 
 public sealed record HoldSaleRequest(
@@ -18,14 +21,16 @@ public sealed record HoldSaleRequest(
 
 public sealed record PostSaleRequest(
     Guid? BranchId, Guid? CustomerId, string? CustomerName, string? CustomerPhone, string? Notes,
-    IReadOnlyList<SaleLineRequest> Items, IReadOnlyList<SalePaymentRequest> Payments, Guid? GodownId = null);
+    IReadOnlyList<SaleLineRequest> Items, IReadOnlyList<SalePaymentRequest> Payments, Guid? GodownId = null,
+    SaleType SaleType = SaleType.Retail, Guid? PriceLevelId = null, Guid? QuotationId = null, Guid? SalesOrderId = null,
+    string? CustomerPoNumber = null, DateOnly? DueDateOverride = null, string? CreditLimitOverrideReason = null);
 
 public sealed record PostHeldSaleRequest(Guid? CustomerId, IReadOnlyList<SalePaymentRequest> Payments);
 
 public sealed record SalesHistoryQuery(
     int Page = 1, int PageSize = 25, string? Search = null, Guid? BranchId = null,
     Guid? CashierUserId = null, SaleStatus? Status = null, SalePaymentMethod? PaymentMethod = null,
-    DateTime? FromUtc = null, DateTime? ToUtc = null);
+    DateTime? FromUtc = null, DateTime? ToUtc = null, SaleType? SaleType = null, Guid? CustomerId = null);
 
 public sealed record HeldSalesQuery(int Page = 1, int PageSize = 25, string? Search = null, Guid? BranchId = null);
 
@@ -33,17 +38,22 @@ public sealed record SaleListItemDto(
     Guid Id, string? InvoiceNumber, string? HoldNumber, SaleStatus Status, DateTime CreatedAt,
     DateTime? PostedAtUtc, Guid BranchId, string BranchName, string CashierName, string? CustomerName,
     string? CustomerPhone, int ItemCount, decimal NetTotal, decimal AmountPaid, decimal ChangeGiven,
-    decimal CreditAmount, string PaymentSummary, SalesReturnState ReturnState = SalesReturnState.NotReturned);
+    decimal CreditAmount, string PaymentSummary, SalesReturnState ReturnState = SalesReturnState.NotReturned,
+    SaleType SaleType = SaleType.Retail, DateTime? DueDateUtc = null);
 
 public sealed record SaleItemAllocationDto(
     Guid Id, Guid ProductBatchId, string BatchNumber, DateOnly ExpiryDate, int Quantity,
-    decimal UnitRetailPriceSnapshot, decimal UnitSalePriceSnapshot, decimal GrossAmount,
+    decimal UnitRetailPriceSnapshot, decimal UnitSalePriceSnapshot, decimal UnitCostPriceSnapshot, decimal GrossAmount,
     decimal DiscountAmount, decimal NetAmount);
 
 public sealed record SaleItemDto(
     Guid Id, Guid ProductId, string ProductName, string SKU, int RequestedQuantity,
     decimal DiscountPercent, decimal GrossAmount, decimal DiscountAmount, decimal TaxAmount,
-    decimal NetAmount, bool HasMixedBatchPricing, IReadOnlyList<SaleItemAllocationDto> Allocations);
+    decimal NetAmount, bool HasMixedBatchPricing, IReadOnlyList<SaleItemAllocationDto> Allocations,
+    PriceSource PriceSource = PriceSource.Default, decimal? ResolvedUnitPrice = null,
+    bool IsManualPriceOverride = false, string? PriceOverrideReason = null,
+    bool IsDiscountOverride = false, string? DiscountOverrideReason = null,
+    bool IsBelowCost = false, string? BelowCostOverrideReason = null);
 
 public sealed record SalePaymentDto(Guid Id, SalePaymentMethod Method, decimal AmountApplied, decimal? TenderedAmount, string? ReferenceNumber);
 
@@ -54,7 +64,10 @@ public sealed record SaleDetailsDto(
     string? CustomerCode, string? CustomerName, string? CustomerPhone, decimal Subtotal,
     decimal DiscountTotal, decimal TaxTotal, decimal NetTotal, decimal AmountPaid,
     decimal CreditAmount, decimal ChangeGiven, string? Notes,
-    IReadOnlyList<SaleItemDto> Items, IReadOnlyList<SalePaymentDto> Payments);
+    IReadOnlyList<SaleItemDto> Items, IReadOnlyList<SalePaymentDto> Payments,
+    SaleType SaleType = SaleType.Retail, Guid? PriceLevelId = null, string? PriceLevelName = null,
+    Guid? QuotationId = null, string? QuotationNumber = null, Guid? SalesOrderId = null, string? SalesOrderNumber = null,
+    string? CustomerPoNumber = null, DateTime? DueDateUtc = null);
 
 public sealed record ReceiptDto(
     string InvoiceNumber, string BranchName, string? BranchAddress, string? BranchPhone,

@@ -2287,6 +2287,209 @@ void main() {
       );
     },
   );
+
+  testWidgets('quotations, sales orders, wholesale and price levels navigation follow permissions', (
+    tester,
+  ) async {
+    final denied = TestFixture();
+    await tester.pumpWidget(denied.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Quotations'), findsNothing);
+    expect(find.text('Sales Orders'), findsNothing);
+    expect(find.text('Wholesale'), findsNothing);
+    expect(find.text('Price Levels'), findsNothing);
+
+    final allowed = TestFixture(
+      permissions: {
+        'quotations.view',
+        'sales_orders.view',
+        'sales.wholesale',
+        'pricing.view',
+      },
+    );
+    await tester.pumpWidget(allowed.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    expect(find.text('Quotations'), findsOneWidget);
+    expect(find.text('Sales Orders'), findsOneWidget);
+    expect(find.text('Wholesale'), findsOneWidget);
+    expect(find.text('Price Levels'), findsOneWidget);
+  });
+
+  testWidgets('creating a quotation and moving it through send and accept', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'quotations.view',
+        'quotations.create',
+        'quotations.send',
+        'quotations.accept',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Quotations'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('add_quotation')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('quotation_customer_search')),
+      'Ali',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ali Customer').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('quotation_product_search')),
+      'Panadol',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Panadol Extra').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save_quotation')));
+    await tester.pumpAndSettle();
+
+    expect(fixture.api.lastQuotationBody?['customerId'], 'customer-1');
+    expect(find.text('QT-2026-000001'), findsOneWidget);
+    expect(find.text('Draft'), findsOneWidget);
+
+    await tester.ensureVisible(find.byTooltip('Open'));
+    await tester.tap(find.byTooltip('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Status: Draft'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('send_quotation')));
+    await tester.pumpAndSettle();
+    expect(find.text('Status: Sent'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('accept_quotation')));
+    await tester.pumpAndSettle();
+    expect(find.text('Status: Accepted'), findsOneWidget);
+  });
+
+  testWidgets('creating a sales order, confirming and partially fulfilling it', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'sales_orders.view',
+        'sales_orders.create',
+        'sales_orders.confirm',
+        'sales_orders.fulfill',
+      },
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Sales Orders'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('add_sales_order')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('sales_order_customer_search')),
+      'Ali',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ali Customer').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('sales_order_product_search')),
+      'Panadol',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Panadol Extra').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Qty'), '10');
+    await tester.tap(find.byKey(const Key('save_sales_order')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('SO-2026-000001'), findsOneWidget);
+    expect(find.text('Draft'), findsOneWidget);
+
+    await tester.ensureVisible(find.byTooltip('Open'));
+    await tester.tap(find.byTooltip('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_sales_order')));
+    await tester.pumpAndSettle();
+    expect(find.text('Status: Confirmed'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('fulfill_qty_sales-order-item-product-1')),
+      '4',
+    );
+    await tester.tap(find.byKey(const Key('fulfill_sales_order')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Record fully on customer credit'));
+    await tester.pumpAndSettle();
+
+    expect(fixture.api.lastFulfillSalesOrderBody?['items'], isNotNull);
+    expect(find.text('Status: PartiallyFulfilled'), findsOneWidget);
+  });
+
+  testWidgets('price levels screen creates a new level', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'pricing.view', 'pricing.manage'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Price Levels'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('add_price_level')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('price_level_name')),
+      'Trade',
+    );
+    await tester.enterText(find.byKey(const Key('price_level_code')), 'TRADE');
+    await tester.tap(find.byKey(const Key('save_price_level')));
+    await tester.pumpAndSettle();
+
+    expect(fixture.api.lastPriceLevelBody?['name'], 'Trade');
+    expect(find.text('Trade'), findsOneWidget);
+  });
+
+  testWidgets('customer form exposes commercial fields', (tester) async {
+    final fixture = TestFixture(
+      permissions: {'customers.view', 'customers.create'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Customers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add_customer')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('customer_type')), findsOneWidget);
+    expect(find.byKey(const Key('customer_price_level')), findsOneWidget);
+    expect(find.byKey(const Key('customer_credit_allowed')), findsOneWidget);
+    expect(find.byKey(const Key('customer_credit_days')), findsOneWidget);
+  });
+
+  testWidgets('reports show quotation and sales order sections when permitted', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {'reports.view', 'quotations.view', 'sales_orders.view'},
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButton<String>).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Quotations').last, findsOneWidget);
+    expect(find.text('Sales Orders').last, findsOneWidget);
+  });
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -4664,6 +4867,374 @@ class FakeApi implements PharmacyApi {
       return _transferDetailJson(transfer);
     }
     return _transferDetailJson(transfer);
+  }
+
+  final List<Map<String, dynamic>> _priceLevels = [];
+  int _priceLevelSeq = 0;
+  Map<String, dynamic>? lastPriceLevelBody;
+
+  @override
+  Future<dynamic> pricing(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async {
+    if (path.isEmpty && method == 'GET') {
+      return _priceLevels.map((x) => Map<String, dynamic>.from(x)).toList();
+    }
+    if (path.isEmpty && method == 'POST') {
+      _priceLevelSeq++;
+      lastPriceLevelBody = body;
+      final level = <String, dynamic>{
+        'id': 'price-level-$_priceLevelSeq',
+        'name': body!['name'],
+        'code': body['code'],
+        'priority': body['priority'] ?? 0,
+        'isDefault': body['isDefault'] ?? false,
+        'isActive': body['isActive'] ?? true,
+        'branchId': null,
+        'branchName': null,
+      };
+      _priceLevels.add(level);
+      return level;
+    }
+    if (path == 'product-prices') {
+      if (method == 'GET') return <Map<String, dynamic>>[];
+      return <String, dynamic>{
+        'id': 'product-price-1',
+        'productId': body?['productId'],
+        'productName': product.name,
+        'sku': product.sku,
+        'priceLevelId': body?['priceLevelId'],
+        'priceLevelName': 'Wholesale',
+        'sellingPrice': body?['sellingPrice'] ?? 0,
+        'isActive': true,
+      };
+    }
+    if (path == 'product-breaks') {
+      if (method == 'GET') return <Map<String, dynamic>>[];
+      return <String, dynamic>{
+        'id': 'product-break-1',
+        'productId': body?['productId'],
+        'productName': product.name,
+        'sku': product.sku,
+        'priceLevelId': body?['priceLevelId'],
+        'priceLevelName': null,
+        'minimumQuantity': body?['minimumQuantity'] ?? 0,
+        'sellingPrice': body?['sellingPrice'] ?? 0,
+        'isActive': true,
+      };
+    }
+    if (path == 'resolve') {
+      return <String, dynamic>{
+        'price': null,
+        'source': 'Default',
+        'priceLevelId': null,
+        'fallbackPrice': product.retailPrice,
+      };
+    }
+    final index = _priceLevels.indexWhere((x) => x['id'] == path);
+    if (index != -1 && method == 'PUT') {
+      _priceLevels[index] = {..._priceLevels[index], ...?body};
+      return _priceLevels[index];
+    }
+    return null;
+  }
+
+  final List<Map<String, dynamic>> _quotations = [];
+  int _quotationSeq = 0;
+  Map<String, dynamic>? lastQuotationBody;
+
+  Map<String, dynamic> _quotationJson(Map<String, dynamic> q) => {
+    ...q,
+    'items': (q['items'] as List<dynamic>).map((raw) {
+      final m = raw as Map<String, dynamic>;
+      final qty = m['quantity'] as int;
+      final unitPrice = product.retailPrice;
+      final gross = unitPrice * qty;
+      return {
+        'id': 'quotation-item-${m['productId']}',
+        'productId': m['productId'],
+        'productName': product.name,
+        'sku': product.sku,
+        'quantity': qty,
+        'unitPrice': unitPrice,
+        'discountPercent': m['discountPercent'] ?? 0,
+        'grossAmount': gross,
+        'discountAmount': 0,
+        'netAmount': gross,
+      };
+    }).toList(),
+  };
+
+  @override
+  Future<dynamic> salesQuotations(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async {
+    if (path.isEmpty && method == 'GET') {
+      return <String, dynamic>{
+        'items': _quotations
+            .map(
+              (q) => {
+                'id': q['id'],
+                'quotationNumber': q['quotationNumber'],
+                'customerId': q['customerId'],
+                'customerName': customer.name,
+                'quotationDate': q['quotationDate'],
+                'validUntil': q['validUntil'],
+                'status': q['status'],
+                'netTotal': q['items'] == null
+                    ? 0
+                    : (q['items'] as List<dynamic>).fold<double>(
+                        0,
+                        (sum, i) =>
+                            sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+                      ),
+                'createdByName': user.fullName,
+              },
+            )
+            .toList(),
+        'page': 1,
+        'pageSize': 50,
+        'totalCount': _quotations.length,
+      };
+    }
+    if (path.isEmpty && method == 'POST') {
+      _quotationSeq++;
+      lastQuotationBody = body;
+      final quotation = <String, dynamic>{
+        'id': 'quotation-$_quotationSeq',
+        'quotationNumber': 'QT-2026-${_quotationSeq.toString().padLeft(6, '0')}',
+        'branchId': user.branch.id,
+        'branchName': user.branch.name,
+        'godownId': null,
+        'godownName': null,
+        'customerId': body!['customerId'],
+        'customerCode': customer.customerCode,
+        'customerName': customer.name,
+        'priceLevelId': null,
+        'priceLevelName': null,
+        'quotationDate': body['quotationDate'],
+        'validUntil': body['validUntil'],
+        'status': 'Draft',
+        'notes': body['notes'],
+        'createdByName': user.fullName,
+        'approvedByName': null,
+        'convertedToSalesOrderId': null,
+        'convertedToSalesOrderNumber': null,
+        'convertedToSaleId': null,
+        'convertedToSaleInvoiceNumber': null,
+        'sentAtUtc': null,
+        'respondedAtUtc': null,
+        'cancelledAtUtc': null,
+        'cancellationReason': null,
+        'createdAt': DateTime.now().toIso8601String(),
+        'items': body['items'],
+      };
+      _quotations.add(quotation);
+      return _quotationJson(quotation);
+    }
+    final segments = path.split('/');
+    final id = segments.first;
+    final quotation = _quotations.firstWhere((q) => q['id'] == id);
+    if (segments.length == 1 && method == 'GET') {
+      return _quotationJson(Map<String, dynamic>.from(quotation)
+        ..['subtotal'] = 0
+        ..['discountTotal'] = 0
+        ..['netTotal'] = (quotation['items'] as List<dynamic>).fold<double>(
+          0,
+          (sum, i) => sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+        ));
+    }
+    if (segments.length == 2 && segments[1] == 'send') {
+      quotation['status'] = 'Sent';
+    } else if (segments.length == 2 && segments[1] == 'accept') {
+      quotation['status'] = 'Accepted';
+    } else if (segments.length == 2 && segments[1] == 'reject') {
+      quotation['status'] = 'Rejected';
+    } else if (segments.length == 2 && segments[1] == 'cancel') {
+      quotation['status'] = 'Cancelled';
+      quotation['cancellationReason'] = body?['reason'];
+    } else if (segments.length == 2 && segments[1] == 'convert-to-order') {
+      quotation['status'] = 'Converted';
+      _salesOrderSeq++;
+      final order = <String, dynamic>{
+        'id': 'sales-order-$_salesOrderSeq',
+        'orderNumber': 'SO-2026-${_salesOrderSeq.toString().padLeft(6, '0')}',
+        'branchId': user.branch.id,
+        'branchName': user.branch.name,
+        'godownId': null,
+        'godownName': null,
+        'customerId': quotation['customerId'],
+        'customerCode': customer.customerCode,
+        'customerName': customer.name,
+        'priceLevelId': null,
+        'priceLevelName': null,
+        'quotationId': quotation['id'],
+        'quotationNumber': quotation['quotationNumber'],
+        'orderDate': DateTime.now().toIso8601String(),
+        'expectedDeliveryDate': null,
+        'status': 'Draft',
+        'notes': null,
+        'createdByName': user.fullName,
+        'confirmedByName': null,
+        'confirmedAtUtc': null,
+        'cancelledAtUtc': null,
+        'cancellationReason': null,
+        'createdAt': DateTime.now().toIso8601String(),
+        'items': quotation['items'],
+        'linkedSales': <dynamic>[],
+      };
+      _salesOrders.add(order);
+      quotation['convertedToSalesOrderId'] = order['id'];
+      quotation['convertedToSalesOrderNumber'] = order['orderNumber'];
+      return _salesOrderJson(order);
+    } else if (segments.length == 2 && segments[1] == 'convert-to-sale') {
+      quotation['status'] = 'Converted';
+      quotation['convertedToSaleId'] = 'sale-from-quotation';
+      quotation['convertedToSaleInvoiceNumber'] = 'INV-2026-000001';
+      return <String, dynamic>{'id': 'sale-from-quotation', 'invoiceNumber': 'INV-2026-000001'};
+    }
+    return _quotationJson(quotation);
+  }
+
+  final List<Map<String, dynamic>> _salesOrders = [];
+  int _salesOrderSeq = 0;
+  Map<String, dynamic>? lastSalesOrderBody;
+  Map<String, dynamic>? lastFulfillSalesOrderBody;
+
+  Map<String, dynamic> _salesOrderJson(Map<String, dynamic> o) => {
+    ...o,
+    'subtotal': 0,
+    'discountTotal': 0,
+    'netTotal': (o['items'] as List<dynamic>).fold<double>(
+      0,
+      (sum, i) => sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+    ),
+    'items': (o['items'] as List<dynamic>).map((raw) {
+      final m = raw as Map<String, dynamic>;
+      final qty = m['quantity'] as int;
+      return {
+        'id': 'sales-order-item-${m['productId']}',
+        'productId': m['productId'],
+        'productName': product.name,
+        'sku': product.sku,
+        'orderedQuantity': qty,
+        'fulfilledQuantity': m['fulfilledQuantity'] ?? 0,
+        'unitPrice': product.retailPrice,
+        'discountPercent': m['discountPercent'] ?? 0,
+        'grossAmount': product.retailPrice * qty,
+        'discountAmount': 0,
+        'netAmount': product.retailPrice * qty,
+      };
+    }).toList(),
+  };
+
+  @override
+  Future<dynamic> salesOrders(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async {
+    if (path.isEmpty && method == 'GET') {
+      return <String, dynamic>{
+        'items': _salesOrders
+            .map(
+              (o) => {
+                'id': o['id'],
+                'orderNumber': o['orderNumber'],
+                'customerId': o['customerId'],
+                'customerName': customer.name,
+                'orderDate': o['orderDate'],
+                'status': o['status'],
+                'netTotal': (o['items'] as List<dynamic>).fold<double>(
+                  0,
+                  (sum, i) =>
+                      sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+                ),
+                'orderedQuantity': (o['items'] as List<dynamic>).fold<int>(
+                  0,
+                  (sum, i) => sum + ((i as Map<String, dynamic>)['quantity'] as int),
+                ),
+                'fulfilledQuantity': 0,
+              },
+            )
+            .toList(),
+        'page': 1,
+        'pageSize': 50,
+        'totalCount': _salesOrders.length,
+      };
+    }
+    if (path.isEmpty && method == 'POST') {
+      _salesOrderSeq++;
+      lastSalesOrderBody = body;
+      final order = <String, dynamic>{
+        'id': 'sales-order-$_salesOrderSeq',
+        'orderNumber': 'SO-2026-${_salesOrderSeq.toString().padLeft(6, '0')}',
+        'branchId': user.branch.id,
+        'branchName': user.branch.name,
+        'godownId': body!['godownId'],
+        'godownName': null,
+        'customerId': body['customerId'],
+        'customerCode': customer.customerCode,
+        'customerName': customer.name,
+        'priceLevelId': null,
+        'priceLevelName': null,
+        'quotationId': null,
+        'quotationNumber': null,
+        'orderDate': body['orderDate'],
+        'expectedDeliveryDate': body['expectedDeliveryDate'],
+        'status': 'Draft',
+        'notes': body['notes'],
+        'createdByName': user.fullName,
+        'confirmedByName': null,
+        'confirmedAtUtc': null,
+        'cancelledAtUtc': null,
+        'cancellationReason': null,
+        'createdAt': DateTime.now().toIso8601String(),
+        'items': body['items'],
+        'linkedSales': <dynamic>[],
+      };
+      _salesOrders.add(order);
+      return _salesOrderJson(order);
+    }
+    final segments = path.split('/');
+    final id = segments.first;
+    final order = _salesOrders.firstWhere((o) => o['id'] == id);
+    if (segments.length == 1 && method == 'GET') {
+      return _salesOrderJson(order);
+    }
+    if (segments.length == 2 && segments[1] == 'confirm') {
+      order['status'] = 'Confirmed';
+      order['confirmedByName'] = user.fullName;
+      order['confirmedAtUtc'] = DateTime.now().toIso8601String();
+    } else if (segments.length == 2 && segments[1] == 'cancel') {
+      order['status'] = 'Cancelled';
+      order['cancellationReason'] = body?['reason'];
+    } else if (segments.length == 2 && segments[1] == 'fulfill') {
+      lastFulfillSalesOrderBody = body;
+      final items = (order['items'] as List<dynamic>).cast<Map<String, dynamic>>();
+      for (final requested in (body?['items'] as List<dynamic>? ?? [])) {
+        final requestedMap = requested as Map<String, dynamic>;
+        final match = items.firstWhere((x) => x['productId'] == requestedMap['productId']);
+        match['fulfilledQuantity'] =
+            ((match['fulfilledQuantity'] as int?) ?? 0) + (requestedMap['quantity'] as int);
+      }
+      final fullyFulfilled = items.every(
+        (x) => ((x['fulfilledQuantity'] as int?) ?? 0) >= (x['quantity'] as int),
+      );
+      order['status'] = fullyFulfilled ? 'Fulfilled' : 'PartiallyFulfilled';
+      return <String, dynamic>{'id': 'sale-from-order', 'invoiceNumber': 'INV-2026-000002'};
+    }
+    return _salesOrderJson(order);
   }
 
   @override

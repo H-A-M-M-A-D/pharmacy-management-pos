@@ -166,6 +166,42 @@ class AuthState extends ChangeNotifier {
     query: query,
     body: body,
   );
+  Future<dynamic> pricing(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.pricing(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
+  Future<dynamic> salesQuotations(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.salesQuotations(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
+  Future<dynamic> salesOrders(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.salesOrders(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
   Future<void> signOutEverywhere() async {
     await administration('sessions/revoke', method: 'POST');
     await logout();

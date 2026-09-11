@@ -69,6 +69,8 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
         if (!canSelectBranch && actorBranchId.HasValue) sales = sales.Where(x => x.BranchId == actorBranchId);
         if (query.BranchId.HasValue) sales = sales.Where(x => x.BranchId == query.BranchId);
         if (query.CashierUserId.HasValue) sales = sales.Where(x => x.CashierUserId == query.CashierUserId);
+        if (query.CustomerId.HasValue) sales = sales.Where(x => x.CustomerId == query.CustomerId);
+        if (query.SaleType.HasValue) sales = sales.Where(x => x.SaleType == query.SaleType);
         if (heldOnly) sales = sales.Where(x => x.Status == SaleStatus.Held); else if (query.Status.HasValue) sales = sales.Where(x => x.Status == query.Status);
         if (query.PaymentMethod.HasValue) sales = sales.Where(x => x.Payments.Any(p => p.Method == query.PaymentMethod));
         if (query.FromUtc.HasValue) sales = sales.Where(x => (x.PostedAtUtc ?? x.CreatedAt) >= query.FromUtc);
@@ -108,7 +110,9 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
                 x.ChangeGiven,
                 x.CreditAmount,
                 string.Join(", ", x.Payments.Select(p => $"{p.Method}:{p.AmountApplied}")),
-                ReturnState(x.Items.Sum(i => i.RequestedQuantity), returnedBySale.GetValueOrDefault(x.Id))))
+                ReturnState(x.Items.Sum(i => i.RequestedQuantity), returnedBySale.GetValueOrDefault(x.Id)),
+                x.SaleType,
+                x.DueDateUtc))
             .ToList();
         return new(items, query.Page, query.PageSize, total);
     }
@@ -116,6 +120,7 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
     public async Task<SaleDetailsDto?> GetSaleDetailsAsync(Guid id, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
         var sale = await context.Sales.AsNoTracking().Include(x => x.Branch).Include(x => x.CashierUser).Include(x => x.Customer)
+            .Include(x => x.PriceLevel).Include(x => x.Quotation).Include(x => x.SalesOrder)
             .Include(x => x.Items).ThenInclude(x => x.Product)
             .Include(x => x.Items).ThenInclude(x => x.Allocations).ThenInclude(x => x.ProductBatch)
             .Include(x => x.Payments)
@@ -123,11 +128,13 @@ public sealed class SalesRepository(PharmacyDbContext context) : ISalesRepositor
         if (sale is null) return null;
         var items = sale.Items.OrderBy(x => x.CreatedAt).Select(item =>
         {
-            var allocations = item.Allocations.OrderBy(x => x.ExpiryDateSnapshot).ThenBy(x => x.ProductBatch!.BatchNumber).Select(a => new SaleItemAllocationDto(a.Id, a.ProductBatchId, a.ProductBatch!.BatchNumber, a.ExpiryDateSnapshot, a.Quantity, a.UnitRetailPriceSnapshot, a.UnitSalePriceSnapshot, a.GrossAmount, a.DiscountAmount, a.NetAmount)).ToList();
-            return new SaleItemDto(item.Id, item.ProductId, item.Product!.Name, item.Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, allocations.Select(x => x.UnitRetailPriceSnapshot).Distinct().Count() > 1, allocations);
+            var allocations = item.Allocations.OrderBy(x => x.ExpiryDateSnapshot).ThenBy(x => x.ProductBatch!.BatchNumber).Select(a => new SaleItemAllocationDto(a.Id, a.ProductBatchId, a.ProductBatch!.BatchNumber, a.ExpiryDateSnapshot, a.Quantity, a.UnitRetailPriceSnapshot, a.UnitSalePriceSnapshot, a.UnitCostPriceSnapshot, a.GrossAmount, a.DiscountAmount, a.NetAmount)).ToList();
+            return new SaleItemDto(item.Id, item.ProductId, item.Product!.Name, item.Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, allocations.Select(x => x.UnitRetailPriceSnapshot).Distinct().Count() > 1, allocations,
+                item.PriceSource, item.ResolvedUnitPrice, item.IsManualPriceOverride, item.PriceOverrideReason, item.IsDiscountOverride, item.DiscountOverrideReason, item.IsBelowCost, item.BelowCostOverrideReason);
         }).ToList();
         var payments = sale.Payments.OrderBy(x => x.CreatedAt).Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
-        return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, sale.Branch!.Name, sale.Branch.Address, sale.Branch.PhoneNumber, sale.CashierUserId, sale.CashierUser!.FullName, sale.CustomerId, sale.Customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments);
+        return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, sale.Branch!.Name, sale.Branch.Address, sale.Branch.PhoneNumber, sale.CashierUserId, sale.CashierUser!.FullName, sale.CustomerId, sale.Customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments,
+            sale.SaleType, sale.PriceLevelId, sale.PriceLevel?.Name, sale.QuotationId, sale.Quotation?.QuotationNumber, sale.SalesOrderId, sale.SalesOrder?.OrderNumber, sale.CustomerPoNumber, sale.DueDateUtc);
     }
 
     private static SalesReturnState ReturnState(int soldQuantity, int returnedQuantity) =>

@@ -368,6 +368,27 @@ abstract interface class PharmacyApi {
     Map<String, String>? query,
     Map<String, dynamic>? body,
   });
+  Future<dynamic> pricing(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  });
+  Future<dynamic> salesQuotations(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  });
+  Future<dynamic> salesOrders(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  });
   void close();
 }
 
@@ -1761,6 +1782,57 @@ class ApiClient implements PharmacyApi {
     method,
     Uri(
       path: '/api/stock-transfers${path.isEmpty ? '' : '/$path'}',
+      queryParameters: query,
+    ).toString(),
+    token: token,
+    body: body,
+  );
+
+  @override
+  Future<dynamic> pricing(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(
+      path: '/api/price-levels${path.isEmpty ? '' : '/$path'}',
+      queryParameters: query,
+    ).toString(),
+    token: token,
+    body: body,
+  );
+
+  @override
+  Future<dynamic> salesQuotations(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(
+      path: '/api/sales-quotations${path.isEmpty ? '' : '/$path'}',
+      queryParameters: query,
+    ).toString(),
+    token: token,
+    body: body,
+  );
+
+  @override
+  Future<dynamic> salesOrders(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(
+      path: '/api/sales-orders${path.isEmpty ? '' : '/$path'}',
       queryParameters: query,
     ).toString(),
     token: token,

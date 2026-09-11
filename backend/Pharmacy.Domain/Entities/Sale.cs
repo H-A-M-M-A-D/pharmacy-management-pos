@@ -29,6 +29,14 @@ public class Sale : Entity
     public decimal CreditAmount { get; set; }
     public decimal ChangeGiven { get; set; }
     public string? Notes { get; set; }
+    public SaleType SaleType { get; set; } = SaleType.Retail;
+    public Guid? PriceLevelId { get; set; }
+    public PriceLevel? PriceLevel { get; set; }
+    public Guid? QuotationId { get; set; }
+    public SalesQuotation? Quotation { get; set; }
+    public Guid? SalesOrderId { get; set; }
+    public SalesOrder? SalesOrder { get; set; }
+    public string? CustomerPoNumber { get; set; }
     public ICollection<SaleItem> Items { get; set; } = new List<SaleItem>();
     public ICollection<SalePayment> Payments { get; set; } = new List<SalePayment>();
 }
@@ -38,4 +46,10 @@ public enum SaleStatus
     Held = 1,
     Posted = 2,
     Cancelled = 3
+}
+
+public enum SaleType
+{
+    Retail = 1,
+    Wholesale = 2
 }

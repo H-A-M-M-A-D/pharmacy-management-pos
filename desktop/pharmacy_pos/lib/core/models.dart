@@ -1166,11 +1166,16 @@ class CustomerListItem {
     this.email,
     this.city,
     this.businessName,
+    this.customerType = 'Retail',
+    this.priceLevelId,
+    this.priceLevelName,
   });
   final String id, customerCode, name;
   final String? phoneNumber, email, city, businessName;
   final double creditLimit, outstandingBalance, advanceBalance;
   final bool isActive;
+  final String customerType;
+  final String? priceLevelId, priceLevelName;
   factory CustomerListItem.fromJson(Map<String, dynamic> json) =>
       CustomerListItem(
         id: json['id'] as String,
@@ -1185,6 +1190,9 @@ class CustomerListItem {
             (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
         advanceBalance: (json['advanceBalance'] as num?)?.toDouble() ?? 0,
         isActive: json['isActive'] as bool? ?? false,
+        customerType: _enumName(json['customerType'] ?? 'Retail'),
+        priceLevelId: json['priceLevelId'] as String?,
+        priceLevelName: json['priceLevelName'] as String?,
       );
 }
 
@@ -1209,6 +1217,15 @@ class CustomerDetails {
     this.businessName,
     this.ntn,
     this.lastPaymentAtUtc,
+    this.creditDays,
+    this.customerType = 'Retail',
+    this.creditAllowed = true,
+    this.priceLevelId,
+    this.priceLevelName,
+    this.contactPerson,
+    this.shippingAddress,
+    this.notes,
+    this.availableCredit = 0,
   });
   final String id, customerCode, name;
   final String? phoneNumber,
@@ -1222,10 +1239,15 @@ class CustomerDetails {
       creditLimit,
       outstandingBalance,
       advanceBalance,
-      totalPayments;
+      totalPayments,
+      availableCredit;
   final bool isActive;
+  final bool creditAllowed;
   final DateTime createdAt, updatedAt;
   final DateTime? lastPaymentAtUtc;
+  final int? creditDays;
+  final String customerType;
+  final String? priceLevelId, priceLevelName, contactPerson, shippingAddress, notes;
 
   factory CustomerDetails.fromJson(Map<String, dynamic> json) =>
       CustomerDetails(
@@ -1249,6 +1271,15 @@ class CustomerDetails {
         lastPaymentAtUtc: _date(json['lastPaymentAtUtc']),
         createdAt: _date(json['createdAt']) ?? DateTime.now(),
         updatedAt: _date(json['updatedAt']) ?? DateTime.now(),
+        creditDays: json['creditDays'] as int?,
+        customerType: _enumName(json['customerType'] ?? 'Retail'),
+        creditAllowed: json['creditAllowed'] as bool? ?? true,
+        priceLevelId: json['priceLevelId'] as String?,
+        priceLevelName: json['priceLevelName'] as String?,
+        contactPerson: json['contactPerson'] as String?,
+        shippingAddress: json['shippingAddress'] as String?,
+        notes: json['notes'] as String?,
+        availableCredit: (json['availableCredit'] as num?)?.toDouble() ?? 0,
       );
 }
 
@@ -1276,6 +1307,109 @@ class CustomerLookup {
     outstandingBalance: (json['outstandingBalance'] as num?)?.toDouble() ?? 0,
     availableCredit: (json['availableCredit'] as num?)?.toDouble() ?? 0,
     isActive: json['isActive'] as bool? ?? false,
+  );
+}
+
+class PriceLevel {
+  const PriceLevel({
+    required this.id,
+    required this.name,
+    required this.code,
+    required this.priority,
+    required this.isDefault,
+    required this.isActive,
+    this.branchId,
+    this.branchName,
+  });
+  final String id, name, code;
+  final int priority;
+  final bool isDefault, isActive;
+  final String? branchId, branchName;
+  factory PriceLevel.fromJson(Map<String, dynamic> json) => PriceLevel(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    code: json['code'] as String? ?? '',
+    priority: json['priority'] as int? ?? 0,
+    isDefault: json['isDefault'] as bool? ?? false,
+    isActive: json['isActive'] as bool? ?? true,
+    branchId: json['branchId'] as String?,
+    branchName: json['branchName'] as String?,
+  );
+}
+
+class ProductPriceLevelInfo {
+  const ProductPriceLevelInfo({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.priceLevelId,
+    required this.priceLevelName,
+    required this.sellingPrice,
+    required this.isActive,
+  });
+  final String id, productId, productName, sku, priceLevelId, priceLevelName;
+  final double sellingPrice;
+  final bool isActive;
+  factory ProductPriceLevelInfo.fromJson(Map<String, dynamic> json) =>
+      ProductPriceLevelInfo(
+        id: json['id'] as String,
+        productId: json['productId'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        priceLevelId: json['priceLevelId'] as String? ?? '',
+        priceLevelName: json['priceLevelName'] as String? ?? '',
+        sellingPrice: (json['sellingPrice'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? true,
+      );
+}
+
+class ProductPriceBreakInfo {
+  const ProductPriceBreakInfo({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.minimumQuantity,
+    required this.sellingPrice,
+    required this.isActive,
+    this.priceLevelId,
+    this.priceLevelName,
+  });
+  final String id, productId, productName, sku;
+  final String? priceLevelId, priceLevelName;
+  final int minimumQuantity;
+  final double sellingPrice;
+  final bool isActive;
+  factory ProductPriceBreakInfo.fromJson(Map<String, dynamic> json) =>
+      ProductPriceBreakInfo(
+        id: json['id'] as String,
+        productId: json['productId'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        sku: json['sku'] as String? ?? '',
+        priceLevelId: json['priceLevelId'] as String?,
+        priceLevelName: json['priceLevelName'] as String?,
+        minimumQuantity: json['minimumQuantity'] as int? ?? 0,
+        sellingPrice: (json['sellingPrice'] as num?)?.toDouble() ?? 0,
+        isActive: json['isActive'] as bool? ?? true,
+      );
+}
+
+class ResolvedPrice {
+  const ResolvedPrice({
+    required this.source,
+    this.price,
+    this.priceLevelId,
+    this.fallbackPrice,
+  });
+  final double? price, fallbackPrice;
+  final String source;
+  final String? priceLevelId;
+  factory ResolvedPrice.fromJson(Map<String, dynamic> json) => ResolvedPrice(
+    price: (json['price'] as num?)?.toDouble(),
+    source: _enumName(json['source'] ?? 'Default'),
+    priceLevelId: json['priceLevelId'] as String?,
+    fallbackPrice: (json['fallbackPrice'] as num?)?.toDouble(),
   );
 }
 
@@ -1908,10 +2042,12 @@ class SaleListItem {
     this.postedAtUtc,
     this.customerName,
     this.customerPhone,
+    this.saleType = 'Retail',
   });
 
   final String id, status, branchName, cashierName, paymentSummary, returnState;
   final String? invoiceNumber, holdNumber, customerName, customerPhone;
+  final String saleType;
   final DateTime createdAt;
   final DateTime? postedAtUtc;
   final int itemCount;
@@ -1939,6 +2075,7 @@ class SaleListItem {
     changeGiven: (json['changeGiven'] as num?)?.toDouble() ?? 0,
     paymentSummary: json['paymentSummary'] as String? ?? '',
     returnState: _enumName(json['returnState'] ?? 'NotReturned'),
+    saleType: _enumName(json['saleType'] ?? 'Retail'),
   );
 }
 
@@ -1993,11 +2130,23 @@ class SaleItemDetail {
     required this.discountAmount,
     required this.netAmount,
     required this.allocations,
+    this.priceSource = 'Default',
+    this.resolvedUnitPrice,
+    this.isManualPriceOverride = false,
+    this.priceOverrideReason,
+    this.isDiscountOverride = false,
+    this.discountOverrideReason,
+    this.isBelowCost = false,
+    this.belowCostOverrideReason,
   });
   final String productName, sku;
   final int requestedQuantity;
   final double discountPercent, grossAmount, discountAmount, netAmount;
   final List<SaleAllocation> allocations;
+  final String priceSource;
+  final double? resolvedUnitPrice;
+  final bool isManualPriceOverride, isDiscountOverride, isBelowCost;
+  final String? priceOverrideReason, discountOverrideReason, belowCostOverrideReason;
   factory SaleItemDetail.fromJson(Map<String, dynamic> json) => SaleItemDetail(
     productName: json['productName'] as String? ?? '',
     sku: json['sku'] as String? ?? '',
@@ -2009,6 +2158,14 @@ class SaleItemDetail {
     allocations: (json['allocations'] as List<dynamic>? ?? [])
         .map((x) => SaleAllocation.fromJson(x as Map<String, dynamic>))
         .toList(),
+    priceSource: _enumName(json['priceSource'] ?? 'Default'),
+    resolvedUnitPrice: (json['resolvedUnitPrice'] as num?)?.toDouble(),
+    isManualPriceOverride: json['isManualPriceOverride'] as bool? ?? false,
+    priceOverrideReason: json['priceOverrideReason'] as String?,
+    isDiscountOverride: json['isDiscountOverride'] as bool? ?? false,
+    discountOverrideReason: json['discountOverrideReason'] as String?,
+    isBelowCost: json['isBelowCost'] as bool? ?? false,
+    belowCostOverrideReason: json['belowCostOverrideReason'] as String?,
   );
 }
 
@@ -2055,6 +2212,15 @@ class SaleDetails {
     this.customerPhone,
     this.customerId,
     this.customerCode,
+    this.saleType = 'Retail',
+    this.priceLevelId,
+    this.priceLevelName,
+    this.quotationId,
+    this.quotationNumber,
+    this.salesOrderId,
+    this.salesOrderNumber,
+    this.customerPoNumber,
+    this.dueDateUtc,
   });
   final String id, status, branchName, cashierName;
   final String? invoiceNumber, holdNumber, customerName, customerPhone;
@@ -2070,6 +2236,15 @@ class SaleDetails {
       changeGiven;
   final List<SaleItemDetail> items;
   final List<SalePaymentDetail> payments;
+  final String saleType;
+  final String? priceLevelId,
+      priceLevelName,
+      quotationId,
+      quotationNumber,
+      salesOrderId,
+      salesOrderNumber,
+      customerPoNumber;
+  final DateTime? dueDateUtc;
   factory SaleDetails.fromJson(Map<String, dynamic> json) => SaleDetails(
     id: json['id'] as String? ?? '',
     invoiceNumber: json['invoiceNumber'] as String?,
@@ -2100,6 +2275,15 @@ class SaleDetails {
     payments: (json['payments'] as List<dynamic>? ?? [])
         .map((x) => SalePaymentDetail.fromJson(x as Map<String, dynamic>))
         .toList(),
+    saleType: _enumName(json['saleType'] ?? 'Retail'),
+    priceLevelId: json['priceLevelId'] as String?,
+    priceLevelName: json['priceLevelName'] as String?,
+    quotationId: json['quotationId'] as String?,
+    quotationNumber: json['quotationNumber'] as String?,
+    salesOrderId: json['salesOrderId'] as String?,
+    salesOrderNumber: json['salesOrderNumber'] as String?,
+    customerPoNumber: json['customerPoNumber'] as String?,
+    dueDateUtc: _date(json['dueDateUtc']),
   );
 }
 
@@ -2733,5 +2917,321 @@ class TransferableBatch {
     quantityAvailable: json['quantityAvailable'] as int? ?? 0,
     purchasePrice: (json['purchasePrice'] as num?)?.toDouble() ?? 0,
     retailPrice: (json['retailPrice'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class QuotationListItem {
+  const QuotationListItem({
+    required this.id,
+    required this.quotationNumber,
+    required this.customerId,
+    required this.customerName,
+    required this.quotationDate,
+    required this.status,
+    required this.netTotal,
+    required this.createdByName,
+    this.validUntil,
+  });
+  final String id, quotationNumber, customerId, customerName, status, createdByName;
+  final DateTime quotationDate;
+  final DateTime? validUntil;
+  final double netTotal;
+  factory QuotationListItem.fromJson(Map<String, dynamic> json) => QuotationListItem(
+    id: json['id'] as String,
+    quotationNumber: json['quotationNumber'] as String? ?? '',
+    customerId: json['customerId'] as String? ?? '',
+    customerName: json['customerName'] as String? ?? '',
+    quotationDate: _date(json['quotationDate']) ?? DateTime.now(),
+    validUntil: _date(json['validUntil']),
+    status: _enumName(json['status'] ?? 'Draft'),
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    createdByName: json['createdByName'] as String? ?? '',
+  );
+}
+
+class PagedQuotations {
+  const PagedQuotations({required this.items, required this.totalCount});
+  final List<QuotationListItem> items;
+  final int totalCount;
+  factory PagedQuotations.fromJson(Map<String, dynamic> json) => PagedQuotations(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => QuotationListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class QuotationItem {
+  const QuotationItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.unitPrice,
+    required this.discountPercent,
+    required this.grossAmount,
+    required this.discountAmount,
+    required this.netAmount,
+  });
+  final String id, productId, productName, sku;
+  final int quantity;
+  final double unitPrice, discountPercent, grossAmount, discountAmount, netAmount;
+  factory QuotationItem.fromJson(Map<String, dynamic> json) => QuotationItem(
+    id: json['id'] as String? ?? '',
+    productId: json['productId'] as String? ?? '',
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    quantity: json['quantity'] as int? ?? 0,
+    unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
+    discountPercent: (json['discountPercent'] as num?)?.toDouble() ?? 0,
+    grossAmount: (json['grossAmount'] as num?)?.toDouble() ?? 0,
+    discountAmount: (json['discountAmount'] as num?)?.toDouble() ?? 0,
+    netAmount: (json['netAmount'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class QuotationDetails {
+  const QuotationDetails({
+    required this.id,
+    required this.quotationNumber,
+    required this.branchId,
+    required this.branchName,
+    required this.customerId,
+    required this.customerCode,
+    required this.customerName,
+    required this.quotationDate,
+    required this.status,
+    required this.subtotal,
+    required this.discountTotal,
+    required this.netTotal,
+    required this.createdByName,
+    required this.createdAt,
+    required this.items,
+    this.godownId,
+    this.godownName,
+    this.priceLevelId,
+    this.priceLevelName,
+    this.validUntil,
+    this.notes,
+    this.approvedByName,
+    this.convertedToSalesOrderId,
+    this.convertedToSalesOrderNumber,
+    this.convertedToSaleId,
+    this.convertedToSaleInvoiceNumber,
+    this.sentAtUtc,
+    this.respondedAtUtc,
+    this.cancelledAtUtc,
+    this.cancellationReason,
+  });
+  final String id, quotationNumber, branchId, branchName, customerId, customerCode, customerName, status, createdByName;
+  final String? godownId, godownName, priceLevelId, priceLevelName, notes, approvedByName,
+      convertedToSalesOrderId, convertedToSalesOrderNumber, convertedToSaleId, convertedToSaleInvoiceNumber, cancellationReason;
+  final DateTime quotationDate, createdAt;
+  final DateTime? validUntil, sentAtUtc, respondedAtUtc, cancelledAtUtc;
+  final double subtotal, discountTotal, netTotal;
+  final List<QuotationItem> items;
+  factory QuotationDetails.fromJson(Map<String, dynamic> json) => QuotationDetails(
+    id: json['id'] as String,
+    quotationNumber: json['quotationNumber'] as String? ?? '',
+    branchId: json['branchId'] as String? ?? '',
+    branchName: json['branchName'] as String? ?? '',
+    godownId: json['godownId'] as String?,
+    godownName: json['godownName'] as String?,
+    customerId: json['customerId'] as String? ?? '',
+    customerCode: json['customerCode'] as String? ?? '',
+    customerName: json['customerName'] as String? ?? '',
+    priceLevelId: json['priceLevelId'] as String?,
+    priceLevelName: json['priceLevelName'] as String?,
+    quotationDate: _date(json['quotationDate']) ?? DateTime.now(),
+    validUntil: _date(json['validUntil']),
+    status: _enumName(json['status'] ?? 'Draft'),
+    notes: json['notes'] as String?,
+    subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
+    discountTotal: (json['discountTotal'] as num?)?.toDouble() ?? 0,
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    createdByName: json['createdByName'] as String? ?? '',
+    approvedByName: json['approvedByName'] as String?,
+    convertedToSalesOrderId: json['convertedToSalesOrderId'] as String?,
+    convertedToSalesOrderNumber: json['convertedToSalesOrderNumber'] as String?,
+    convertedToSaleId: json['convertedToSaleId'] as String?,
+    convertedToSaleInvoiceNumber: json['convertedToSaleInvoiceNumber'] as String?,
+    sentAtUtc: _date(json['sentAtUtc']),
+    respondedAtUtc: _date(json['respondedAtUtc']),
+    cancelledAtUtc: _date(json['cancelledAtUtc']),
+    cancellationReason: json['cancellationReason'] as String?,
+    createdAt: _date(json['createdAt']) ?? DateTime.now(),
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => QuotationItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+class SalesOrderListItem {
+  const SalesOrderListItem({
+    required this.id,
+    required this.orderNumber,
+    required this.customerId,
+    required this.customerName,
+    required this.orderDate,
+    required this.status,
+    required this.netTotal,
+    required this.orderedQuantity,
+    required this.fulfilledQuantity,
+  });
+  final String id, orderNumber, customerId, customerName, status;
+  final DateTime orderDate;
+  final double netTotal;
+  final int orderedQuantity, fulfilledQuantity;
+  factory SalesOrderListItem.fromJson(Map<String, dynamic> json) => SalesOrderListItem(
+    id: json['id'] as String,
+    orderNumber: json['orderNumber'] as String? ?? '',
+    customerId: json['customerId'] as String? ?? '',
+    customerName: json['customerName'] as String? ?? '',
+    orderDate: _date(json['orderDate']) ?? DateTime.now(),
+    status: _enumName(json['status'] ?? 'Draft'),
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    orderedQuantity: json['orderedQuantity'] as int? ?? 0,
+    fulfilledQuantity: json['fulfilledQuantity'] as int? ?? 0,
+  );
+}
+
+class PagedSalesOrders {
+  const PagedSalesOrders({required this.items, required this.totalCount});
+  final List<SalesOrderListItem> items;
+  final int totalCount;
+  factory PagedSalesOrders.fromJson(Map<String, dynamic> json) => PagedSalesOrders(
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SalesOrderListItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    totalCount: json['totalCount'] as int? ?? 0,
+  );
+}
+
+class SalesOrderItem {
+  const SalesOrderItem({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.orderedQuantity,
+    required this.fulfilledQuantity,
+    required this.unitPrice,
+    required this.discountPercent,
+    required this.grossAmount,
+    required this.discountAmount,
+    required this.netAmount,
+  });
+  final String id, productId, productName, sku;
+  final int orderedQuantity, fulfilledQuantity;
+  final double unitPrice, discountPercent, grossAmount, discountAmount, netAmount;
+  int get remainingQuantity => orderedQuantity - fulfilledQuantity;
+  factory SalesOrderItem.fromJson(Map<String, dynamic> json) => SalesOrderItem(
+    id: json['id'] as String? ?? '',
+    productId: json['productId'] as String? ?? '',
+    productName: json['productName'] as String? ?? '',
+    sku: json['sku'] as String? ?? '',
+    orderedQuantity: json['orderedQuantity'] as int? ?? 0,
+    fulfilledQuantity: json['fulfilledQuantity'] as int? ?? 0,
+    unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
+    discountPercent: (json['discountPercent'] as num?)?.toDouble() ?? 0,
+    grossAmount: (json['grossAmount'] as num?)?.toDouble() ?? 0,
+    discountAmount: (json['discountAmount'] as num?)?.toDouble() ?? 0,
+    netAmount: (json['netAmount'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class LinkedSale {
+  const LinkedSale({
+    required this.saleId,
+    required this.netTotal,
+    this.invoiceNumber,
+    this.postedAtUtc,
+  });
+  final String saleId;
+  final String? invoiceNumber;
+  final DateTime? postedAtUtc;
+  final double netTotal;
+  factory LinkedSale.fromJson(Map<String, dynamic> json) => LinkedSale(
+    saleId: json['saleId'] as String? ?? '',
+    invoiceNumber: json['invoiceNumber'] as String?,
+    postedAtUtc: _date(json['postedAtUtc']),
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+class SalesOrderDetails {
+  const SalesOrderDetails({
+    required this.id,
+    required this.orderNumber,
+    required this.branchId,
+    required this.branchName,
+    required this.customerId,
+    required this.customerCode,
+    required this.customerName,
+    required this.orderDate,
+    required this.status,
+    required this.subtotal,
+    required this.discountTotal,
+    required this.netTotal,
+    required this.createdByName,
+    required this.createdAt,
+    required this.items,
+    required this.linkedSales,
+    this.godownId,
+    this.godownName,
+    this.priceLevelId,
+    this.priceLevelName,
+    this.quotationId,
+    this.quotationNumber,
+    this.expectedDeliveryDate,
+    this.notes,
+    this.confirmedByName,
+    this.confirmedAtUtc,
+    this.cancelledAtUtc,
+    this.cancellationReason,
+  });
+  final String id, orderNumber, branchId, branchName, customerId, customerCode, customerName, status, createdByName;
+  final String? godownId, godownName, priceLevelId, priceLevelName, quotationId, quotationNumber, notes, confirmedByName, cancellationReason;
+  final DateTime orderDate, createdAt;
+  final DateTime? expectedDeliveryDate, confirmedAtUtc, cancelledAtUtc;
+  final double subtotal, discountTotal, netTotal;
+  final List<SalesOrderItem> items;
+  final List<LinkedSale> linkedSales;
+  int get totalOrdered => items.fold(0, (sum, x) => sum + x.orderedQuantity);
+  int get totalFulfilled => items.fold(0, (sum, x) => sum + x.fulfilledQuantity);
+  factory SalesOrderDetails.fromJson(Map<String, dynamic> json) => SalesOrderDetails(
+    id: json['id'] as String,
+    orderNumber: json['orderNumber'] as String? ?? '',
+    branchId: json['branchId'] as String? ?? '',
+    branchName: json['branchName'] as String? ?? '',
+    godownId: json['godownId'] as String?,
+    godownName: json['godownName'] as String?,
+    customerId: json['customerId'] as String? ?? '',
+    customerCode: json['customerCode'] as String? ?? '',
+    customerName: json['customerName'] as String? ?? '',
+    priceLevelId: json['priceLevelId'] as String?,
+    priceLevelName: json['priceLevelName'] as String?,
+    quotationId: json['quotationId'] as String?,
+    quotationNumber: json['quotationNumber'] as String?,
+    orderDate: _date(json['orderDate']) ?? DateTime.now(),
+    expectedDeliveryDate: _date(json['expectedDeliveryDate']),
+    status: _enumName(json['status'] ?? 'Draft'),
+    notes: json['notes'] as String?,
+    subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
+    discountTotal: (json['discountTotal'] as num?)?.toDouble() ?? 0,
+    netTotal: (json['netTotal'] as num?)?.toDouble() ?? 0,
+    createdByName: json['createdByName'] as String? ?? '',
+    confirmedByName: json['confirmedByName'] as String?,
+    confirmedAtUtc: _date(json['confirmedAtUtc']),
+    cancelledAtUtc: _date(json['cancelledAtUtc']),
+    cancellationReason: json['cancellationReason'] as String?,
+    createdAt: _date(json['createdAt']) ?? DateTime.now(),
+    items: (json['items'] as List<dynamic>? ?? [])
+        .map((x) => SalesOrderItem.fromJson(x as Map<String, dynamic>))
+        .toList(),
+    linkedSales: (json['linkedSales'] as List<dynamic>? ?? [])
+        .map((x) => LinkedSale.fromJson(x as Map<String, dynamic>))
+        .toList(),
   );
 }

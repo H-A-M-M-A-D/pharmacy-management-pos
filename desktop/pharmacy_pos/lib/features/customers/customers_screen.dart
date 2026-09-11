@@ -112,6 +112,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
           columns: const [
             DataColumn(label: Text('Code')),
             DataColumn(label: Text('Customer')),
+            DataColumn(label: Text('Type')),
+            DataColumn(label: Text('Price Level')),
             DataColumn(label: Text('Phone')),
             DataColumn(label: Text('City')),
             DataColumn(label: Text('Credit Limit')),
@@ -126,6 +128,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   cells: [
                     DataCell(Text(customer.customerCode)),
                     DataCell(Text(customer.name)),
+                    DataCell(Text(customer.customerType)),
+                    DataCell(Text(customer.priceLevelName ?? 'Default')),
                     DataCell(Text(customer.phoneNumber ?? '-')),
                     DataCell(Text(customer.city ?? '-')),
                     DataCell(Text(_money(customer.creditLimit))),
@@ -340,8 +344,38 @@ class _CustomerFormState extends State<_CustomerForm> {
   late final _credit = TextEditingController(
     text: widget.customer?.creditLimit.toString() ?? '0',
   );
+  late final _creditDays = TextEditingController(
+    text: widget.customer?.creditDays?.toString() ?? '',
+  );
+  late final _contactPerson = TextEditingController(
+    text: widget.customer?.contactPerson,
+  );
+  late final _shippingAddress = TextEditingController(
+    text: widget.customer?.shippingAddress,
+  );
+  late final _notes = TextEditingController(text: widget.customer?.notes);
   bool _active = true;
+  late String _customerType = widget.customer?.customerType ?? 'Retail';
+  late bool _creditAllowed = widget.customer?.creditAllowed ?? true;
+  late String? _priceLevelId = widget.customer?.priceLevelId;
+  List<PriceLevel> _priceLevels = [];
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.authState
+        .pricing('', query: const {'activeOnly': 'true'})
+        .then((data) {
+          if (!mounted) return;
+          setState(() {
+            _priceLevels = (data as List<dynamic>)
+                .map((x) => PriceLevel.fromJson(x as Map<String, dynamic>))
+                .toList();
+          });
+        })
+        .catchError((_) {});
+  }
 
   @override
   void dispose() {
@@ -355,6 +389,10 @@ class _CustomerFormState extends State<_CustomerForm> {
     _ntn.dispose();
     _opening.dispose();
     _credit.dispose();
+    _creditDays.dispose();
+    _contactPerson.dispose();
+    _shippingAddress.dispose();
+    _notes.dispose();
     super.dispose();
   }
 
@@ -408,6 +446,56 @@ class _CustomerFormState extends State<_CustomerForm> {
                   controller: _ntn,
                   decoration: const InputDecoration(labelText: 'NTN'),
                 ),
+                TextFormField(
+                  controller: _contactPerson,
+                  decoration: const InputDecoration(
+                    labelText: 'Contact Person',
+                  ),
+                ),
+                TextFormField(
+                  controller: _shippingAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Shipping Address',
+                  ),
+                ),
+                DropdownButtonFormField<String>(
+                  key: const Key('customer_type'),
+                  initialValue: _customerType,
+                  decoration: const InputDecoration(
+                    labelText: 'Customer Type',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Retail', child: Text('Retail')),
+                    DropdownMenuItem(
+                      value: 'Wholesale',
+                      child: Text('Wholesale'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Institutional',
+                      child: Text('Institutional'),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _customerType = v ?? 'Retail'),
+                ),
+                DropdownButtonFormField<String?>(
+                  key: const Key('customer_price_level'),
+                  initialValue: _priceLevelId,
+                  decoration: const InputDecoration(
+                    labelText: 'Price Level',
+                    helperText: 'Leave blank for the default retail price.',
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('Default')),
+                    ..._priceLevels.map(
+                      (x) => DropdownMenuItem(
+                        value: x.id,
+                        child: Text(x.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _priceLevelId = v),
+                ),
                 if (!editing)
                   TextFormField(
                     key: const Key('customer_opening_balance'),
@@ -426,6 +514,29 @@ class _CustomerFormState extends State<_CustomerForm> {
                   decoration: const InputDecoration(labelText: 'Credit Limit'),
                   keyboardType: TextInputType.number,
                   validator: _nonNegative,
+                ),
+                TextFormField(
+                  key: const Key('customer_credit_days'),
+                  controller: _creditDays,
+                  decoration: const InputDecoration(
+                    labelText: 'Credit Days',
+                    helperText: 'Days after invoice date before payment is due.',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                TextFormField(
+                  controller: _notes,
+                  decoration: const InputDecoration(labelText: 'Notes'),
+                  maxLines: 2,
+                ),
+                SwitchListTile(
+                  key: const Key('customer_credit_allowed'),
+                  value: _creditAllowed,
+                  onChanged: (v) => setState(() => _creditAllowed = v),
+                  title: const Text('Credit Allowed'),
+                  subtitle: const Text(
+                    'When off, this customer can never be sold on credit.',
+                  ),
                 ),
                 SwitchListTile(
                   value: _active,
@@ -472,6 +583,15 @@ class _CustomerFormState extends State<_CustomerForm> {
       'businessName': _empty(_business.text),
       'ntn': _empty(_ntn.text),
       'creditLimit': double.parse(_credit.text),
+      'creditDays': _empty(_creditDays.text) == null
+          ? null
+          : int.tryParse(_creditDays.text.trim()),
+      'customerType': _customerType,
+      'creditAllowed': _creditAllowed,
+      'priceLevelId': _priceLevelId,
+      'contactPerson': _empty(_contactPerson.text),
+      'shippingAddress': _empty(_shippingAddress.text),
+      'notes': _empty(_notes.text),
       if (widget.customer == null)
         'openingBalance': double.parse(_opening.text),
       if (widget.customer == null) 'isActive': _active,

@@ -40,6 +40,8 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     {
         var actor = await Require(actorId, PermissionCatalog.CustomersCreate, cancellationToken);
         Validate(request.Name, request.Email, request.CreditLimit, request.CreditDays);
+        if (request.PriceLevelId.HasValue && !await repository.PriceLevelIsValidAsync(request.PriceLevelId.Value, cancellationToken))
+            throw new RequestValidationException("Price level is invalid or inactive.");
         Customer? customer = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
@@ -58,7 +60,13 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
                 OpeningBalance = Money(request.OpeningBalance),
                 CreditLimit = Money(request.CreditLimit),
                 CreditDays = request.CreditDays,
-                IsActive = request.IsActive
+                IsActive = request.IsActive,
+                CustomerType = request.CustomerType,
+                CreditAllowed = request.CreditAllowed,
+                PriceLevelId = request.PriceLevelId,
+                ContactPerson = Clean(request.ContactPerson),
+                ShippingAddress = Clean(request.ShippingAddress),
+                Notes = Clean(request.Notes)
             };
             await repository.AddCustomerAsync(customer, ct);
             await Audit(actorId, "CustomerCreated", "Customer", customer.Id, null, Values(customer), ct);
@@ -88,6 +96,8 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     {
         await Require(actorId, PermissionCatalog.CustomersUpdate, cancellationToken);
         Validate(request.Name, request.Email, request.CreditLimit, request.CreditDays);
+        if (request.PriceLevelId.HasValue && !await repository.PriceLevelIsValidAsync(request.PriceLevelId.Value, cancellationToken))
+            throw new RequestValidationException("Price level is invalid or inactive.");
         var customer = await RequiredCustomer(customerId, cancellationToken);
         var old = Values(customer);
         customer.Name = request.Name.Trim();
@@ -101,6 +111,12 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
         customer.NTN = Clean(request.NTN);
         customer.CreditLimit = Money(request.CreditLimit);
         customer.CreditDays = request.CreditDays;
+        customer.CustomerType = request.CustomerType;
+        customer.CreditAllowed = request.CreditAllowed;
+        customer.PriceLevelId = request.PriceLevelId;
+        customer.ContactPerson = Clean(request.ContactPerson);
+        customer.ShippingAddress = Clean(request.ShippingAddress);
+        customer.Notes = Clean(request.Notes);
         customer.UpdatedAt = UtcNow();
         await Audit(actorId, "CustomerUpdated", "Customer", customer.Id, old, Values(customer), cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
@@ -295,7 +311,7 @@ public sealed class CustomerService(ICustomerRepository repository, IJournalPost
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static decimal Money(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
-    private static object Values(Customer x) => new { x.CustomerCode, x.Name, x.PhoneNumber, x.AlternatePhone, x.Email, x.Address, x.City, x.BusinessName, x.NTN, x.OpeningBalance, x.CreditLimit, x.CreditDays, x.IsActive };
+    private static object Values(Customer x) => new { x.CustomerCode, x.Name, x.PhoneNumber, x.AlternatePhone, x.Email, x.Address, x.City, x.BusinessName, x.NTN, x.OpeningBalance, x.CreditLimit, x.CreditDays, x.IsActive, x.CustomerType, x.CreditAllowed, x.PriceLevelId, x.ContactPerson, x.ShippingAddress };
     private Task Audit(Guid actor, string action, string type, Guid id, object? old, object? current, CancellationToken ct) => repository.AddAuditAsync(new AuditLog
     { UserId = actor, Action = action, EntityType = type, EntityId = id, OldValues = old is null ? null : JsonSerializer.Serialize(old), NewValues = current is null ? null : JsonSerializer.Serialize(current) }, ct);
     private static void ValidatePage(int page, int pageSize)

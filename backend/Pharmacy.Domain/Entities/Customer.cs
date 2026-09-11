@@ -18,7 +18,21 @@ public class Customer : Entity
     public decimal CreditLimit { get; set; }
     public int? CreditDays { get; set; }
     public bool IsActive { get; set; } = true;
+    public CustomerType CustomerType { get; set; } = CustomerType.Retail;
+    public bool CreditAllowed { get; set; } = true;
+    public Guid? PriceLevelId { get; set; }
+    public PriceLevel? PriceLevel { get; set; }
+    public string? ContactPerson { get; set; }
+    public string? ShippingAddress { get; set; }
+    public string? Notes { get; set; }
     public ICollection<CustomerLedgerEntry> LedgerEntries { get; set; } = new List<CustomerLedgerEntry>();
     public ICollection<CustomerPayment> Payments { get; set; } = new List<CustomerPayment>();
     public ICollection<Sale> Sales { get; set; } = new List<Sale>();
+}
+
+public enum CustomerType
+{
+    Retail = 1,
+    Wholesale = 2,
+    Institutional = 3
 }

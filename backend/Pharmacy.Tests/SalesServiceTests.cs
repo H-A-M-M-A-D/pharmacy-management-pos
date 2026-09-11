@@ -239,6 +239,184 @@ public sealed class SalesServiceTests
     }
 
     [Fact]
+    public async Task Credit_disallowed_customer_blocks_credit_sale_even_within_limit()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit);
+        var customer = f.AddCustomer(creditLimit: 1000, creditAllowed: false);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, customer.Id, null, null, null, [new(f.Product.Id, 1)], [])));
+    }
+
+    [Fact]
+    public async Task Credit_limit_override_requires_permission_and_reason_and_is_audited()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesCredit, PermissionCatalog.SalesCreditLimitOverride);
+        var customer = f.AddCustomer(creditLimit: 10);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, customer.Id, null, null, null, [new(f.Product.Id, 1)], [])));
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, customer.Id, null, null, null, [new(f.Product.Id, 1)], [],
+            CreditLimitOverrideReason: "Approved by manager on call"));
+        Assert.Equal(12, sale.CreditAmount);
+        Assert.Contains(f.Audits, x => x.Action == "CreditLimitOverridden");
+    }
+
+    [Fact]
+    public async Task Resolved_price_overrides_batch_retail_price_when_a_quantity_break_matches()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("A", 20, f.Today.AddDays(5), 8, 12);
+        f.PriceResolver.Resolve = (_, _, qty, _) => qty >= 10 ? new(9m, PriceSource.QuantityBreak, null, null) : new(null, PriceSource.Default, null, null);
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 10)], [new(SalePaymentMethod.Cash, 90, 90)]));
+
+        Assert.Equal(90, sale.NetTotal);
+        var item = Assert.Single(sale.Items);
+        Assert.Equal(PriceSource.QuantityBreak, item.PriceSource);
+        Assert.Equal(9m, item.ResolvedUnitPrice);
+    }
+
+    [Fact]
+    public async Task Manual_price_override_requires_permission_and_reason_and_is_recorded()
+    {
+        var noPermission = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        noPermission.AddBatch("A", 5, noPermission.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => noPermission.Service.PostSaleAsync(noPermission.Actor.Id, new(
+            noPermission.Branch.Id, null, "Walk-in", null, null, [new(noPermission.Product.Id, 1, UnitPriceOverride: 20)], [new(SalePaymentMethod.Cash, 20, 20)])));
+
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesPriceOverride);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1, UnitPriceOverride: 20)], [new(SalePaymentMethod.Cash, 20, 20)])));
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1, UnitPriceOverride: 20, PriceOverrideReason: "Negotiated")], [new(SalePaymentMethod.Cash, 20, 20)]));
+        var item = Assert.Single(sale.Items);
+        Assert.True(item.IsManualPriceOverride);
+        Assert.Equal("Negotiated", item.PriceOverrideReason);
+        Assert.Equal(PriceSource.ManualOverride, item.PriceSource);
+    }
+
+    [Fact]
+    public async Task Discount_beyond_product_maximum_requires_override_permission_and_reason()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesDiscount, PermissionCatalog.SalesDiscountOverride);
+        f.Product.MaximumDiscountPercent = 5;
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1, DiscountPercent: 50)], [new(SalePaymentMethod.Cash, 6, 6)])));
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1, DiscountPercent: 50, DiscountOverrideReason: "VIP customer")], [new(SalePaymentMethod.Cash, 6, 6)]));
+        var item = Assert.Single(sale.Items);
+        Assert.True(item.IsDiscountOverride);
+        Assert.Equal("VIP customer", item.DiscountOverrideReason);
+    }
+
+    [Fact]
+    public async Task Selling_below_cost_via_a_resolved_price_requires_permission_but_default_retail_price_never_triggers_it()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+        f.PriceResolver.Resolve = (_, _, _, _) => new(5m, PriceSource.PriceLevel, null, null);
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 5, 5)])));
+
+        var withPermission = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesSellBelowCost);
+        withPermission.AddBatch("A", 5, withPermission.Today.AddDays(5), 8, 12);
+        withPermission.PriceResolver.Resolve = (_, _, _, _) => new(5m, PriceSource.PriceLevel, null, null);
+        var sale = await withPermission.Service.PostSaleAsync(withPermission.Actor.Id, new(
+            withPermission.Branch.Id, null, "Walk-in", null, null, [new(withPermission.Product.Id, 1)], [new(SalePaymentMethod.Cash, 5, 5)]));
+        Assert.True(Assert.Single(sale.Items).IsBelowCost);
+
+        // The existing default per-batch retail price (8 cost / 12 retail, no resolver override) must
+        // never trigger the guard, even for a batch that happens to be priced under its own cost -
+        // this preserves pre-Phase-3 behaviour exactly (see BuildPostedSale's checkBelowCost flag).
+        var defaultPricing = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        defaultPricing.AddBatch("LOSS", 5, defaultPricing.Today.AddDays(5), 20, 5);
+        var lossSale = await defaultPricing.Service.PostSaleAsync(defaultPricing.Actor.Id, new(
+            defaultPricing.Branch.Id, null, "Walk-in", null, null, [new(defaultPricing.Product.Id, 1)], [new(SalePaymentMethod.Cash, 5, 5)]));
+        Assert.False(Assert.Single(lossSale.Items).IsBelowCost);
+    }
+
+    [Fact]
+    public async Task Wholesale_sale_type_requires_sales_wholesale_permission()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        f.AddBatch("A", 5, f.Today.AddDays(5), 8, 12);
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 12, 12)], SaleType: SaleType.Wholesale)));
+    }
+
+    [Fact]
+    public async Task Fulfilling_a_sales_order_uses_the_order_items_snapshot_price_and_tracks_fulfilled_quantity()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesWholesale);
+        var customer = f.AddCustomer(creditLimit: 1000);
+        f.AddBatch("A", 20, f.Today.AddDays(5), 8, 12);
+        var orderItem = new SalesOrderItem { ProductId = f.Product.Id, OrderedQuantity = 10, FulfilledQuantity = 0, UnitPrice = 9.5m, DiscountPercent = 0 };
+        var order = new SalesOrder
+        {
+            BranchId = f.Branch.Id, CustomerId = customer.Id, OrderNumber = "SO-2026-000001",
+            Status = SalesOrderStatus.Confirmed, Items = [orderItem]
+        };
+        f.SalesOrders.Orders.Add(order);
+
+        var firstFulfillment = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            null, null, null, null, null, [new(f.Product.Id, 6)], [new(SalePaymentMethod.Cash, 57, 57)],
+            SalesOrderId: order.Id));
+
+        Assert.Equal(57, firstFulfillment.NetTotal);
+        var item = Assert.Single(firstFulfillment.Items);
+        Assert.Equal(PriceSource.DocumentSnapshot, item.PriceSource);
+        Assert.Equal(9.5m, item.ResolvedUnitPrice);
+        Assert.Equal(6, orderItem.FulfilledQuantity);
+        Assert.Equal(SalesOrderStatus.PartiallyFulfilled, order.Status);
+
+        var secondFulfillment = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            null, null, null, null, null, [new(f.Product.Id, 4)], [new(SalePaymentMethod.Cash, 38, 38)],
+            SalesOrderId: order.Id));
+        Assert.Equal(10, orderItem.FulfilledQuantity);
+        Assert.Equal(SalesOrderStatus.Fulfilled, order.Status);
+        Assert.Equal(SaleType.Wholesale, secondFulfillment.SaleType);
+
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            null, null, null, null, null, [new(f.Product.Id, 1)], [new(SalePaymentMethod.Cash, 10, 10)], SalesOrderId: order.Id)));
+    }
+
+    [Fact]
+    public async Task Converting_an_accepted_quotation_to_a_sale_preserves_the_quoted_price_and_cannot_be_converted_twice()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView, PermissionCatalog.SalesWholesale);
+        var customer = f.AddCustomer(creditLimit: 1000);
+        f.AddBatch("A", 20, f.Today.AddDays(5), 8, 12);
+        var quotation = new SalesQuotation
+        {
+            BranchId = f.Branch.Id, CustomerId = customer.Id, QuotationNumber = "QT-2026-000001",
+            Status = SalesQuotationStatus.Accepted,
+            Items = [new SalesQuotationItem { ProductId = f.Product.Id, Quantity = 3, UnitPrice = 10m, DiscountPercent = 0, NetAmount = 30 }]
+        };
+        f.SalesQuotations.Quotations.Add(quotation);
+
+        var sale = await f.Service.PostSaleAsync(f.Actor.Id, new(
+            null, null, null, null, null, [new(f.Product.Id, 3)], [new(SalePaymentMethod.Cash, 30, 30)], QuotationId: quotation.Id));
+
+        Assert.Equal(30, sale.NetTotal);
+        Assert.Equal(PriceSource.DocumentSnapshot, Assert.Single(sale.Items).PriceSource);
+        Assert.Equal(SalesQuotationStatus.Converted, quotation.Status);
+        Assert.Equal(sale.Id, quotation.ConvertedToSaleId);
+
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostSaleAsync(f.Actor.Id, new(
+            null, null, null, null, null, [new(f.Product.Id, 3)], [new(SalePaymentMethod.Cash, 30, 30)], QuotationId: quotation.Id)));
+    }
+
+    [Fact]
     public async Task Missing_sales_permission_is_forbidden()
     {
         var f = new Fixture();
@@ -331,6 +509,9 @@ public sealed class SalesServiceTests
         public readonly List<AuditLog> Audits = [];
         public readonly FakeJournalPostingService Journal = new();
         public readonly FakeGodownAccessService GodownAccess = new();
+        public readonly FakePriceResolutionService PriceResolver = new();
+        public readonly FakeSalesOrderRepository SalesOrders = new();
+        public readonly FakeSalesQuotationRepository SalesQuotations = new();
         public SalesService Service { get; }
 
         public Fixture(params string[] permissions)
@@ -365,7 +546,7 @@ public sealed class SalesServiceTests
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             }
             Actor = new User { Username = "cashier", NormalizedUsername = "CASHIER", FullName = "Cashier User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
-            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, TimeProvider.System);
+            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, PriceResolver, SalesOrders, SalesQuotations, TimeProvider.System);
         }
 
         public ProductBatch AddBatch(string number, int quantity, DateOnly expiry, decimal purchasePrice, decimal retailPrice, bool disposed = false, Guid? branchId = null, Guid? godownId = null)
@@ -389,7 +570,7 @@ public sealed class SalesServiceTests
             return batch;
         }
 
-        public Customer AddCustomer(decimal creditLimit, bool active = true)
+        public Customer AddCustomer(decimal creditLimit, bool active = true, bool creditAllowed = true, Guid? priceLevelId = null)
         {
             var customer = new Customer
             {
@@ -397,7 +578,9 @@ public sealed class SalesServiceTests
                 Name = $"Customer {Customers.Count + 1}",
                 NormalizedName = $"CUSTOMER {Customers.Count + 1}",
                 CreditLimit = creditLimit,
-                IsActive = active
+                IsActive = active,
+                CreditAllowed = creditAllowed,
+                PriceLevelId = priceLevelId
             };
             Customers.Add(customer);
             return customer;
@@ -435,13 +618,15 @@ public sealed class SalesServiceTests
                 var allocations = item.Allocations.Select(allocation =>
                 {
                     var batch = Batches.Single(x => x.Id == allocation.ProductBatchId);
-                    return new SaleItemAllocationDto(allocation.Id, allocation.ProductBatchId, batch.BatchNumber, allocation.ExpiryDateSnapshot, allocation.Quantity, allocation.UnitRetailPriceSnapshot, allocation.UnitSalePriceSnapshot, allocation.GrossAmount, allocation.DiscountAmount, allocation.NetAmount);
+                    return new SaleItemAllocationDto(allocation.Id, allocation.ProductBatchId, batch.BatchNumber, allocation.ExpiryDateSnapshot, allocation.Quantity, allocation.UnitRetailPriceSnapshot, allocation.UnitSalePriceSnapshot, allocation.UnitCostPriceSnapshot, allocation.GrossAmount, allocation.DiscountAmount, allocation.NetAmount);
                 }).ToList();
-                return new SaleItemDto(item.Id, item.ProductId, Product.Name, Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, false, allocations);
+                return new SaleItemDto(item.Id, item.ProductId, Product.Name, Product.SKU, item.RequestedQuantity, item.DiscountPercent, item.GrossAmount, item.DiscountAmount, item.TaxAmount, item.NetAmount, false, allocations,
+                    item.PriceSource, item.ResolvedUnitPrice, item.IsManualPriceOverride, item.PriceOverrideReason, item.IsDiscountOverride, item.DiscountOverrideReason, item.IsBelowCost, item.BelowCostOverrideReason);
             }).ToList();
             var payments = sale.Payments.Select(x => new SalePaymentDto(x.Id, x.Method, x.AmountApplied, x.TenderedAmount, x.ReferenceNumber)).ToList();
             var customer = Customers.FirstOrDefault(x => x.Id == sale.CustomerId);
-            return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, sale.CashierUserId, Actor.FullName, sale.CustomerId, customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments);
+            return new SaleDetailsDto(sale.Id, sale.InvoiceNumber, sale.HoldNumber, sale.Status, sale.CreatedAt, sale.PostedAtUtc, sale.BranchId, Branch.Name, Branch.Address, Branch.PhoneNumber, sale.CashierUserId, Actor.FullName, sale.CustomerId, customer?.CustomerCode, sale.CustomerName, sale.CustomerPhone, sale.Subtotal, sale.DiscountTotal, sale.TaxTotal, sale.NetTotal, sale.AmountPaid, sale.CreditAmount, sale.ChangeGiven, sale.Notes, items, payments,
+                sale.SaleType, sale.PriceLevelId, null, sale.QuotationId, null, sale.SalesOrderId, null, sale.CustomerPoNumber, sale.DueDateUtc);
         }
     }
 
@@ -465,5 +650,55 @@ public sealed class SalesServiceTests
         public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
         public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
         public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
+    }
+
+    /// <summary>Defaults to "no override" (Source=Default, Price=null) so every pre-existing test in
+    /// this file keeps exercising the exact pre-Phase-3 per-batch retail-price path unless a test
+    /// explicitly assigns Resolve.</summary>
+    private sealed class FakePriceResolutionService : Pharmacy.Application.Services.Pricing.IPriceResolutionService
+    {
+        public Func<Guid?, Guid, int, Guid?, Pharmacy.Application.Services.Pricing.PriceResolutionResult> Resolve =
+            (_, _, _, _) => new(null, PriceSource.Default, null, null);
+        public Task<Pharmacy.Application.Services.Pricing.PriceResolutionResult> ResolveAsync(Guid? customerId, Guid productId, int quantity, Guid? explicitPriceLevelId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Resolve(customerId, productId, quantity, explicitPriceLevelId));
+    }
+
+    private sealed class FakeSalesOrderRepository : Pharmacy.Application.Services.SalesOrders.ISalesOrderRepository
+    {
+        public readonly List<SalesOrder> Orders = [];
+        public Task<SalesOrder?> GetOrderForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Orders.FirstOrDefault(x => x.Id == id));
+        public Task<string> NextOrderNumberAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<SalesOrder?> GetOrderAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task AddOrderAsync(SalesOrder order, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void ReplaceOrderItems(SalesOrder order, List<SalesOrderItem> items) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Pharmacy.Application.DTOs.SalesOrders.LinkedSaleDto>> GetLinkedSalesAsync(Guid orderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Pharmacy.Application.DTOs.SalesOrders.SalesOrderDetailsDto?> GetOrderDetailsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<PagedResult<Pharmacy.Application.DTOs.SalesOrders.SalesOrderListItemDto>> ListOrdersAsync(Pharmacy.Application.DTOs.SalesOrders.SalesOrderListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeSalesQuotationRepository : Pharmacy.Application.Services.Quotations.ISalesQuotationRepository
+    {
+        public readonly List<SalesQuotation> Quotations = [];
+        public Task<SalesQuotation?> GetQuotationForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Quotations.FirstOrDefault(x => x.Id == id));
+        public Task<string> NextQuotationNumberAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<SalesQuotation?> GetQuotationAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task AddQuotationAsync(SalesQuotation quotation, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void ReplaceQuotationItems(SalesQuotation quotation, List<SalesQuotationItem> items) => throw new NotImplementedException();
+        public Task<Pharmacy.Application.DTOs.Quotations.QuotationDetailsDto?> GetQuotationDetailsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<PagedResult<Pharmacy.Application.DTOs.Quotations.QuotationListItemDto>> ListQuotationsAsync(Pharmacy.Application.DTOs.Quotations.QuotationListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

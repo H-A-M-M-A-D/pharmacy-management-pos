@@ -24,7 +24,7 @@ public sealed class ReportingRepository(PharmacyDbContext db) : IReportingReposi
 
     public async Task<PagedReport<DailySaleDto>> DailySalesAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
     {
-        var query = Sales(branchId, q.FromUtc, q.ToUtc);
+        var query = Sales(branchId, q.FromUtc, q.ToUtc, q.SaleType);
         if (!string.IsNullOrWhiteSpace(q.Search)) query = query.Where(x => x.InvoiceNumber!.Contains(q.Search) || (x.CustomerName ?? "").Contains(q.Search));
         var total = await query.CountAsync(ct);
         var raw = await query.OrderByDescending(x => x.PostedAtUtc).ThenBy(x => x.InvoiceNumber).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
@@ -69,7 +69,136 @@ public sealed class ReportingRepository(PharmacyDbContext db) : IReportingReposi
     public async Task<PagedReport<DiscountRowDto>> DiscountsAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
     {
         var query = db.SaleItems.AsNoTracking().Where(x => x.Sale!.Status == SaleStatus.Posted && x.Sale.PostedAtUtc >= q.FromUtc && x.Sale.PostedAtUtc < q.ToUtc && x.DiscountAmount > 0 && (!branchId.HasValue || x.Sale.BranchId == branchId));
-        var total = await query.CountAsync(ct); var items = await query.OrderByDescending(x => x.Sale!.PostedAtUtc).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).Select(x => new DiscountRowDto(x.Sale!.InvoiceNumber!, x.Product!.Name, x.Sale.CashierUser!.FullName, x.GrossAmount, x.DiscountPercent, x.DiscountAmount, x.NetAmount)).ToListAsync(ct); return new(items, total, q.Page, q.PageSize);
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(x => x.Sale!.PostedAtUtc).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new DiscountRowDto(x.Sale!.InvoiceNumber!, x.Product!.Name, x.Sale.CashierUser!.FullName, x.GrossAmount, x.DiscountPercent, x.DiscountAmount, x.NetAmount, x.IsDiscountOverride, x.DiscountOverrideReason)).ToListAsync(ct);
+        return new(items, total, q.Page, q.PageSize);
+    }
+
+    public async Task<IReadOnlyList<NamedSalesDto>> SalesByCustomerAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var rows = await Sales(branchId, from, to).Where(x => x.CustomerId != null)
+            .GroupBy(x => new { x.CustomerId, Name = x.Customer!.Name })
+            .Select(g => new { g.Key.CustomerId, g.Key.Name, Count = g.Count(), Gross = g.Sum(x => x.Subtotal), Discount = g.Sum(x => x.DiscountTotal), Net = g.Sum(x => x.NetTotal) })
+            .ToListAsync(ct);
+        var returned = await Returns(branchId, from, to).Where(x => x.OriginalSale!.CustomerId != null)
+            .GroupBy(x => x.OriginalSale!.CustomerId).Select(g => new { Id = g.Key, Value = g.Sum(x => x.RefundAmount) }).ToListAsync(ct);
+        return rows.Select(x => { var value = returned.FirstOrDefault(r => r.Id == x.CustomerId)?.Value ?? 0; return new NamedSalesDto(x.Name, x.Count, x.Gross, x.Discount, x.Net, value, x.Net - value); })
+            .OrderByDescending(x => x.NetSales).ToList();
+    }
+
+    public async Task<IReadOnlyList<NamedSalesDto>> SalesByTypeAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var rows = await Sales(branchId, from, to).GroupBy(x => x.SaleType)
+            .Select(g => new { Type = g.Key, Count = g.Count(), Gross = g.Sum(x => x.Subtotal), Discount = g.Sum(x => x.DiscountTotal), Net = g.Sum(x => x.NetTotal) })
+            .ToListAsync(ct);
+        return rows.Select(x => new NamedSalesDto(x.Type.ToString(), x.Count, x.Gross, x.Discount, x.Net, 0, x.Net)).OrderByDescending(x => x.NetSales).ToList();
+    }
+
+    public async Task<IReadOnlyList<NamedSalesDto>> SalesByPriceLevelAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var rows = await Sales(branchId, from, to)
+            .GroupBy(x => new { x.PriceLevelId, Name = x.PriceLevel != null ? x.PriceLevel.Name : "Default" })
+            .Select(g => new { g.Key.Name, Count = g.Count(), Gross = g.Sum(x => x.Subtotal), Discount = g.Sum(x => x.DiscountTotal), Net = g.Sum(x => x.NetTotal) })
+            .ToListAsync(ct);
+        return rows.Select(x => new NamedSalesDto(x.Name, x.Count, x.Gross, x.Discount, x.Net, 0, x.Net)).OrderByDescending(x => x.NetSales).ToList();
+    }
+
+    public async Task<PagedReport<PriceOverrideRowDto>> PriceOverridesAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var query = db.SaleItems.AsNoTracking().Where(x => x.Sale!.Status == SaleStatus.Posted && x.Sale.PostedAtUtc >= q.FromUtc && x.Sale.PostedAtUtc < q.ToUtc
+            && x.IsManualPriceOverride && (!branchId.HasValue || x.Sale.BranchId == branchId));
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(x => x.Sale!.PostedAtUtc).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new PriceOverrideRowDto(x.Sale!.InvoiceNumber!, x.Sale.PostedAtUtc!.Value, x.Product!.Name, x.Sale.CashierUser!.FullName,
+                x.ResolvedUnitPrice ?? 0, x.Product.RetailPrice, x.PriceOverrideReason)).ToListAsync(ct);
+        return new(items, total, q.Page, q.PageSize);
+    }
+
+    public async Task<PagedReport<BelowCostSaleRowDto>> BelowCostSalesAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var query = db.SaleItemBatchAllocations.AsNoTracking().Where(x => x.SaleItem!.Sale!.Status == SaleStatus.Posted && x.SaleItem.Sale.PostedAtUtc >= q.FromUtc && x.SaleItem.Sale.PostedAtUtc < q.ToUtc
+            && x.SaleItem.IsBelowCost && (!branchId.HasValue || x.SaleItem.Sale.BranchId == branchId));
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(x => x.SaleItem!.Sale!.PostedAtUtc).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new { x.SaleItem!.Sale!.InvoiceNumber, PostedAtUtc = x.SaleItem.Sale.PostedAtUtc!.Value, Product = x.SaleItem.Product!.Name,
+                Cashier = x.SaleItem.Sale.CashierUser!.FullName, x.Quantity, SellingPrice = x.UnitSalePriceSnapshot, UnitCost = x.UnitCostPriceSnapshot })
+            .ToListAsync(ct);
+        return new(items.Select(x => new BelowCostSaleRowDto(x.InvoiceNumber!, x.PostedAtUtc, x.Product, x.Cashier, x.Quantity, x.SellingPrice, x.UnitCost,
+            x.UnitCost - x.SellingPrice, (x.UnitCost - x.SellingPrice) * x.Quantity)).ToList(), total, q.Page, q.PageSize);
+    }
+
+    public async Task<IReadOnlyList<CustomerProfitDto>> GrossProfitByCustomerAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var rows = await db.SaleItemBatchAllocations.AsNoTracking()
+            .Where(x => x.SaleItem!.Sale!.Status == SaleStatus.Posted && x.SaleItem.Sale.PostedAtUtc >= from && x.SaleItem.Sale.PostedAtUtc < to
+                && x.SaleItem.Sale.CustomerId != null && (!branchId.HasValue || x.SaleItem.Sale.BranchId == branchId))
+            .GroupBy(x => new { x.SaleItem!.Sale!.CustomerId, Name = x.SaleItem.Sale.Customer!.Name })
+            .Select(g => new { g.Key.CustomerId, g.Key.Name, Net = g.Sum(x => x.NetAmount), Cost = g.Sum(x => x.UnitCostPriceSnapshot * x.Quantity) })
+            .ToListAsync(ct);
+        return rows.Select(x => { var profit = x.Net - x.Cost; return new CustomerProfitDto(x.CustomerId!.Value, x.Name, x.Net, x.Cost, profit, x.Net == 0 ? 0 : decimal.Round(profit / x.Net * 100, 2)); })
+            .OrderByDescending(x => x.GrossProfit).ToList();
+    }
+
+    public async Task<IReadOnlyList<CreditUtilizationRowDto>> CreditLimitUtilizationAsync(Guid? branchId, CancellationToken ct)
+    {
+        var balances = await db.CustomerLedgerEntries.AsNoTracking().Where(x => !branchId.HasValue || x.BranchId == branchId)
+            .GroupBy(x => x.CustomerId).Select(g => new { Id = g.Key, Balance = g.Sum(x => x.Amount) }).ToListAsync(ct);
+        var customers = await db.Customers.AsNoTracking().Where(x => x.CreditLimit > 0)
+            .Select(x => new { x.Id, x.CustomerCode, x.Name, x.CreditLimit }).ToListAsync(ct);
+        return customers.Select(c =>
+        {
+            var outstanding = balances.FirstOrDefault(b => b.Id == c.Id)?.Balance ?? 0;
+            outstanding = outstanding > 0 ? outstanding : 0;
+            return new CreditUtilizationRowDto(c.Id, c.CustomerCode, c.Name, c.CreditLimit, outstanding, c.CreditLimit - outstanding,
+                c.CreditLimit == 0 ? 0 : decimal.Round(outstanding / c.CreditLimit * 100, 2));
+        }).OrderByDescending(x => x.UtilizationPercent).ToList();
+    }
+
+    public async Task<QuotationSummaryDto> QuotationSummaryAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var quotationDateFrom = BusinessDate(from);
+        var quotationDateTo = BusinessDate(to);
+        var rows = await db.SalesQuotations.AsNoTracking()
+            .Where(x => x.QuotationDate >= quotationDateFrom && x.QuotationDate < quotationDateTo && (!branchId.HasValue || x.BranchId == branchId))
+            .Select(x => new { x.Status, x.NetTotal }).ToListAsync(ct);
+        int Count(SalesQuotationStatus s) => rows.Count(x => x.Status == s);
+        var converted = Count(SalesQuotationStatus.Converted);
+        var total = rows.Count;
+        var responded = total - Count(SalesQuotationStatus.Draft) - Count(SalesQuotationStatus.Sent);
+        return new(total, Count(SalesQuotationStatus.Draft), Count(SalesQuotationStatus.Sent), Count(SalesQuotationStatus.Accepted),
+            Count(SalesQuotationStatus.Rejected), Count(SalesQuotationStatus.Expired), converted, Count(SalesQuotationStatus.Cancelled),
+            rows.Sum(x => x.NetTotal), rows.Where(x => x.Status == SalesQuotationStatus.Converted).Sum(x => x.NetTotal),
+            responded == 0 ? 0 : decimal.Round((decimal)converted / responded * 100, 2));
+    }
+
+    public async Task<SalesOrderSummaryDto> SalesOrderSummaryAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var orderDateFrom = BusinessDate(from);
+        var orderDateTo = BusinessDate(to);
+        var rows = await db.SalesOrders.AsNoTracking()
+            .Where(x => x.OrderDate >= orderDateFrom && x.OrderDate < orderDateTo && (!branchId.HasValue || x.BranchId == branchId))
+            .Select(x => new { x.Status, x.NetTotal, Ordered = x.Items.Sum(i => i.OrderedQuantity), Fulfilled = x.Items.Sum(i => i.FulfilledQuantity) })
+            .ToListAsync(ct);
+        int Count(SalesOrderStatus s) => rows.Count(x => x.Status == s);
+        var totalOrdered = rows.Sum(x => x.Ordered);
+        var totalFulfilled = rows.Sum(x => x.Fulfilled);
+        return new(rows.Count, Count(SalesOrderStatus.Draft), Count(SalesOrderStatus.Confirmed), Count(SalesOrderStatus.PartiallyFulfilled),
+            Count(SalesOrderStatus.Fulfilled), Count(SalesOrderStatus.Cancelled), rows.Sum(x => x.NetTotal), totalOrdered, totalFulfilled,
+            totalOrdered == 0 ? 0 : decimal.Round((decimal)totalFulfilled / totalOrdered * 100, 2));
+    }
+
+    public async Task<PagedReport<OpenSalesOrderRowDto>> OpenSalesOrdersAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
+    {
+        var query = db.SalesOrders.AsNoTracking().Where(x => (x.Status == SalesOrderStatus.Confirmed || x.Status == SalesOrderStatus.PartiallyFulfilled)
+            && (!branchId.HasValue || x.BranchId == branchId));
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderBy(x => x.ExpectedDeliveryDate ?? x.OrderDate).Skip((q.Page - 1) * q.PageSize).Take(q.PageSize)
+            .Select(x => new { x.OrderNumber, Customer = x.Customer!.Name, x.OrderDate, x.ExpectedDeliveryDate, x.Status, x.NetTotal,
+                Ordered = x.Items.Sum(i => i.OrderedQuantity), Fulfilled = x.Items.Sum(i => i.FulfilledQuantity) })
+            .ToListAsync(ct);
+        return new(items.Select(x => new OpenSalesOrderRowDto(x.OrderNumber, x.Customer, x.OrderDate, x.ExpectedDeliveryDate, x.Status.ToString(),
+            x.NetTotal, x.Ordered, x.Fulfilled, x.Ordered - x.Fulfilled)).ToList(), total, q.Page, q.PageSize);
     }
 
     public async Task<PagedReport<CreditSaleDto>> CreditSalesAsync(Guid? branchId, ReportQuery q, CancellationToken ct)
@@ -328,7 +457,7 @@ public sealed class ReportingRepository(PharmacyDbContext db) : IReportingReposi
     public async Task<CashPositionReportDto> CashPositionAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct) { var q = db.FinancialLedgerEntries.AsNoTracking().Where(x => !branchId.HasValue || x.BranchId == branchId); var opening = await q.Where(x => x.OccurredAtUtc < from).SumAsync(x => (decimal?)x.Amount, ct) ?? 0; var rows = await q.Where(x => x.OccurredAtUtc >= from && x.OccurredAtUtc < to).GroupBy(x => x.EntryType).Select(g => new { Type = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(ct); decimal V(FinancialLedgerEntryType t) => rows.FirstOrDefault(x => x.Type == t)?.Amount ?? 0; var externalIn = V(FinancialLedgerEntryType.SalePayment) + V(FinancialLedgerEntryType.CustomerPayment) + V(FinancialLedgerEntryType.OtherIncome) + V(FinancialLedgerEntryType.AdjustmentCredit); var externalOut = -(V(FinancialLedgerEntryType.SupplierPayment) + V(FinancialLedgerEntryType.Expense) + V(FinancialLedgerEntryType.SalesRefund) + V(FinancialLedgerEntryType.AdjustmentDebit)); var closing = opening + rows.Sum(x => x.Amount); return new(opening, externalIn, externalOut, closing, V(FinancialLedgerEntryType.SalePayment), V(FinancialLedgerEntryType.CustomerPayment), -V(FinancialLedgerEntryType.SupplierPayment), -V(FinancialLedgerEntryType.Expense), -V(FinancialLedgerEntryType.SalesRefund), V(FinancialLedgerEntryType.OtherIncome), V(FinancialLedgerEntryType.TransferIn), -V(FinancialLedgerEntryType.TransferOut)); }
     public async Task<IReadOnlyList<TrendPointDto>> TrendAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct) { var sales = await Allocations(branchId, from, to).GroupBy(x => DateOnly.FromDateTime(x.SaleItem!.Sale!.PostedAtUtc!.Value)).Select(g => new { Date = g.Key, Net = g.Sum(x => x.NetAmount), Cost = g.Sum(x => x.UnitCostPriceSnapshot * x.Quantity) }).ToListAsync(ct); var returns = await ReturnAllocations(branchId, from, to).GroupBy(x => DateOnly.FromDateTime(x.SalesReturnItem!.SalesReturn!.PostedAtUtc!.Value)).Select(g => new { Date = g.Key, Net = g.Sum(x => x.RefundAmount), Cost = g.Sum(x => x.UnitCostPriceSnapshot * x.Quantity) }).ToListAsync(ct); return sales.Select(x => { var r = returns.FirstOrDefault(y => y.Date == x.Date); var net = x.Net - (r?.Net ?? 0); var cost = x.Cost - (r?.Cost ?? 0); return new TrendPointDto(x.Date, net, net - cost); }).OrderBy(x => x.Date).ToList(); }
 
-    private IQueryable<Sale> Sales(Guid? branch, DateTime from, DateTime to) => db.Sales.AsNoTracking().Where(x => x.Status == SaleStatus.Posted && x.PostedAtUtc >= from && x.PostedAtUtc < to && (!branch.HasValue || x.BranchId == branch));
+    private IQueryable<Sale> Sales(Guid? branch, DateTime from, DateTime to, SaleType? saleType = null) => db.Sales.AsNoTracking().Where(x => x.Status == SaleStatus.Posted && x.PostedAtUtc >= from && x.PostedAtUtc < to && (!branch.HasValue || x.BranchId == branch) && (!saleType.HasValue || x.SaleType == saleType));
     private IQueryable<SalesReturn> Returns(Guid? branch, DateTime from, DateTime to) => db.SalesReturns.AsNoTracking().Where(x => x.Status == SalesReturnStatus.Posted && x.PostedAtUtc >= from && x.PostedAtUtc < to && (!branch.HasValue || x.BranchId == branch));
     private IQueryable<SaleItemBatchAllocation> Allocations(Guid? branch, DateTime from, DateTime to) => db.SaleItemBatchAllocations.AsNoTracking().Where(x => x.SaleItem!.Sale!.Status == SaleStatus.Posted && x.SaleItem.Sale.PostedAtUtc >= from && x.SaleItem.Sale.PostedAtUtc < to && (!branch.HasValue || x.SaleItem.Sale.BranchId == branch));
     private IQueryable<SalesReturnAllocation> ReturnAllocations(Guid? branch, DateTime from, DateTime to) => db.SalesReturnAllocations.AsNoTracking().Where(x => x.SalesReturnItem!.SalesReturn!.PostedAtUtc >= from && x.SalesReturnItem.SalesReturn.PostedAtUtc < to && (!branch.HasValue || x.SalesReturnItem.SalesReturn.BranchId == branch));

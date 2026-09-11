@@ -182,6 +182,7 @@ public sealed class CustomerManagementTests
         public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Branch?>(Branch.Id == branchId ? Branch : null);
         public Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default) => Task.FromResult<Customer?>(Customer is not null && Customer.Id == customerId ? Customer : null);
         public Task<bool> CustomerCodeExistsAsync(string customerCode, Guid? excludingId = null, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> PriceLevelIsValidAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<string> NextCustomerCodeAsync(CancellationToken cancellationToken = default) => Task.FromResult("CUS-000001");
         public Task<string> NextPaymentReceiptNumberAsync(DateTime paymentDateUtc, CancellationToken cancellationToken = default) => Task.FromResult($"CR-{paymentDateUtc.Year}-000001");
         public Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default) { Customer = customer; return Task.CompletedTask; }

@@ -12,6 +12,7 @@ public interface ICustomerRepository
     Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default);
     Task<Customer?> GetCustomerAsync(Guid customerId, CancellationToken cancellationToken = default);
     Task<bool> CustomerCodeExistsAsync(string customerCode, Guid? excludingId = null, CancellationToken cancellationToken = default);
+    Task<bool> PriceLevelIsValidAsync(Guid id, CancellationToken cancellationToken = default);
     Task<string> NextCustomerCodeAsync(CancellationToken cancellationToken = default);
     Task<string> NextPaymentReceiptNumberAsync(DateTime paymentDateUtc, CancellationToken cancellationToken = default);
     Task AddCustomerAsync(Customer customer, CancellationToken cancellationToken = default);

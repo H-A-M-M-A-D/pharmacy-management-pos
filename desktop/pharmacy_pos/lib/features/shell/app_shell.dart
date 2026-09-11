@@ -8,11 +8,15 @@ import '../customers/customers_screen.dart';
 import '../finance/finance_screen.dart';
 import '../godowns/godowns_screen.dart';
 import '../inventory/inventory_screen.dart';
+import '../pricing/price_levels_screen.dart';
 import '../purchasing/purchasing_screen.dart';
+import '../quotations/quotations_screen.dart';
 import '../reports/reports_screen.dart';
 import '../sales/cashier_shift_screen.dart';
 import '../sales/pos_screen.dart';
+import '../sales_orders/sales_orders_screen.dart';
 import '../stock_transfers/stock_transfers_screen.dart';
+import '../wholesale/wholesale_screen.dart';
 import '../suppliers/suppliers_screen.dart';
 import '../users/users_screen.dart';
 import '../administration/administration_screen.dart';
@@ -48,6 +52,10 @@ class _AppShellState extends State<AppShell> {
     final canViewSales =
         widget.authState.can('sales.view') ||
         widget.authState.can('sales.create');
+    final canViewQuotations = widget.authState.can('quotations.view');
+    final canViewSalesOrders = widget.authState.can('sales_orders.view');
+    final canViewWholesale = widget.authState.can('sales.wholesale');
+    final canViewPricing = widget.authState.can('pricing.view');
     final canViewCashierShift = const [
       'cashier_shift.open',
       'cashier_shift.view',
@@ -149,6 +157,30 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.point_of_sale),
           label: Text('Sales'),
         ),
+      if (canViewQuotations)
+        const NavigationRailDestination(
+          icon: Icon(Icons.request_quote_outlined),
+          selectedIcon: Icon(Icons.request_quote),
+          label: Text('Quotations'),
+        ),
+      if (canViewSalesOrders)
+        const NavigationRailDestination(
+          icon: Icon(Icons.assignment_outlined),
+          selectedIcon: Icon(Icons.assignment),
+          label: Text('Sales Orders'),
+        ),
+      if (canViewWholesale)
+        const NavigationRailDestination(
+          icon: Icon(Icons.storefront_outlined),
+          selectedIcon: Icon(Icons.storefront),
+          label: Text('Wholesale'),
+        ),
+      if (canViewPricing)
+        const NavigationRailDestination(
+          icon: Icon(Icons.sell_outlined),
+          selectedIcon: Icon(Icons.sell),
+          label: Text('Price Levels'),
+        ),
       if (canViewCashierShift)
         const NavigationRailDestination(
           icon: Icon(Icons.savings_outlined),
@@ -207,6 +239,10 @@ class _AppShellState extends State<AppShell> {
       if (canViewCustomers) CustomersScreen(authState: widget.authState),
       if (canViewPurchasing) PurchasingScreen(authState: widget.authState),
       if (canViewSales) PosScreen(authState: widget.authState),
+      if (canViewQuotations) QuotationsScreen(authState: widget.authState),
+      if (canViewSalesOrders) SalesOrdersScreen(authState: widget.authState),
+      if (canViewWholesale) WholesaleScreen(authState: widget.authState),
+      if (canViewPricing) PriceLevelsScreen(authState: widget.authState),
       if (canViewCashierShift) CashierShiftScreen(authState: widget.authState),
       if (canViewFinance) FinanceScreen(authState: widget.authState),
       if (canViewReports) ReportsScreen(authState: widget.authState),

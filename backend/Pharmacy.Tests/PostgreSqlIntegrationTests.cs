@@ -11,8 +11,17 @@ using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Application.Services.Customers;
 using Pharmacy.Application.Services.Finance;
+using Pharmacy.Application.DTOs.Quotations;
+using Pharmacy.Application.DTOs.Sales;
+using Pharmacy.Application.DTOs.SalesOrders;
 using Pharmacy.Application.DTOs.StockTransfers;
+using Pharmacy.Application.Services.Godowns;
+using Pharmacy.Application.Services.Inventory;
+using Pharmacy.Application.Services.Pricing;
 using Pharmacy.Application.Services.Purchasing;
+using Pharmacy.Application.Services.Quotations;
+using Pharmacy.Application.Services.Sales;
+using Pharmacy.Application.Services.SalesOrders;
 using Pharmacy.Application.Services.StockTransfers;
 using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Domain.Entities;
@@ -701,7 +710,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            56L,
+            63L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -842,6 +851,106 @@ public sealed class PostgreSqlIntegrationTests
         _ = await reports.TransferDetailAsync(null, query, default);
         _ = await reports.TransferDiscrepancyAsync(null, query, null, default);
         _ = await reports.StockCountVarianceAsync(null, query, default);
+        _ = await reports.SalesByCustomerAsync(null, from, to, default);
+        _ = await reports.SalesByTypeAsync(null, from, to, default);
+        _ = await reports.SalesByPriceLevelAsync(null, from, to, default);
+        _ = await reports.PriceOverridesAsync(null, query, default);
+        _ = await reports.BelowCostSalesAsync(null, query, default);
+        _ = await reports.GrossProfitByCustomerAsync(null, from, to, default);
+        _ = await reports.CreditLimitUtilizationAsync(null, default);
+        _ = await reports.QuotationSummaryAsync(null, from, to, default);
+        _ = await reports.SalesOrderSummaryAsync(null, from, to, default);
+        _ = await reports.OpenSalesOrdersAsync(null, query, default);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Phase3_wholesale_reports_classify_and_total_correctly()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var godownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, godownId, isDefault: true);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(seedConnection, seedTransaction, branchId, productId, Unique("batch"), batchId, godownId: godownId);
+        await ExecuteAsync(seedConnection, seedTransaction, "UPDATE \"ProductBatches\" SET \"QuantityAvailable\" = 100 WHERE \"Id\" = @id;", ("id", batchId));
+        await InsertInventoryAsync(seedConnection, seedTransaction, branchId, godownId, productId, batchId, 100);
+        await InsertCustomerAsync(seedConnection, seedTransaction, customerId, Unique("CUS"), "Report Customer", "REPORT CUSTOMER", 100000);
+        var username = Unique("report-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        // One retail cash sale (5 units @ 12 default retail) and one wholesale sale posted at a
+        // manually overridden price of 6 - a genuine below-cost line (batch cost is 10) that
+        // requires sales.sell_below_cost, which Manager already holds.
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            var sales = SalesServiceFor(context);
+            await sales.PostSaleAsync(actorId, new(branchId, null, "Walk-in", null, null, [new(productId, 5)], [new(SalePaymentMethod.Cash, 60, 60)], godownId));
+            await sales.PostSaleAsync(actorId, new(branchId, customerId, null, null, null,
+                [new(productId, 4, UnitPriceOverride: 6m, PriceOverrideReason: "Clearance")], [new(SalePaymentMethod.Cash, 24, 24)], godownId, SaleType.Wholesale));
+        }
+
+        // One quotation, accepted then converted to a sales order (never fulfilled), so the summary
+        // reports have one Converted quotation and one open (Confirmed) sales order.
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            var quotations = SalesQuotationServiceFor(context);
+            var quotation = await quotations.CreateQuotationAsync(actorId, new(branchId, customerId, godownId, null, DateOnly.FromDateTime(DateTime.UtcNow), null, null, [new(productId, 10)]));
+            await quotations.AcceptQuotationAsync(actorId, quotation.Id);
+            var order = await quotations.ConvertToSalesOrderAsync(actorId, quotation.Id, new(null));
+            await SalesOrderServiceFor(context).ConfirmOrderAsync(actorId, order.Id);
+        }
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var reports = new ReportingRepository(verifyContext);
+        var from = DateTime.UtcNow.AddDays(-1);
+        var to = DateTime.UtcNow.AddDays(1);
+
+        var byType = await reports.SalesByTypeAsync(branchId, from, to, default);
+        var retail = byType.Single(x => x.Name == "Retail");
+        var wholesale = byType.Single(x => x.Name == "Wholesale");
+        Assert.Equal(60, retail.NetSales);
+        Assert.Equal(24, wholesale.NetSales);
+
+        var belowCost = await reports.BelowCostSalesAsync(branchId, new ReportQuery(branchId, from, to, 1, 20), default);
+        var lossRow = Assert.Single(belowCost.Items);
+        Assert.Equal(4, lossRow.Quantity);
+        Assert.Equal(6, lossRow.SellingPrice);
+        Assert.Equal(10, lossRow.UnitCost);
+        Assert.Equal(16, lossRow.TotalLoss);
+
+        var byCustomer = await reports.SalesByCustomerAsync(branchId, from, to, default);
+        Assert.Equal(24, Assert.Single(byCustomer).NetSales);
+
+        var quotationSummary = await reports.QuotationSummaryAsync(branchId, from, to, default);
+        Assert.Equal(1, quotationSummary.Total);
+        Assert.Equal(1, quotationSummary.Converted);
+        Assert.Equal(100, quotationSummary.ConversionRatePercent);
+
+        var orderSummary = await reports.SalesOrderSummaryAsync(branchId, from, to, default);
+        Assert.Equal(1, orderSummary.Total);
+        Assert.Equal(1, orderSummary.Confirmed);
+        Assert.Equal(10, orderSummary.TotalOrderedQuantity);
+        Assert.Equal(0, orderSummary.TotalFulfilledQuantity);
+
+        var openOrders = await reports.OpenSalesOrdersAsync(branchId, new ReportQuery(branchId, from, to, 1, 20), default);
+        var openRow = Assert.Single(openOrders.Items);
+        Assert.Equal("Confirmed", openRow.Status);
+        Assert.Equal(10, openRow.RemainingQuantity);
     }
 
     [PostgreSqlFact]
@@ -3232,8 +3341,166 @@ public sealed class PostgreSqlIntegrationTests
         Assert.Equal(1L, await ScalarAsync<long>(seedConnection, null, "SELECT count(*) FROM \"StockMovements\" WHERE \"ProductBatchId\" = @id AND \"MovementType\" = 7;", ("id", batchId)));
     }
 
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Price_resolution_prefers_the_most_specific_quantity_break_and_ignores_inactive_price_levels()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        var activeLevelId = Guid.NewGuid();
+        var inactiveLevelId = Guid.NewGuid();
+        await ExecuteAsync(seedConnection, seedTransaction, """
+            INSERT INTO "PriceLevels" ("Id","Name","Code","Priority","IsDefault","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@active,'Wholesale',@activeCode,1,false,true,now(),now()), (@inactive,'Old Tier',@inactiveCode,2,false,false,now(),now());
+            """, ("active", activeLevelId), ("activeCode", ShortCode("WS")), ("inactive", inactiveLevelId), ("inactiveCode", ShortCode("OLD")));
+        await ExecuteAsync(seedConnection, seedTransaction, """
+            INSERT INTO "ProductPriceLevels" ("Id","ProductId","PriceLevelId","SellingPrice","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@productId,@levelId,11.00,true,now(),now());
+            """, ("id", Guid.NewGuid()), ("productId", productId), ("levelId", activeLevelId));
+        await ExecuteAsync(seedConnection, seedTransaction, """
+            INSERT INTO "ProductPriceBreaks" ("Id","ProductId","PriceLevelId","MinimumQuantity","SellingPrice","IsActive","CreatedAt","UpdatedAt")
+            VALUES (@id,@productId,@levelId,10,9.00,true,now(),now());
+            """, ("id", Guid.NewGuid()), ("productId", productId), ("levelId", activeLevelId));
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        await using var context = new PharmacyDbContext(Options(connectionString));
+        var resolver = new PriceResolutionService(context);
+
+        var belowBreak = await resolver.ResolveAsync(null, productId, 5, activeLevelId);
+        Assert.Equal(11.00m, belowBreak.Price);
+        Assert.Equal(PriceSource.PriceLevel, belowBreak.Source);
+
+        var atBreak = await resolver.ResolveAsync(null, productId, 10, activeLevelId);
+        Assert.Equal(9.00m, atBreak.Price);
+        Assert.Equal(PriceSource.QuantityBreak, atBreak.Source);
+
+        var inactive = await resolver.ResolveAsync(null, productId, 5, inactiveLevelId);
+        Assert.Null(inactive.Price);
+        Assert.Equal(PriceSource.Default, inactive.Source);
+
+        var noLevel = await resolver.ResolveAsync(null, productId, 5);
+        Assert.Null(noLevel.Price);
+        Assert.Equal(PriceSource.Default, noLevel.Source);
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Concurrent_quotation_creation_never_produces_duplicate_quotation_numbers()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        await InsertCustomerAsync(seedConnection, seedTransaction, customerId, Unique("CUS"), "Race Customer", "RACE CUSTOMER", 100000);
+        var username = Unique("qt-race-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        async Task<string> CreateAsync()
+        {
+            await using var context = new PharmacyDbContext(Options(connectionString));
+            var quotation = await SalesQuotationServiceFor(context).CreateQuotationAsync(actorId, new(
+                branchId, customerId, null, null, DateOnly.FromDateTime(DateTime.UtcNow), null, null, [new(productId, 1)]));
+            return quotation.QuotationNumber;
+        }
+
+        var numbers = await Task.WhenAll(Task.Run(CreateAsync), Task.Run(CreateAsync), Task.Run(CreateAsync));
+        Assert.Equal(numbers.Length, numbers.Distinct().Count());
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Concurrent_sales_order_fulfillment_never_exceeds_the_ordered_quantity()
+    {
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var categoryId = Guid.NewGuid();
+        var branchId = Guid.NewGuid();
+        var godownId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var batchId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Manager';");
+        await InsertCategoryAsync(seedConnection, seedTransaction, categoryId);
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        await InsertGodownAsync(seedConnection, seedTransaction, branchId, godownId, isDefault: true);
+        await InsertProductAsync(seedConnection, seedTransaction, categoryId, Unique("sku"), null, productId);
+        await InsertBatchAsync(seedConnection, seedTransaction, branchId, productId, Unique("batch"), batchId, godownId: godownId);
+        await ExecuteAsync(seedConnection, seedTransaction, "UPDATE \"ProductBatches\" SET \"QuantityAvailable\" = 10 WHERE \"Id\" = @id;", ("id", batchId));
+        await InsertInventoryAsync(seedConnection, seedTransaction, branchId, godownId, productId, batchId, 10);
+        await InsertCustomerAsync(seedConnection, seedTransaction, customerId, Unique("CUS"), "Race Customer", "RACE CUSTOMER", 100000);
+        var username = Unique("so-race-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        static DbContextOptions<PharmacyDbContext> Options(string value) =>
+            new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(value).Options;
+
+        Guid orderId;
+        await using (var context = new PharmacyDbContext(Options(connectionString)))
+        {
+            var service = SalesOrderServiceFor(context);
+            var order = await service.CreateOrderAsync(actorId, new(branchId, customerId, godownId, null, DateOnly.FromDateTime(DateTime.UtcNow), null, null, [new(productId, 10)]));
+            await service.ConfirmOrderAsync(actorId, order.Id);
+            orderId = order.Id;
+        }
+
+        // Only 10 units were ordered (and only 10 exist in stock); two concurrent 6-unit fulfillment
+        // attempts must never both succeed.
+        async Task<bool> TryFulfillAsync()
+        {
+            try
+            {
+                await using var context = new PharmacyDbContext(Options(connectionString));
+                await SalesOrderServiceFor(context).FulfillOrderAsync(actorId, orderId, new(
+                    [new(productId, 6)], [new(SalePaymentMethod.Cash, 72, 72)]));
+                return true;
+            }
+            catch { return false; }
+        }
+
+        var results = await Task.WhenAll(Task.Run(TryFulfillAsync), Task.Run(TryFulfillAsync));
+        Assert.Equal(1, results.Count(x => x));
+
+        await using var verifyContext = new PharmacyDbContext(Options(connectionString));
+        var fulfilled = await verifyContext.SalesOrderItems.AsNoTracking().Where(x => x.SalesOrderId == orderId).SumAsync(x => x.FulfilledQuantity);
+        Assert.Equal(6, fulfilled);
+        Assert.True(fulfilled <= 10);
+    }
+
     private static StockTransferService ServiceFor(PharmacyDbContext context) =>
         new(new StockTransferRepository(context), new GodownAccessService(context), JournalPostingFor(context), TimeProvider.System);
+
+    private static SalesService SalesServiceFor(PharmacyDbContext context) =>
+        new(new SalesRepository(context), new FefoAllocationService(), JournalPostingFor(context), new GodownAccessService(context),
+            new PriceResolutionService(context), new SalesOrderRepository(context), new SalesQuotationRepository(context), TimeProvider.System);
+
+    private static SalesOrderService SalesOrderServiceFor(PharmacyDbContext context) =>
+        new(new SalesOrderRepository(context), new GodownAccessService(context), new PriceResolutionService(context), SalesServiceFor(context), TimeProvider.System);
+
+    private static SalesQuotationService SalesQuotationServiceFor(PharmacyDbContext context) =>
+        new(new SalesQuotationRepository(context), new SalesOrderRepository(context), new GodownAccessService(context), new PriceResolutionService(context), SalesServiceFor(context), TimeProvider.System);
 
     private static async Task InsertStockTransferAsync(
         NpgsqlConnection connection,
@@ -3365,6 +3632,9 @@ public sealed class PostgreSqlIntegrationTests
 
     private static string Unique(string prefix) =>
         $"{prefix}-{Guid.NewGuid():N}";
+
+    private static string ShortCode(string prefix) =>
+        $"{prefix}{Guid.NewGuid():N}"[..Math.Min(30, prefix.Length + 32)];
 }
 
 public sealed class PostgreSqlFactAttribute : FactAttribute

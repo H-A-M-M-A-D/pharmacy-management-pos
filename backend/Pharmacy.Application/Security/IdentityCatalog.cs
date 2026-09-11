@@ -126,6 +126,27 @@ public static class PermissionCatalog
     public const string RecycleBinView = "recycle_bin.view";
     public const string RecycleBinRestore = "recycle_bin.restore";
     public const string AuditExport = "audit.export";
+    public const string QuotationsView = "quotations.view";
+    public const string QuotationsCreate = "quotations.create";
+    public const string QuotationsUpdate = "quotations.update";
+    public const string QuotationsSend = "quotations.send";
+    public const string QuotationsAccept = "quotations.accept";
+    public const string QuotationsCancel = "quotations.cancel";
+    public const string QuotationsConvert = "quotations.convert";
+    public const string SalesOrdersView = "sales_orders.view";
+    public const string SalesOrdersCreate = "sales_orders.create";
+    public const string SalesOrdersUpdate = "sales_orders.update";
+    public const string SalesOrdersConfirm = "sales_orders.confirm";
+    public const string SalesOrdersFulfill = "sales_orders.fulfill";
+    public const string SalesOrdersCancel = "sales_orders.cancel";
+    public const string SalesWholesale = "sales.wholesale";
+    public const string SalesCreditLimitOverride = "sales.credit_limit_override";
+    public const string SalesDiscountOverride = "sales.discount_override";
+    public const string SalesPriceOverride = "sales.price_override";
+    public const string SalesSellBelowCost = "sales.sell_below_cost";
+    public const string SalesCostView = "sales.cost_view";
+    public const string PricingView = "pricing.view";
+    public const string PricingManage = "pricing.manage";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -164,7 +185,11 @@ public static class PermissionCatalog
         GodownsManage, GodownsSetDefault,
         StockTransfersView, StockTransfersCreate, StockTransfersRequest, StockTransfersApprove,
         StockTransfersDispatch, StockTransfersReceive, StockTransfersCancel,
-        RecycleBinView, RecycleBinRestore, AuditExport
+        RecycleBinView, RecycleBinRestore, AuditExport,
+        QuotationsView, QuotationsCreate, QuotationsUpdate, QuotationsSend, QuotationsAccept, QuotationsCancel, QuotationsConvert,
+        SalesOrdersView, SalesOrdersCreate, SalesOrdersUpdate, SalesOrdersConfirm, SalesOrdersFulfill, SalesOrdersCancel,
+        SalesWholesale, SalesCreditLimitOverride, SalesDiscountOverride, SalesPriceOverride, SalesSellBelowCost, SalesCostView,
+        PricingView, PricingManage
     ];
 }
 

@@ -7,29 +7,38 @@ public enum CustomerAdjustmentType { Debit, Credit }
 public sealed record CustomerRequest(
     string Name, string? PhoneNumber, string? AlternatePhone, string? Email,
     string? Address, string? City, string? BusinessName, string? NTN,
-    decimal OpeningBalance, decimal CreditLimit, bool IsActive = true, int? CreditDays = null);
+    decimal OpeningBalance, decimal CreditLimit, bool IsActive = true, int? CreditDays = null,
+    CustomerType CustomerType = CustomerType.Retail, bool CreditAllowed = true, Guid? PriceLevelId = null,
+    string? ContactPerson = null, string? ShippingAddress = null, string? Notes = null);
 
 public sealed record CustomerUpdateRequest(
     string Name, string? PhoneNumber, string? AlternatePhone, string? Email,
     string? Address, string? City, string? BusinessName, string? NTN,
-    decimal CreditLimit, int? CreditDays = null);
+    decimal CreditLimit, int? CreditDays = null,
+    CustomerType CustomerType = CustomerType.Retail, bool CreditAllowed = true, Guid? PriceLevelId = null,
+    string? ContactPerson = null, string? ShippingAddress = null, string? Notes = null);
 
 public sealed record CustomerListQuery(
     int Page = 1, int PageSize = 25, string? Search = null, bool? IsActive = null,
     string? City = null, bool? HasOutstandingBalance = null, bool? OverCreditLimit = null,
-    string SortBy = "name", bool Descending = false);
+    string SortBy = "name", bool Descending = false, CustomerType? CustomerType = null);
 
 public sealed record CustomerListItemDto(
     Guid Id, string CustomerCode, string Name, string? PhoneNumber, string? Email,
     string? City, string? BusinessName, decimal CreditLimit, decimal OutstandingBalance,
-    decimal AdvanceBalance, bool IsActive);
+    decimal AdvanceBalance, bool IsActive, CustomerType CustomerType = CustomerType.Retail,
+    Guid? PriceLevelId = null, string? PriceLevelName = null);
 
 public sealed record CustomerDetailsDto(
     Guid Id, string CustomerCode, string Name, string? PhoneNumber, string? AlternatePhone,
     string? Email, string? Address, string? City, string? BusinessName, string? NTN,
     decimal OpeningBalance, decimal CreditLimit, bool IsActive,
     decimal OutstandingBalance, decimal AdvanceBalance, decimal TotalPayments,
-    DateTime? LastPaymentAtUtc, DateTime CreatedAt, DateTime UpdatedAt, int? CreditDays = null);
+    DateTime? LastPaymentAtUtc, DateTime CreatedAt, DateTime UpdatedAt, int? CreditDays = null,
+    CustomerType CustomerType = CustomerType.Retail, bool CreditAllowed = true,
+    Guid? PriceLevelId = null, string? PriceLevelName = null,
+    string? ContactPerson = null, string? ShippingAddress = null, string? Notes = null,
+    decimal AvailableCredit = 0);
 
 /// <summary>
 /// An open credit-sale document (an unsettled or partially settled invoice) used both by the
