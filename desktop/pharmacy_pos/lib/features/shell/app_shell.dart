@@ -9,6 +9,7 @@ import '../finance/finance_screen.dart';
 import '../godowns/godowns_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../pricing/price_levels_screen.dart';
+import '../phase6/phase6_screen.dart';
 import '../purchasing/purchasing_screen.dart';
 import '../quotations/quotations_screen.dart';
 import '../reports/reports_screen.dart';
@@ -57,6 +58,12 @@ class _AppShellState extends State<AppShell> {
     final canViewSalesOrders = widget.authState.can('sales_orders.view');
     final canViewWholesale = widget.authState.can('sales.wholesale');
     final canViewPricing = widget.authState.can('pricing.view');
+    final canViewPhase6 = const [
+      'pricing.view',
+      'inventory.reorder.view',
+      'alerts.view',
+      'automation.view',
+    ].any(widget.authState.can);
     final canViewCashierShift = const [
       'cashier_shift.open',
       'cashier_shift.view',
@@ -190,6 +197,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.sell),
           label: Text('Price Levels'),
         ),
+      if (canViewPhase6)
+        const NavigationRailDestination(
+          icon: Icon(Icons.auto_awesome_outlined),
+          selectedIcon: Icon(Icons.auto_awesome),
+          label: Text('Business Automation'),
+        ),
       if (canViewCashierShift)
         const NavigationRailDestination(
           icon: Icon(Icons.savings_outlined),
@@ -258,6 +271,7 @@ class _AppShellState extends State<AppShell> {
       if (canViewSalesOrders) SalesOrdersScreen(authState: widget.authState),
       if (canViewWholesale) WholesaleScreen(authState: widget.authState),
       if (canViewPricing) PriceLevelsScreen(authState: widget.authState),
+      if (canViewPhase6) Phase6Screen(authState: widget.authState),
       if (canViewCashierShift) CashierShiftScreen(authState: widget.authState),
       if (canViewFinance) FinanceScreen(authState: widget.authState),
       if (canViewReports) ReportsScreen(authState: widget.authState),

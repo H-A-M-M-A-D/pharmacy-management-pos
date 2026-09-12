@@ -379,6 +379,13 @@ abstract interface class PharmacyApi {
     Map<String, String>? query,
     Map<String, dynamic>? body,
   });
+  Future<dynamic> phase6(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  });
   Future<dynamic> salesQuotations(
     String token,
     String path, {
@@ -1794,7 +1801,6 @@ class ApiClient implements PharmacyApi {
     token: token,
     body: body,
   );
-
   @override
   Future<dynamic> stockTransfers(
     String token,
@@ -1806,6 +1812,23 @@ class ApiClient implements PharmacyApi {
     method,
     Uri(
       path: '/api/stock-transfers${path.isEmpty ? '' : '/$path'}',
+      queryParameters: query,
+    ).toString(),
+    token: token,
+    body: body,
+  );
+
+  @override
+  Future<dynamic> phase6(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _request(
+    method,
+    Uri(
+      path: '/api/phase6${path.isEmpty ? '' : '/$path'}',
       queryParameters: query,
     ).toString(),
     token: token,

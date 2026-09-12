@@ -15,17 +15,17 @@ public sealed record PurchaseOrderListQuery(
 public sealed record PurchaseOrderListItemDto(
     Guid Id, string OrderNumber, DateOnly OrderDate, DateOnly? ExpectedDate,
     Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
-    int ItemCount, int OrderedQuantity, int ReceivedQuantity, PurchaseOrderStatus Status);
+    int ItemCount, int OrderedQuantity, int ReceivedQuantity, PurchaseOrderStatus Status, Guid? GodownId = null, string? GodownName = null);
 
 public sealed record PurchaseOrderItemDto(
     Guid Id, Guid ProductId, string ProductName, string SKU, int OrderedQuantity,
-    int ReceivedQuantity, int RemainingQuantity, decimal? ExpectedPurchasePrice, string? Notes);
+    int ReceivedQuantity, int RemainingQuantity, decimal? ExpectedPurchasePrice, string? Notes, int? SuggestedOrderQuantity = null);
 
 public sealed record PurchaseOrderDetailsDto(
     Guid Id, string OrderNumber, DateOnly OrderDate, DateOnly? ExpectedDate,
     Guid SupplierId, string SupplierName, Guid BranchId, string BranchName,
     string? SupplierReference, PurchaseOrderStatus Status, string? Notes,
-    DateTime CreatedAt, DateTime UpdatedAt, IReadOnlyList<PurchaseOrderItemDto> Items);
+    DateTime CreatedAt, DateTime UpdatedAt, IReadOnlyList<PurchaseOrderItemDto> Items, Guid? GodownId = null);
 
 public sealed record GoodsReceiptRequest(
     Guid BranchId, Guid SupplierId, Guid? PurchaseOrderId, string? SupplierInvoiceNumber,

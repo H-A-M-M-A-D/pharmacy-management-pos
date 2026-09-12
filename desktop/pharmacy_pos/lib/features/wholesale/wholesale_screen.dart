@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../auth/auth_state.dart';
+import '../pricing/price_source_label.dart';
 
 class WholesaleScreen extends StatefulWidget {
   const WholesaleScreen({required this.authState, super.key});
@@ -22,7 +23,8 @@ class _WholesaleLine {
   ResolvedPrice? resolved;
 }
 
-class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProviderStateMixin {
+class _WholesaleScreenState extends State<WholesaleScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 2, vsync: this);
 
   final _customerSearch = TextEditingController();
@@ -73,7 +75,8 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
   }
 
   double get _grossTotal => _lines.fold(0, (sum, line) {
-    final price = line.manualPrice ?? line.resolved?.price ?? line.product.retailPrice;
+    final price =
+        line.manualPrice ?? line.resolved?.price ?? line.product.retailPrice;
     final gross = price * line.quantity;
     return sum + gross - (gross * line.discountPercent / 100);
   });
@@ -100,11 +103,16 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
       final query = <String, String>{
         'productId': line.product.id,
         'quantity': '${line.quantity}',
+        'saleType': 'Wholesale',
       };
       if (_customer != null) query['customerId'] = _customer!.id;
-      final data = await widget.authState.pricing('resolve', query: query);
+      final data = await widget.authState.phase6('sale-price', query: query);
       if (mounted) {
-        setState(() => line.resolved = ResolvedPrice.fromJson(data as Map<String, dynamic>));
+        setState(
+          () => line.resolved = ResolvedPrice.fromJson(
+            data as Map<String, dynamic>,
+          ),
+        );
       }
     } on ApiException {
       // Preview only - fall back silently to the product's default retail price.
@@ -117,12 +125,18 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
-          child: Text('Wholesale Sales', style: Theme.of(context).textTheme.headlineSmall),
+          child: Text(
+            'Wholesale Sales',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
         ),
         TabBar(
           controller: _tabs,
           isScrollable: true,
-          tabs: const [Tab(text: 'New Invoice'), Tab(text: 'Wholesale History')],
+          tabs: const [
+            Tab(text: 'New Invoice'),
+            Tab(text: 'Wholesale History'),
+          ],
         ),
         Expanded(
           child: TabBarView(
@@ -190,14 +204,18 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                         setState(() => _customerResults = []);
                         return;
                       }
-                      final results = await widget.authState.lookupCustomers(search: v);
+                      final results = await widget.authState.lookupCustomers(
+                        search: v,
+                      );
                       if (mounted) setState(() => _customerResults = results);
                     },
                   ),
                   if (_customerResults.isNotEmpty)
                     Container(
                       constraints: const BoxConstraints(maxHeight: 160),
-                      decoration: BoxDecoration(border: Border.all(color: Colors.grey)),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey),
+                      ),
                       child: ListView(
                         shrinkWrap: true,
                         children: _customerResults
@@ -220,10 +238,18 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Price level: ${_customerDetails!.priceLevelName ?? 'Default retail'}'),
-                            Text('Credit limit: ${_customerDetails!.creditLimit.toStringAsFixed(2)}'),
-                            Text('Outstanding: ${_customerDetails!.outstandingBalance.toStringAsFixed(2)}'),
-                            Text('Available credit: ${_customerDetails!.availableCredit.toStringAsFixed(2)}'),
+                            Text(
+                              'Price level: ${_customerDetails!.priceLevelName ?? 'Default retail'}',
+                            ),
+                            Text(
+                              'Credit limit: ${_customerDetails!.creditLimit.toStringAsFixed(2)}',
+                            ),
+                            Text(
+                              'Outstanding: ${_customerDetails!.outstandingBalance.toStringAsFixed(2)}',
+                            ),
+                            Text(
+                              'Available credit: ${_customerDetails!.availableCredit.toStringAsFixed(2)}',
+                            ),
                             if (!_customerDetails!.creditAllowed)
                               const Text(
                                 'Credit sales are not allowed for this customer.',
@@ -250,12 +276,20 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                     items: [
                       const DropdownMenuItem(
                         value: null,
-                        child: Text('Default', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          'Default',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       ..._godowns.map(
                         (g) => DropdownMenuItem(
                           value: g.id,
-                          child: Text(g.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            g.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
                     ],
@@ -263,7 +297,9 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                   ),
                   TextField(
                     controller: _poNumber,
-                    decoration: const InputDecoration(labelText: 'Customer PO Number'),
+                    decoration: const InputDecoration(
+                      labelText: 'Customer PO Number',
+                    ),
                   ),
                 ],
               ),
@@ -298,7 +334,9 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                     (p) => ListTile(
                       dense: true,
                       title: Text(p.name),
-                      subtitle: Text('${p.sku} - ${p.retailPrice.toStringAsFixed(2)}'),
+                      subtitle: Text(
+                        '${p.sku} - ${p.retailPrice.toStringAsFixed(2)}',
+                      ),
                       onTap: () async {
                         final line = _WholesaleLine(product: p);
                         setState(() {
@@ -329,7 +367,10 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                 DataColumn(label: Text('')),
               ],
               rows: _lines.map((line) {
-                final price = line.manualPrice ?? line.resolved?.price ?? line.product.retailPrice;
+                final price =
+                    line.manualPrice ??
+                    line.resolved?.price ??
+                    line.product.retailPrice;
                 final gross = price * line.quantity;
                 final net = gross - (gross * line.discountPercent / 100);
                 return DataRow(
@@ -350,7 +391,15 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                       ),
                     ),
                     DataCell(Text(price.toStringAsFixed(2))),
-                    DataCell(Text(line.manualPrice != null ? 'ManualOverride' : (line.resolved?.source ?? 'Default'))),
+                    DataCell(
+                      Text(
+                        priceSourceLabel(
+                          line.manualPrice != null
+                              ? 'ManualOverride'
+                              : line.resolved?.source,
+                        ),
+                      ),
+                    ),
                     DataCell(
                       can('sales.price_override')
                           ? IconButton(
@@ -367,7 +416,8 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                           initialValue: '${line.discountPercent}',
                           keyboardType: TextInputType.number,
                           onChanged: (v) => setState(
-                            () => line.discountPercent = double.tryParse(v) ?? line.discountPercent,
+                            () => line.discountPercent =
+                                double.tryParse(v) ?? line.discountPercent,
                           ),
                         ),
                       ),
@@ -394,7 +444,10 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
         ),
         const SizedBox(height: 12),
         if (_error != null)
-          Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         FilledButton.icon(
           key: const Key('post_wholesale_sale'),
           onPressed: _posting || _lines.isEmpty ? null : _post,
@@ -409,11 +462,17 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Posted: ${_lastSale!.invoiceNumber}', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Posted: ${_lastSale!.invoiceNumber}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   Text('Net total: ${_lastSale!.netTotal.toStringAsFixed(2)}'),
-                  Text('Credit amount: ${_lastSale!.creditAmount.toStringAsFixed(2)}'),
+                  Text(
+                    'Credit amount: ${_lastSale!.creditAmount.toStringAsFixed(2)}',
+                  ),
                   if (_lastSale!.dueDateUtc != null)
                     Text('Due date: ${_lastSale!.dueDateUtc}'),
+                  for (final item in _lastSale!.items.where((item) => item.priceSource != 'Default')) Text('${item.productName}: ${priceSourceLabel(item.priceSource)}'),
                 ],
               ),
             ),
@@ -425,9 +484,13 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
 
   Future<void> _showOverrideDialog(_WholesaleLine line) async {
     final priceController = TextEditingController(
-      text: (line.manualPrice ?? line.resolved?.price ?? line.product.retailPrice).toStringAsFixed(2),
+      text:
+          (line.manualPrice ?? line.resolved?.price ?? line.product.retailPrice)
+              .toStringAsFixed(2),
     );
-    final reasonController = TextEditingController(text: line.priceOverrideReason);
+    final reasonController = TextEditingController(
+      text: line.priceOverrideReason,
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -495,7 +558,9 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
         'notes': null,
         'godownId': _godownId,
         'saleType': 'Wholesale',
-        'customerPoNumber': _poNumber.text.trim().isEmpty ? null : _poNumber.text.trim(),
+        'customerPoNumber': _poNumber.text.trim().isEmpty
+            ? null
+            : _poNumber.text.trim(),
         'items': _lines
             .map(
               (l) => {
@@ -503,7 +568,8 @@ class _WholesaleScreenState extends State<WholesaleScreen> with SingleTickerProv
                 'quantity': l.quantity,
                 'discountPercent': l.discountPercent,
                 if (l.manualPrice != null) 'unitPriceOverride': l.manualPrice,
-                if (l.manualPrice != null) 'priceOverrideReason': l.priceOverrideReason,
+                if (l.manualPrice != null)
+                  'priceOverrideReason': l.priceOverrideReason,
               },
             )
             .toList(),

@@ -55,6 +55,7 @@ public sealed class PricingRepository(PharmacyDbContext context) : IPricingRepos
     }
 
     public async Task AddProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default) => await context.ProductPriceLevels.AddAsync(entry, cancellationToken);
+    public async Task AddPriceHistoryAsync(PricingPriceHistory entry, CancellationToken cancellationToken = default) => await context.PricingPriceHistories.AddAsync(entry, cancellationToken);
     public Task RemoveProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default) { context.ProductPriceLevels.Remove(entry); return Task.CompletedTask; }
 
     public Task<ProductPriceBreak?> GetProductPriceBreakAsync(Guid id, CancellationToken cancellationToken = default) =>

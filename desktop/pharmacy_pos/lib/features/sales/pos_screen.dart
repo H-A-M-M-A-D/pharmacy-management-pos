@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../auth/auth_state.dart';
+import '../pricing/price_source_label.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({required this.authState, super.key});
@@ -52,7 +53,9 @@ class _PosScreenState extends State<PosScreen>
         _godowns = godowns;
         _godownId = godowns.isEmpty
             ? null
-            : godowns.firstWhere((g) => g.isDefault, orElse: () => godowns.first).id;
+            : godowns
+                  .firstWhere((g) => g.isDefault, orElse: () => godowns.first)
+                  .id;
       });
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -134,6 +137,45 @@ class _PosScreenState extends State<PosScreen>
         existing.quantity++;
       }
     });
+    final line = _cart
+        .where((x) => x.product.productId == product.productId)
+        .firstOrNull;
+    if (line != null) _resolvePrice(line);
+  }
+
+  Future<void> _resolvePrice(_CartLine line) async {
+    final revision = ++line.priceRevision;
+    try {
+      final data = await widget.authState.phase6(
+        'sale-price',
+        query: {
+          'productId': line.product.productId,
+          'quantity': '${line.quantity}',
+          'saleType': 'Retail',
+          if (_selectedCustomer != null) 'customerId': _selectedCustomer!.id,
+        },
+      );
+      if (mounted && revision == line.priceRevision && _cart.contains(line)) {
+        setState(() {
+          line.resolvedPrice = (data['price'] as num?)?.toDouble();
+          line.priceSource = data['source'] as String? ?? 'Default';
+        });
+      }
+    } on ApiException catch (error) {
+      if (mounted && revision == line.priceRevision) {
+        setState(() => _error = error.message);
+      }
+    }
+  }
+
+  void _changeQuantity(_CartLine line, int quantity) {
+    setState(
+      () => line.quantity = quantity.clamp(
+        1,
+        line.product.availableQuantity > 0 ? line.product.availableQuantity : 1,
+      ),
+    );
+    _resolvePrice(line);
   }
 
   Map<String, dynamic> _saleBody({
@@ -598,24 +640,33 @@ class _PosScreenState extends State<PosScreen>
                       children: [
                         IconButton(
                           tooltip: 'Decrease',
-                          onPressed: () => setState(
-                            () => line.quantity = (line.quantity - 1).clamp(
-                              1,
-                              999,
-                            ),
-                          ),
+                          onPressed: () =>
+                              _changeQuantity(line, line.quantity - 1),
                           icon: const Icon(Icons.remove),
                         ),
                         Text('${line.quantity}'),
                         IconButton(
                           tooltip: 'Increase',
-                          onPressed: () => setState(() => line.quantity++),
+                          onPressed: () =>
+                              _changeQuantity(line, line.quantity + 1),
                           icon: const Icon(Icons.add),
                         ),
                       ],
                     ),
                   ),
-                  DataCell(Text(_money(line.price))),
+                  DataCell(
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_money(line.price)),
+                        Text(
+                          priceSourceLabel(line.priceSource),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  ),
                   if (can('sales.discount'))
                     DataCell(
                       SizedBox(
@@ -669,7 +720,7 @@ class _PosScreenState extends State<PosScreen>
                 ),
               ),
               onSubmitted: (_) => _searchCustomers(),
-              onChanged: (_) => setState(() => _selectedCustomer = null),
+              onChanged: (_) { setState(() => _selectedCustomer = null); for (final line in _cart) { _resolvePrice(line); } },
             ),
           ),
           const SizedBox(width: 12),
@@ -693,11 +744,11 @@ class _PosScreenState extends State<PosScreen>
                   key: Key('select_customer_${customer.customerCode}'),
                   avatar: const Icon(Icons.person_outline, size: 18),
                   label: Text('${customer.customerCode} ${customer.name}'),
-                  onPressed: () => setState(() {
+                  onPressed: () { setState(() {
                     _selectedCustomer = customer;
                     _customer.text = customer.name;
                     _phone.text = customer.phoneNumber ?? '';
-                  }),
+                  }); for (final line in _cart) { _resolvePrice(line); } },
                 ),
               );
             }).toList(),
@@ -845,8 +896,9 @@ class _PosScreenState extends State<PosScreen>
             Text(
               'Total ${_money(sale.netTotal)}  Paid ${_money(sale.amountPaid)}  Change ${_money(sale.changeGiven)}',
             ),
-            if (sale.creditAmount > 0)
-              Text('Credit ${_money(sale.creditAmount)}'),
+              if (sale.creditAmount > 0)
+                Text('Credit ${_money(sale.creditAmount)}'),
+              for (final item in sale.items.where((item) => item.priceSource != 'Default')) Text('${item.productName}: ${priceSourceLabel(item.priceSource)}'),
           ],
         ),
       ),
@@ -1025,7 +1077,10 @@ class _CartLine {
   final PosProduct product;
   int quantity = 1;
   double discountPercent = 0;
-  double get price => product.indicativeRetailPrice ?? 0;
+  double? resolvedPrice;
+  String priceSource = 'Default';
+  int priceRevision = 0;
+  double get price => resolvedPrice ?? product.indicativeRetailPrice ?? 0;
   double get gross => price * quantity;
   double get discountAmount => gross * discountPercent / 100;
   double get net => gross - discountAmount;

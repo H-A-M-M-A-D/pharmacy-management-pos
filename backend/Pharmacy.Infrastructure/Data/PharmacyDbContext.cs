@@ -75,6 +75,10 @@ public class PharmacyDbContext : DbContext
     public DbSet<PriceLevel> PriceLevels { get; set; } = null!;
     public DbSet<ProductPriceLevel> ProductPriceLevels { get; set; } = null!;
     public DbSet<ProductPriceBreak> ProductPriceBreaks { get; set; } = null!;
+    public DbSet<PricingRule> PricingRules { get; set; } = null!;
+    public DbSet<PricingPriceHistory> PricingPriceHistories { get; set; } = null!;
+    public DbSet<BusinessAlert> BusinessAlerts { get; set; } = null!;
+    public DbSet<AutomationRule> AutomationRules { get; set; } = null!;
     public DbSet<SalesQuotation> SalesQuotations { get; set; } = null!;
     public DbSet<SalesQuotationItem> SalesQuotationItems { get; set; } = null!;
     public DbSet<SalesOrder> SalesOrders { get; set; } = null!;
@@ -624,6 +628,10 @@ public class PharmacyDbContext : DbContext
         ConfigurePriceLevel(modelBuilder);
         ConfigureProductPriceLevel(modelBuilder);
         ConfigureProductPriceBreak(modelBuilder);
+        ConfigurePricingRule(modelBuilder);
+        ConfigurePricingPriceHistory(modelBuilder);
+        ConfigureBusinessAlert(modelBuilder);
+        ConfigureAutomationRule(modelBuilder);
         ConfigureSalesQuotation(modelBuilder);
         ConfigureSalesQuotationItem(modelBuilder);
         ConfigureSalesOrder(modelBuilder);
@@ -1384,6 +1392,68 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.PriceLevel).WithMany(l => l.ProductPriceBreaks).HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.Cascade);
     }
 
+    private void ConfigurePricingRule(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PricingRule>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(160);
+        entity.Property(e => e.AdjustmentValue).HasPrecision(18, 2);
+        entity.HasIndex(e => new { e.IsActive, e.Priority, e.StartsAtUtc, e.EndsAtUtc });
+        entity.HasIndex(e => new { e.ProductId, e.CategoryId, e.ManufacturerId });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_PricingRules_Priority_NonNegative", "\"Priority\" >= 0");
+            table.HasCheckConstraint("CK_PricingRules_MinimumQuantity_Positive", "\"MinimumQuantity\" IS NULL OR \"MinimumQuantity\" > 0");
+            table.HasCheckConstraint("CK_PricingRules_DateRange", "\"EndsAtUtc\" IS NULL OR \"StartsAtUtc\" IS NULL OR \"EndsAtUtc\" > \"StartsAtUtc\"");
+            table.HasCheckConstraint("CK_PricingRules_Adjustment_NonNegative", "\"AdjustmentValue\" >= 0");
+            table.HasCheckConstraint("CK_PricingRules_Percent_Max", "\"AdjustmentType\" <> 2 OR \"AdjustmentValue\" <= 100");
+        });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.Category).WithMany().HasForeignKey(e => e.CategoryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Manufacturer).WithMany().HasForeignKey(e => e.ManufacturerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigurePricingPriceHistory(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PricingPriceHistory>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.OldPrice).HasPrecision(18, 2);
+        entity.Property(e => e.NewPrice).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(500);
+        entity.HasIndex(e => new { e.ProductId, e.CreatedAt });
+        entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.PriceLevel).WithMany().HasForeignKey(e => e.PriceLevelId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Actor).WithMany().HasForeignKey(e => e.ActorId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureBusinessAlert(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<BusinessAlert>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).IsRequired().HasMaxLength(1000);
+        entity.Property(e => e.SourceType).IsRequired().HasMaxLength(80);
+        entity.Property(e => e.SourceKey).IsRequired().HasMaxLength(200);
+        entity.HasIndex(e => new { e.SourceType, e.SourceKey }).IsUnique();
+        entity.HasIndex(e => new { e.DismissedAtUtc, e.ResolvedAtUtc, e.Severity });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureAutomationRule(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<AutomationRule>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(160);
+        entity.Property(e => e.ConditionsJson).IsRequired().HasMaxLength(4000);
+        entity.HasIndex(e => new { e.IsActive, e.TriggerType, e.BranchId });
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
     private void ConfigureSalesQuotation(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<SalesQuotation>();
@@ -1655,6 +1725,7 @@ public class PharmacyDbContext : DbContext
         var entity = modelBuilder.Entity<PurchaseOrder>();
 
         entity.HasKey(e => e.Id);
+        entity.HasOne(e => e.Godown).WithMany().HasForeignKey(e => e.GodownId).OnDelete(DeleteBehavior.Restrict);
         entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
         entity.Property(e => e.SupplierReference).HasMaxLength(100);
         entity.Property(e => e.OrderDate).HasColumnType("date").IsRequired();
@@ -1674,6 +1745,7 @@ public class PharmacyDbContext : DbContext
     private void ConfigurePurchaseOrderItem(ModelBuilder modelBuilder)
     {
         var entity = modelBuilder.Entity<PurchaseOrderItem>();
+        entity.ToTable(table => table.HasCheckConstraint("CK_PurchaseOrderItems_SuggestedQuantity", "\"SuggestedOrderQuantity\" IS NULL OR \"SuggestedOrderQuantity\" > 0"));
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.ExpectedPurchasePrice).HasPrecision(18, 2);

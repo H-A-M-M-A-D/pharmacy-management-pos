@@ -18,6 +18,11 @@ public interface IPriceResolutionService
     /// looked up.
     /// </summary>
     Task<PriceResolutionResult> ResolveAsync(Guid? customerId, Guid productId, int quantity, Guid? explicitPriceLevelId = null, CancellationToken cancellationToken = default);
+
+    Task<PriceResolutionResult> ResolveForContextAsync(Guid? customerId, Guid productId, int quantity,
+        Guid? explicitPriceLevelId = null, Guid? branchId = null, SaleType? saleType = null,
+        DateTime? atUtc = null, CancellationToken cancellationToken = default) =>
+        ResolveAsync(customerId, productId, quantity, explicitPriceLevelId, cancellationToken);
 }
 
-public sealed record PriceResolutionResult(decimal? Price, PriceSource Source, Guid? PriceLevelId, Guid? MatchedPriceBreakId);
+public sealed record PriceResolutionResult(decimal? Price, PriceSource Source, Guid? PriceLevelId, Guid? MatchedPriceBreakId, Guid? MatchedPricingRuleId = null);

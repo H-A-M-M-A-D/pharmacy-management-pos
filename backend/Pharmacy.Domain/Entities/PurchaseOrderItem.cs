@@ -9,6 +9,7 @@ public class PurchaseOrderItem : Entity
     public Guid ProductId { get; set; }
     public Product? Product { get; set; }
     public int OrderedQuantity { get; set; }
+    public int? SuggestedOrderQuantity { get; set; }
     public int ReceivedQuantity { get; set; }
     public decimal? ExpectedPurchasePrice { get; set; }
     public string? Notes { get; set; }

@@ -27,6 +27,7 @@ public sealed partial class ReportingRepository
     private IQueryable<SalesFact> SalesFacts(ReportQuery q, string dimension)
     {
         var allocations = db.SaleItemBatchAllocations.AsNoTracking().Where(x =>
+            (!q.PriceSourceFilter.HasValue || x.SaleItem!.PriceSource == q.PriceSourceFilter) &&
             x.SaleItem!.Sale!.Status == SaleStatus.Posted && x.SaleItem.Sale.PostedAtUtc >= q.FromUtc && x.SaleItem.Sale.PostedAtUtc < q.ToUtc &&
             (!q.GodownUserId.HasValue || x.SaleItem.Sale.GodownId.HasValue && db.UserGodowns.Any(g => g.UserId == q.GodownUserId && g.GodownId == x.SaleItem.Sale.GodownId)) &&
             (!q.BranchId.HasValue || x.SaleItem.Sale.BranchId == q.BranchId) && (q.BranchIds == null || q.BranchIds.Contains(x.SaleItem.Sale.BranchId)) &&
@@ -40,6 +41,7 @@ public sealed partial class ReportingRepository
             (!q.PriceLevelId.HasValue || x.SaleItem.Sale.PriceLevelId == q.PriceLevelId) &&
             (!q.SaleType.HasValue || x.SaleItem.Sale.SaleType == q.SaleType));
         var returns = db.SalesReturnAllocations.AsNoTracking().Where(x =>
+            (!q.PriceSourceFilter.HasValue || x.OriginalSaleItemBatchAllocation!.SaleItem!.PriceSource == q.PriceSourceFilter) &&
             x.SalesReturnItem!.SalesReturn!.Status == SalesReturnStatus.Posted &&
             (!q.GodownUserId.HasValue || x.SalesReturnItem.SalesReturn.OriginalSale!.GodownId.HasValue && db.UserGodowns.Any(g => g.UserId == q.GodownUserId && g.GodownId == x.SalesReturnItem.SalesReturn.OriginalSale.GodownId)) &&
             x.SalesReturnItem.SalesReturn.PostedAtUtc >= q.FromUtc && x.SalesReturnItem.SalesReturn.PostedAtUtc < q.ToUtc &&

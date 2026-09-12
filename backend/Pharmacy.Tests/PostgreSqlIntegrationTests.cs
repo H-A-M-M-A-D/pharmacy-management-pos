@@ -712,7 +712,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            79L,
+            83L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -2181,7 +2181,9 @@ public sealed class PostgreSqlIntegrationTests
         // service's valid [2000, 2200] window rather than hardcoded — a fixed year+month would
         // permanently collide with itself ("this period overlaps") on a second local test run against
         // the same persistent Postgres test database.
-        var fiscalYear = Random.Shared.Next(2000, 2201);
+        var usedYears = await context.AccountingPeriods.Select(x => x.FiscalYear).Distinct().ToListAsync();
+        usedYears.AddRange(await context.FiscalYearCloses.Select(x => x.FiscalYear).ToListAsync());
+        var fiscalYear = Enumerable.Range(2000, 201).Except(usedYears).OrderBy(_ => Guid.NewGuid()).First();
         var periodMonth = Random.Shared.Next(1, 13);
         var periodStart = new DateOnly(fiscalYear, periodMonth, 1);
         var periodEnd = new DateOnly(fiscalYear, periodMonth, DateTime.DaysInMonth(fiscalYear, periodMonth));

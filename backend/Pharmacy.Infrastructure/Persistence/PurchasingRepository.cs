@@ -76,7 +76,7 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
         var total = await orders.CountAsync(cancellationToken);
         var items = await orders.OrderByDescending(x => x.OrderDate).ThenByDescending(x => x.CreatedAt).Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .Select(x => new PurchaseOrderListItemDto(x.Id, x.OrderNumber, x.OrderDate, x.ExpectedDate, x.SupplierId, x.Supplier!.Name, x.BranchId, x.Branch!.Name,
-                x.Items.Count, x.Items.Sum(i => i.OrderedQuantity), x.Items.Sum(i => i.ReceivedQuantity), x.Status)).ToListAsync(cancellationToken);
+                x.Items.Count, x.Items.Sum(i => i.OrderedQuantity), x.Items.Sum(i => i.ReceivedQuantity), x.Status, x.GodownId, x.Godown == null ? null : x.Godown.Name)).ToListAsync(cancellationToken);
         return new(items, query.Page, query.PageSize, total);
     }
 
@@ -88,7 +88,7 @@ public sealed class PurchasingRepository(PharmacyDbContext context) : IPurchasin
             order.SupplierId, order.Supplier!.Name, order.BranchId, order.Branch!.Name, order.SupplierReference, order.Status, order.Notes,
             order.CreatedAt, order.UpdatedAt, order.Items.OrderBy(x => x.CreatedAt).Select(x => new PurchaseOrderItemDto(
                 x.Id, x.ProductId, x.Product!.Name, x.Product.SKU, x.OrderedQuantity, x.ReceivedQuantity,
-                x.OrderedQuantity - x.ReceivedQuantity, x.ExpectedPurchasePrice, x.Notes)).ToList());
+                x.OrderedQuantity - x.ReceivedQuantity, x.ExpectedPurchasePrice, x.Notes, x.SuggestedOrderQuantity)).ToList(), order.GodownId);
     }
 
     public async Task<PagedResult<PurchaseHistoryItemDto>> ListPurchasesAsync(PurchaseHistoryQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)

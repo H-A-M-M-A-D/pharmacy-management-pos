@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../auth/auth_state.dart';
+import '../phase6/phase6_suggestions_dialog.dart';
 
 class PurchasingScreen extends StatefulWidget {
   const PurchasingScreen({required this.authState, super.key});
@@ -912,8 +913,8 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     if (mounted) {
       setState(() {
         _options = options;
-        _branchId = options.branches.firstOrNull?.id;
-        _supplierId = options.suppliers.firstOrNull?.id;
+        _branchId = widget.order?.branchId ?? options.branches.firstOrNull?.id;
+        _supplierId = widget.order?.supplierId ?? options.suppliers.firstOrNull?.id;
         _productId = options.products.firstOrNull?.id;
       });
     }
@@ -926,11 +927,11 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     if (!mounted) return;
     setState(() {
       _godowns = godowns;
-      _godownId = godowns.isEmpty
+      _godownId = widget.order?.godownId ?? (godowns.isEmpty
           ? null
           : godowns
                 .firstWhere((g) => g.isDefault, orElse: () => godowns.first)
-                .id;
+                .id);
     });
   }
 
@@ -1135,12 +1136,12 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         },
       ],
     };
-    try {
-      if (widget.order == null) {
-        await widget.authState.postDirectPurchase(body);
-      } else {
-        await widget.authState.postGoodsReceipt(body);
-      }
+      try {
+        final receipt = widget.order == null ? await widget.authState.postDirectPurchase(body) : await widget.authState.postGoodsReceipt(body);
+        if (mounted && widget.authState.can('pricing.suggest') && (widget.authState.can('sales.cost_view') || widget.authState.can('reports.profitability'))) {
+          final navigatorContext = Navigator.of(context).context;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Purchase posted. Cost-based price suggestions are available for manager review.'), action: SnackBarAction(label: 'Review prices', onPressed: () => showDialog<void>(context: navigatorContext, builder: (_) => Phase6SuggestionsDialog(authState: widget.authState, expiry: false, goodsReceiptId: receipt.id)))));
+        }
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);

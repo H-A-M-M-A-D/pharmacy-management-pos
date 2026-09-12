@@ -79,9 +79,20 @@ public sealed class PricingService(IPricingRepository repository, IPriceResoluti
         }
         else
         {
+            var oldPrice = existing.SellingPrice;
             existing.SellingPrice = Money(request.SellingPrice);
             existing.IsActive = request.IsActive;
             existing.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+            if (oldPrice != existing.SellingPrice)
+                await repository.AddPriceHistoryAsync(new PricingPriceHistory
+                {
+                    ProductId = existing.ProductId,
+                    PriceLevelId = existing.PriceLevelId,
+                    OldPrice = oldPrice,
+                    NewPrice = existing.SellingPrice,
+                    Reason = "Product price updated",
+                    ActorId = actorId
+                }, cancellationToken);
         }
         await Audit(actorId, "ProductPriceLevelSet", existing.Id, new { request.ProductId, request.PriceLevelId, existing.SellingPrice, existing.IsActive }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);

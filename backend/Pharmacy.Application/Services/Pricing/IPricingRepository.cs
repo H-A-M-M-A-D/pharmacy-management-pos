@@ -18,6 +18,7 @@ public interface IPricingRepository
     Task<ProductPriceLevel?> FindProductPriceLevelAsync(Guid productId, Guid priceLevelId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProductPriceLevelDto>> ListProductPriceLevelsAsync(Guid? productId, Guid? priceLevelId, CancellationToken cancellationToken = default);
     Task AddProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default);
+    Task AddPriceHistoryAsync(PricingPriceHistory entry, CancellationToken cancellationToken = default);
     Task RemoveProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default);
 
     Task<ProductPriceBreak?> GetProductPriceBreakAsync(Guid id, CancellationToken cancellationToken = default);

@@ -309,7 +309,7 @@ public sealed class SalesService(
                 }
                 else
                 {
-                    var resolved = await priceResolver.ResolveAsync(customerId, product.Id, line.Quantity, priceLevelId, cancellationToken: ct);
+                    var resolved = await priceResolver.ResolveForContextAsync(customerId, product.Id, line.Quantity, priceLevelId, branch.Id, saleType, now, ct);
                     overridePrice = resolved.Price;
                     priceSource = resolved.Source;
                 }

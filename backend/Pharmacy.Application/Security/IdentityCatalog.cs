@@ -147,6 +147,17 @@ public static class PermissionCatalog
     public const string SalesCostView = "sales.cost_view";
     public const string PricingView = "pricing.view";
     public const string PricingManage = "pricing.manage";
+    public const string PricingSuggest = "pricing.suggest";
+    public const string PricingBulkUpdate = "pricing.bulk_update";
+    public const string PricingOverride = "pricing.override";
+    public const string PricingPromotionsManage = "pricing.promotions.manage";
+    public const string AutomationView = "automation.view";
+    public const string AutomationManage = "automation.manage";
+    public const string AutomationRun = "automation.run";
+    public const string AlertsView = "alerts.view";
+    public const string AlertsManage = "alerts.manage";
+    public const string InventoryReorderView = "inventory.reorder.view";
+    public const string InventoryReorderCreatePo = "inventory.reorder.create_po";
     public const string AccountsPeriodsView = "accounts.periods.view";
     public const string AccountsPeriodsManage = "accounts.periods.manage";
     public const string AccountsPeriodsClose = "accounts.periods.close";
@@ -212,7 +223,9 @@ public static class PermissionCatalog
         QuotationsView, QuotationsCreate, QuotationsUpdate, QuotationsSend, QuotationsAccept, QuotationsCancel, QuotationsConvert,
         SalesOrdersView, SalesOrdersCreate, SalesOrdersUpdate, SalesOrdersConfirm, SalesOrdersFulfill, SalesOrdersCancel,
         SalesWholesale, SalesCreditLimitOverride, SalesDiscountOverride, SalesPriceOverride, SalesSellBelowCost, SalesCostView,
-        PricingView, PricingManage,
+        PricingView, PricingManage, PricingSuggest, PricingBulkUpdate, PricingOverride, PricingPromotionsManage,
+        AutomationView, AutomationManage, AutomationRun, AlertsView, AlertsManage,
+        InventoryReorderView, InventoryReorderCreatePo,
         AccountsPeriodsView, AccountsPeriodsManage, AccountsPeriodsClose, AccountsPeriodsReopen, AccountsPostToSoftClosed,
         AccountsJournalReverse, AccountsRecurringView, AccountsRecurringManage,
         AccountsReconciliationView, AccountsReconciliationManage,

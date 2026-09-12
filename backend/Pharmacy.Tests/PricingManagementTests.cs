@@ -119,6 +119,7 @@ public sealed class PricingManagementTests
                 .Where(x => (!productId.HasValue || x.ProductId == productId) && (!priceLevelId.HasValue || x.PriceLevelId == priceLevelId))
                 .Select(x => new ProductPriceLevelDto(x.Id, x.ProductId, Product.Name, Product.SKU, x.PriceLevelId, Levels.First(l => l.Id == x.PriceLevelId).Name, x.SellingPrice, x.IsActive)).ToList());
         public Task AddProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default) { ProductPrices.Add(entry); return Task.CompletedTask; }
+        public Task AddPriceHistoryAsync(PricingPriceHistory entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task RemoveProductPriceLevelAsync(ProductPriceLevel entry, CancellationToken cancellationToken = default) { ProductPrices.Remove(entry); return Task.CompletedTask; }
 
         public Task<ProductPriceBreak?> GetProductPriceBreakAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(ProductBreaks.FirstOrDefault(x => x.Id == id));

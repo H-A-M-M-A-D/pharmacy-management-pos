@@ -13,6 +13,30 @@ namespace Pharmacy.Tests;
 public sealed class PurchasingServiceTests
 {
     [Fact]
+    public async Task Phase6_reorder_suggested_quantity_survives_draft_line_replacement()
+    {
+        var f = new Fixture(PermissionCatalog.PurchaseOrdersUpdate);
+        var order = new PurchaseOrder { OrderNumber = "REORDER-TEST", BranchId = f.Branch.Id, SupplierId = f.Supplier.Id, GodownId = f.SecondGodown.Id,
+            OrderDate = f.Today, Items = [new PurchaseOrderItem { ProductId = f.Product.Id, Product = f.Product, OrderedQuantity = 25, SuggestedOrderQuantity = 19 }] };
+        f.Orders.Add(order);
+        await f.Service.UpdatePurchaseOrderAsync(f.Actor.Id, order.Id, f.OrderRequest(30));
+        Assert.Equal(19, Assert.Single(order.Items).SuggestedOrderQuantity);
+        Assert.Equal(f.SecondGodown.Id, order.GodownId);
+    }
+    [Fact]
+    public async Task Phase6_material_purchase_cost_change_records_suggestion_without_changing_selling_price()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
+        var oldPrice = f.Product.RetailPrice;
+        var receipt = await f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(10, 0, 75, 0, 0));
+        var audit = Assert.Single(f.Audits, x => x.Action == "PurchaseCostSuggestion");
+        var suggestion = System.Text.Json.JsonSerializer.Deserialize<Pharmacy.Application.DTOs.Phase6.PurchaseCostSuggestionDto>(audit.NewValues!)!;
+        Assert.Equal(receipt.Id, suggestion.GoodsReceiptId);
+        Assert.Equal(75, suggestion.NewCost);
+        Assert.Equal(oldPrice, suggestion.CurrentSellingPrice);
+        Assert.Equal(oldPrice, f.Product.RetailPrice);
+    }
+    [Fact]
     public async Task Create_submit_and_cancel_purchase_order_follow_state_rules()
     {
         var f = new Fixture(PermissionCatalog.PurchaseOrdersCreate, PermissionCatalog.PurchaseOrdersUpdate, PermissionCatalog.PurchaseOrdersCancel);

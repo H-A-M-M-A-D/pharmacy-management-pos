@@ -178,6 +178,18 @@ class AuthState extends ChangeNotifier {
     query: query,
     body: body,
   );
+  Future<dynamic> phase6(
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) => _api.phase6(
+    _requiredToken,
+    path,
+    method: method,
+    query: query,
+    body: body,
+  );
   Future<dynamic> salesQuotations(
     String path, {
     String method = 'GET',

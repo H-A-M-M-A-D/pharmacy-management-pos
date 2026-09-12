@@ -10,7 +10,8 @@ using System.Text.Json.Nodes;
 namespace Pharmacy.Application.Services.Reports;
 
 public sealed partial class ReportingService(IReportingRepository repository, TimeProvider timeProvider,
-    IAccountingService? accounting = null, IBudgetService? budgets = null) : IReportingService
+    IAccountingService? accounting = null, IBudgetService? budgets = null,
+    Pharmacy.Application.Services.Phase6.IPhase6Service? phase6 = null) : IReportingService
 {
     public async Task<object> ExecuteAsync(Guid actorId, string report, ReportQuery query, string? option, CancellationToken ct)
     {
@@ -25,6 +26,7 @@ public sealed partial class ReportingService(IReportingRepository repository, Ti
             "quotations" => PermissionCatalog.QuotationsView,
             "sales_orders" => PermissionCatalog.SalesOrdersView,
             "management" => PermissionCatalog.ReportsView,
+            "phase6" => PermissionCatalog.ReportsView,
             _ => throw new RequestValidationException("Unknown report.")
         };
         var actor = await Require(actorId, permission, ct);
@@ -40,6 +42,27 @@ public sealed partial class ReportingService(IReportingRepository repository, Ti
         query = query with { BranchId = branch, GodownUserId = actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager ? null : actor.Id };
         await EnsureGodownScope(actor, query, ct);
         var scopedRepository = repository.WithFilters(query);
+        if (report.StartsWith("phase6/", StringComparison.Ordinal))
+        {
+            var name = report.Split('/')[1];
+            var required = name switch {
+                "price-history" => PermissionCatalog.PricingView, "promotion-performance" => PermissionCatalog.ReportsSales,
+                "automation-log" => PermissionCatalog.AutomationView, "alert-summary" => PermissionCatalog.AlertsView,
+                "margin-exceptions" or "low-margin" => PermissionCatalog.ReportsProfitability,
+                _ => PermissionCatalog.ReportsInventory
+            };
+            if (!Has(actor, required)) throw new ForbiddenOperationException("The report's source permission is required.");
+            query = query with { CanViewReceivables = Has(actor, PermissionCatalog.AccountsAgingReceivablesView) || Has(actor, PermissionCatalog.ReportsFinancial), CanViewPayables = Has(actor, PermissionCatalog.AccountsAgingPayablesView) || Has(actor, PermissionCatalog.ReportsFinancial) };
+            if (name is "margin-exceptions" or "low-margin" && !Has(actor, PermissionCatalog.ReportsProfitability))
+                throw new ForbiddenOperationException("Margin reports require profitability permission.");
+            if (name == "reorder")
+            {
+                if (phase6 == null) throw new InvalidOperationException("Phase 6 service is unavailable.");
+                var rows = await phase6.ListReorderSuggestionsAsync(actorId, branch, query.GodownId, ct);
+                return ProtectCostFields(new PagedReport<Pharmacy.Application.DTOs.Phase6.ReorderSuggestionDto>(rows.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToList(), rows.Count, query.Page, query.PageSize), actor);
+            }
+            return ProtectCostFields(await scopedRepository.Phase6ReportAsync(query, name, ct), actor);
+        }
         if (report is "purchases/suppliers" or "purchases/products")
             return ProtectCostFields(await scopedRepository.PurchaseAnalyticsAsync(query, report == "purchases/suppliers" ? "supplier" : "product", ct), actor);
         if (report is "financial/customer-outstanding" or "financial/supplier-outstanding" or "financial/credit-limit-utilization")
@@ -200,7 +223,7 @@ public sealed partial class ReportingService(IReportingRepository repository, Ti
     }
     private static bool CanViewCost(User actor) => Has(actor, PermissionCatalog.ReportsProfitability) || Has(actor, PermissionCatalog.SalesCostView);
     private static readonly HashSet<string> CostFields = new(StringComparer.OrdinalIgnoreCase)
-    { "cost", "costOfGoodsSold", "unitCost", "unitCostSnapshot", "unitCostPriceSnapshot", "purchaseCost", "purchasePrice", "inventoryValue", "stockValue", "value",
+    { "cost", "costOfGoodsSold", "unitCost", "unitCostSnapshot", "unitCostPriceSnapshot", "purchaseCost", "purchasePrice", "inventoryValue", "stockValue", "value", "lastPurchaseRate",
       "dispatchedValue", "receivedValue", "unresolvedValue", "varianceValue", "costValue", "potentialLoss", "purchaseValue", "inventoryValuePercent", "slowMovingInventoryValue", "deadStockValue",
       "inTransitValue", "adjustmentValue", "openingInventoryValue", "closingInventoryValue", "averageInventoryValue", "inventoryTurnover", "effectiveUnitCost", "previousPrice", "priceVariance", "priceVariancePercent", "nearExpiryValue", "expiredValue", "expiredStockValue" };
     private static readonly HashSet<string> ProfitFields = new(StringComparer.OrdinalIgnoreCase)

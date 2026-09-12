@@ -34,5 +34,7 @@ public enum PriceSource
 
     /// <summary>Price carried over unchanged from a source SalesQuotation/SalesOrder line - not a
     /// fresh resolution and not a human override, so it does not require sales.price_override.</summary>
-    DocumentSnapshot = 5
+    DocumentSnapshot = 5,
+    PricingRule = 6,
+    Promotion = 7
 }

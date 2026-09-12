@@ -372,7 +372,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('SC-2026-000001'), findsOneWidget);
 
-    await tester.ensureVisible(find.byKey(const Key('open_stock_count_session-1')));
+    await tester.ensureVisible(
+      find.byKey(const Key('open_stock_count_session-1')),
+    );
     await tester.tap(find.byKey(const Key('open_stock_count_session-1')));
     await tester.pumpAndSettle();
     expect(find.text('Start Counting'), findsOneWidget);
@@ -424,7 +426,10 @@ void main() {
     await tester.tap(find.byKey(const Key('cashier_shift_cash_in')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('drawer_entry_amount')), '50');
-    await tester.enterText(find.byKey(const Key('drawer_entry_reason')), 'float top-up');
+    await tester.enterText(
+      find.byKey(const Key('drawer_entry_reason')),
+      'float top-up',
+    );
     await tester.tap(find.byKey(const Key('save_drawer_entry')));
     await tester.pumpAndSettle();
     expect(find.textContaining('float top-up'), findsOneWidget);
@@ -432,7 +437,10 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('close_cashier_shift')));
     await tester.tap(find.byKey(const Key('close_cashier_shift')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('close_shift_actual_cash')), '100');
+    await tester.enterText(
+      find.byKey(const Key('close_shift_actual_cash')),
+      '100',
+    );
     await tester.tap(find.byKey(const Key('save_close_shift')));
     await tester.pumpAndSettle();
 
@@ -444,11 +452,15 @@ void main() {
 
     await tester.tap(find.text('Shift History'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('open_cashier_shift_shift-1')));
+    await tester.ensureVisible(
+      find.byKey(const Key('open_cashier_shift_shift-1')),
+    );
     await tester.tap(find.byKey(const Key('open_cashier_shift_shift-1')));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byKey(const Key('reconcile_cashier_shift')));
+    await tester.ensureVisible(
+      find.byKey(const Key('reconcile_cashier_shift')),
+    );
     await tester.tap(find.byKey(const Key('reconcile_cashier_shift')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('confirm_reconcile_shift')));
@@ -475,10 +487,7 @@ void main() {
   testWidgets('godown list renders branch, status and default badge', (
     tester,
   ) async {
-    final fixture = TestFixture(
-      permissions: {'godowns.view'},
-      godownCount: 2,
-    );
+    final fixture = TestFixture(permissions: {'godowns.view'}, godownCount: 2);
     await tester.pumpWidget(fixture.app);
     await tester.pumpAndSettle();
     await _login(tester);
@@ -495,7 +504,9 @@ void main() {
   testWidgets('add godown validates required fields and creates a godown', (
     tester,
   ) async {
-    final fixture = TestFixture(permissions: {'godowns.view', 'godowns.create'});
+    final fixture = TestFixture(
+      permissions: {'godowns.view', 'godowns.create'},
+    );
     await tester.pumpWidget(fixture.app);
     await tester.pumpAndSettle();
     await _login(tester);
@@ -521,7 +532,10 @@ void main() {
     expect(find.text('Required'), findsWidgets);
 
     await tester.enterText(find.byKey(const Key('godown_code')), 'COLD');
-    await tester.enterText(find.byKey(const Key('godown_name')), 'Cold Storage');
+    await tester.enterText(
+      find.byKey(const Key('godown_name')),
+      'Cold Storage',
+    );
     await tester.tap(find.byKey(const Key('save_godown')));
     await tester.pumpAndSettle();
 
@@ -530,7 +544,9 @@ void main() {
   });
 
   testWidgets('edit godown updates name and description', (tester) async {
-    final fixture = TestFixture(permissions: {'godowns.view', 'godowns.update'});
+    final fixture = TestFixture(
+      permissions: {'godowns.view', 'godowns.update'},
+    );
     await tester.pumpWidget(fixture.app);
     await tester.pumpAndSettle();
     await _login(tester);
@@ -897,52 +913,51 @@ void main() {
     },
   );
 
-  testWidgets(
-    'receiving against a purchase order posts the selected godown',
-    (tester) async {
-      final fixture = TestFixture(
-        permissions: {
-          'purchases.view',
-          'purchase_orders.view',
-          'purchases.receive',
-        },
-        godownCount: 2,
-      );
-      await tester.pumpWidget(fixture.app);
-      await tester.pumpAndSettle();
-      await _login(tester);
-      await tester.tap(find.text('Purchasing'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byTooltip('Receive goods'));
-      await tester.tap(find.byTooltip('Receive goods'));
-      await tester.pumpAndSettle();
+  testWidgets('receiving against a purchase order posts the selected godown', (
+    tester,
+  ) async {
+    final fixture = TestFixture(
+      permissions: {
+        'purchases.view',
+        'purchase_orders.view',
+        'purchases.receive',
+      },
+      godownCount: 2,
+    );
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    await _login(tester);
+    await tester.tap(find.text('Purchasing'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Receive goods'));
+    await tester.tap(find.byTooltip('Receive goods'));
+    await tester.pumpAndSettle();
 
-      final godownDropdown = find.widgetWithText(
-        DropdownButtonFormField<String>,
-        'Godown',
-      );
-      expect(godownDropdown, findsOneWidget);
-      await tester.tap(godownDropdown);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Annex Store').last);
-      await tester.pumpAndSettle();
+    final godownDropdown = find.widgetWithText(
+      DropdownButtonFormField<String>,
+      'Godown',
+    );
+    expect(godownDropdown, findsOneWidget);
+    await tester.tap(godownDropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annex Store').last);
+    await tester.pumpAndSettle();
 
-      await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-300');
-      await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Purchase Price'),
-        '50',
-      );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Retail Price'),
-        '60',
-      );
-      await tester.tap(find.byKey(const Key('post_purchase')));
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('receipt_batch')), 'B-300');
+    await tester.enterText(find.byKey(const Key('receipt_paid')), '10');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Purchase Price'),
+      '50',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Retail Price'),
+      '60',
+    );
+    await tester.tap(find.byKey(const Key('post_purchase')));
+    await tester.pumpAndSettle();
 
-      expect(fixture.api.lastGoodsReceiptBody?['godownId'], 'godown-2');
-    },
-  );
+    expect(fixture.api.lastGoodsReceiptBody?['godownId'], 'godown-2');
+  });
 
   testWidgets('direct purchase duplicate invoice error is safe', (
     tester,
@@ -1553,7 +1568,9 @@ void main() {
 
     expect(find.byKey(const Key('posted_journal_read_only')), findsOneWidget);
     expect(
-      find.text('Posted journals are permanent and read-only. Corrections are made by reversal.'),
+      find.text(
+        'Posted journals are permanent and read-only. Corrections are made by reversal.',
+      ),
       findsOneWidget,
     );
     expect(find.byKey(const Key('journal_reverse')), findsNothing);
@@ -1578,19 +1595,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('1010 · Cash').last);
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('manual_line_debit_0')),
-      '100',
-    );
+    await tester.enterText(find.byKey(const Key('manual_line_debit_0')), '100');
 
     await tester.tap(find.byKey(const Key('manual_line_account_1')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('4010 · Sales Revenue').last);
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('manual_line_credit_1')),
-      '50',
-    );
+    await tester.enterText(find.byKey(const Key('manual_line_credit_1')), '50');
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('manual_journal_post')));
@@ -1693,31 +1704,32 @@ void main() {
     expect(find.byKey(const Key('new_stock_transfer')), findsNothing);
   });
 
-  testWidgets('create transfer requires a different source and destination godown', (
-    tester,
-  ) async {
-    final fixture = TestFixture(
-      permissions: {'stock_transfers.view', 'stock_transfers.create'},
-      godownCount: 2,
-    );
-    await tester.pumpWidget(fixture.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    await tester.tap(find.text('Transfers'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'create transfer requires a different source and destination godown',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'stock_transfers.view', 'stock_transfers.create'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('new_stock_transfer')));
-    await tester.pumpAndSettle();
-    expect(find.text('New Stock Transfer'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+      expect(find.text('New Stock Transfer'), findsOneWidget);
 
-    // Source and destination both default to the branch's default godown.
-    await tester.tap(find.byKey(const Key('save_draft_transfer')));
-    await tester.pump();
-    expect(
-      find.text('Source and destination godown must be different.'),
-      findsWidgets,
-    );
-  });
+      // Source and destination both default to the branch's default godown.
+      await tester.tap(find.byKey(const Key('save_draft_transfer')));
+      await tester.pump();
+      expect(
+        find.text('Source and destination godown must be different.'),
+        findsWidgets,
+      );
+    },
+  );
 
   testWidgets(
     'create, request, approve, dispatch and receive a transfer end to end',
@@ -1879,7 +1891,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('transfer_action_cancel')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('reason_field')), 'no longer needed');
+    await tester.enterText(
+      find.byKey(const Key('reason_field')),
+      'no longer needed',
+    );
     await tester.tap(find.byKey(const Key('confirm_reason')));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(Chip, 'Cancelled'), findsOneWidget);
@@ -1955,9 +1970,7 @@ void main() {
     expect(find.byKey(const Key('transfer_action_edit')), findsNothing);
   });
 
-  testWidgets('editing a draft transfer updates header fields', (
-    tester,
-  ) async {
+  testWidgets('editing a draft transfer updates header fields', (tester) async {
     final fixture = TestFixture(
       permissions: {'stock_transfers.view', 'stock_transfers.create'},
       godownCount: 2,
@@ -2095,62 +2108,63 @@ void main() {
     },
   );
 
-  testWidgets('editing a draft transfer sends the updated payload to the backend', (
-    tester,
-  ) async {
-    final fixture = TestFixture(
-      permissions: {'stock_transfers.view', 'stock_transfers.create'},
-      godownCount: 2,
-    );
-    await tester.pumpWidget(fixture.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    await tester.tap(find.text('Transfers'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'editing a draft transfer sends the updated payload to the backend',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'stock_transfers.view', 'stock_transfers.create'},
+        godownCount: 2,
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Transfers'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('new_stock_transfer')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('transfer_dest_godown')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Annex Store').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('search_transferable_batches')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.add_circle_outline));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('line_quantity')), '5');
-    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('save_draft_transfer')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new_stock_transfer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_dest_godown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annex Store').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('line_quantity')), '5');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_draft_transfer')));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('transfer_action_edit')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transfer_action_edit')));
+      await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.byKey(const Key('transfer_notes')),
-      'payload check',
-    );
-    await tester.tap(find.byKey(const Key('search_transferable_batches')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.add_circle_outline));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('line_quantity')), '9');
-    await tester.tap(find.byKey(const Key('confirm_line_quantity')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('save_transfer_edit')));
-    await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('transfer_notes')),
+        'payload check',
+      );
+      await tester.tap(find.byKey(const Key('search_transferable_batches')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add_circle_outline));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('line_quantity')), '9');
+      await tester.tap(find.byKey(const Key('confirm_line_quantity')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_transfer_edit')));
+      await tester.pumpAndSettle();
 
-    final body = fixture.api.lastStockTransferUpdateBody!;
-    expect(body['sourceGodownId'], 'godown-1');
-    expect(body['destinationGodownId'], 'godown-2');
-    expect(body['notes'], 'payload check');
-    final items = body['items'] as List<dynamic>;
-    expect(items, hasLength(1));
-    expect((items.single as Map<String, dynamic>)['quantityRequested'], 9);
-  });
+      final body = fixture.api.lastStockTransferUpdateBody!;
+      expect(body['sourceGodownId'], 'godown-1');
+      expect(body['destinationGodownId'], 'godown-2');
+      expect(body['notes'], 'payload check');
+      final items = body['items'] as List<dynamic>;
+      expect(items, hasLength(1));
+      expect((items.single as Map<String, dynamic>)['quantityRequested'], 9);
+    },
+  );
 
   testWidgets(
     'per-item and header notes entered while receiving are visible in the transfer detail',
@@ -2233,7 +2247,10 @@ void main() {
       await tester.tap(find.text('Inventory'));
       await tester.pumpAndSettle();
       await tester.tap(
-        find.descendant(of: find.byType(TabBar), matching: find.text('Batches')),
+        find.descendant(
+          of: find.byType(TabBar),
+          matching: find.text('Batches'),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -2289,34 +2306,35 @@ void main() {
     },
   );
 
-  testWidgets('quotations, sales orders, wholesale and price levels navigation follow permissions', (
-    tester,
-  ) async {
-    final denied = TestFixture();
-    await tester.pumpWidget(denied.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    expect(find.text('Quotations'), findsNothing);
-    expect(find.text('Sales Orders'), findsNothing);
-    expect(find.text('Wholesale'), findsNothing);
-    expect(find.text('Price Levels'), findsNothing);
+  testWidgets(
+    'quotations, sales orders, wholesale and price levels navigation follow permissions',
+    (tester) async {
+      final denied = TestFixture();
+      await tester.pumpWidget(denied.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      expect(find.text('Quotations'), findsNothing);
+      expect(find.text('Sales Orders'), findsNothing);
+      expect(find.text('Wholesale'), findsNothing);
+      expect(find.text('Price Levels'), findsNothing);
 
-    final allowed = TestFixture(
-      permissions: {
-        'quotations.view',
-        'sales_orders.view',
-        'sales.wholesale',
-        'pricing.view',
-      },
-    );
-    await tester.pumpWidget(allowed.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    expect(find.text('Quotations'), findsOneWidget);
-    expect(find.text('Sales Orders'), findsOneWidget);
-    expect(find.text('Wholesale'), findsOneWidget);
-    expect(find.text('Price Levels'), findsOneWidget);
-  });
+      final allowed = TestFixture(
+        permissions: {
+          'quotations.view',
+          'sales_orders.view',
+          'sales.wholesale',
+          'pricing.view',
+        },
+      );
+      await tester.pumpWidget(allowed.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      expect(find.text('Quotations'), findsOneWidget);
+      expect(find.text('Sales Orders'), findsOneWidget);
+      expect(find.text('Wholesale'), findsOneWidget);
+      expect(find.text('Price Levels'), findsOneWidget);
+    },
+  );
 
   testWidgets('creating a quotation and moving it through send and accept', (
     tester,
@@ -2372,65 +2390,66 @@ void main() {
     expect(find.text('Status: Accepted'), findsOneWidget);
   });
 
-  testWidgets('creating a sales order, confirming and partially fulfilling it', (
-    tester,
-  ) async {
-    final fixture = TestFixture(
-      permissions: {
-        'sales_orders.view',
-        'sales_orders.create',
-        'sales_orders.confirm',
-        'sales_orders.fulfill',
-      },
-    );
-    await tester.pumpWidget(fixture.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    await tester.tap(find.text('Sales Orders'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'creating a sales order, confirming and partially fulfilling it',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'sales_orders.view',
+          'sales_orders.create',
+          'sales_orders.confirm',
+          'sales_orders.fulfill',
+        },
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Sales Orders'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('add_sales_order')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('sales_order_customer_search')),
-      'Ali',
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Ali Customer').last);
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('sales_order_product_search')),
-      'Panadol',
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Panadol Extra').last);
-    await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextFormField, 'Qty'), '10');
-    await tester.tap(find.byKey(const Key('save_sales_order')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('add_sales_order')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('sales_order_customer_search')),
+        'Ali',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ali Customer').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('sales_order_product_search')),
+        'Panadol',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Panadol Extra').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextFormField, 'Qty'), '10');
+      await tester.tap(find.byKey(const Key('save_sales_order')));
+      await tester.pumpAndSettle();
 
-    expect(find.text('SO-2026-000001'), findsOneWidget);
-    expect(find.text('Draft'), findsOneWidget);
+      expect(find.text('SO-2026-000001'), findsOneWidget);
+      expect(find.text('Draft'), findsOneWidget);
 
-    await tester.ensureVisible(find.byTooltip('Open'));
-    await tester.tap(find.byTooltip('Open'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('confirm_sales_order')));
-    await tester.pumpAndSettle();
-    expect(find.text('Status: Confirmed'), findsOneWidget);
+      await tester.ensureVisible(find.byTooltip('Open'));
+      await tester.tap(find.byTooltip('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_sales_order')));
+      await tester.pumpAndSettle();
+      expect(find.text('Status: Confirmed'), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('fulfill_qty_sales-order-item-product-1')),
-      '4',
-    );
-    await tester.tap(find.byKey(const Key('fulfill_sales_order')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Record fully on customer credit'));
-    await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('fulfill_qty_sales-order-item-product-1')),
+        '4',
+      );
+      await tester.tap(find.byKey(const Key('fulfill_sales_order')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Record fully on customer credit'));
+      await tester.pumpAndSettle();
 
-    expect(fixture.api.lastFulfillSalesOrderBody?['items'], isNotNull);
-    expect(find.text('Status: PartiallyFulfilled'), findsOneWidget);
-  });
+      expect(fixture.api.lastFulfillSalesOrderBody?['items'], isNotNull);
+      expect(find.text('Status: PartiallyFulfilled'), findsOneWidget);
+    },
+  );
 
   testWidgets('price levels screen creates a new level', (tester) async {
     final fixture = TestFixture(
@@ -2444,10 +2463,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('add_price_level')));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('price_level_name')),
-      'Trade',
-    );
+    await tester.enterText(find.byKey(const Key('price_level_name')), 'Trade');
     await tester.enterText(find.byKey(const Key('price_level_code')), 'TRADE');
     await tester.tap(find.byKey(const Key('save_price_level')));
     await tester.pumpAndSettle();
@@ -2474,23 +2490,24 @@ void main() {
     expect(find.byKey(const Key('customer_credit_days')), findsOneWidget);
   });
 
-  testWidgets('reports show quotation and sales order sections when permitted', (
-    tester,
-  ) async {
-    final fixture = TestFixture(
-      permissions: {'reports.view', 'quotations.view', 'sales_orders.view'},
-    );
-    await tester.pumpWidget(fixture.app);
-    await tester.pumpAndSettle();
-    await _login(tester);
-    await tester.tap(find.text('Reports'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'reports show quotation and sales order sections when permitted',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {'reports.view', 'quotations.view', 'sales_orders.view'},
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Reports'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(DropdownButton<String>).first);
-    await tester.pumpAndSettle();
-    expect(find.text('Quotations').last, findsOneWidget);
-    expect(find.text('Sales Orders').last, findsOneWidget);
-  });
+      await tester.tap(find.byType(DropdownButton<String>).first);
+      await tester.pumpAndSettle();
+      expect(find.text('Quotations').last, findsOneWidget);
+      expect(find.text('Sales Orders').last, findsOneWidget);
+    },
+  );
 }
 
 Future<void> _login(WidgetTester tester) async {
@@ -2593,7 +2610,12 @@ class _FakeTransferItem {
     required this.unitCost,
     required this.requested,
   });
-  final String id, productId, productName, sku, sourceProductBatchId, batchNumber;
+  final String id,
+      productId,
+      productName,
+      sku,
+      sourceProductBatchId,
+      batchNumber;
   final DateTime expiryDate;
   final double unitCost;
   final int requested;
@@ -2623,7 +2645,13 @@ class _FakeTransfer {
   DateTime transferDate;
   String? notes;
   String status = 'Draft';
-  String? createdBy, requestedBy, approvedBy, dispatchedBy, receivedBy, cancelledBy, cancellationReason;
+  String? createdBy,
+      requestedBy,
+      approvedBy,
+      dispatchedBy,
+      receivedBy,
+      cancelledBy,
+      cancellationReason;
   DateTime? requestedAt, approvedAt, dispatchedAt, receivedAt, cancelledAt;
   final List<_FakeTransferItem> items = [];
 }
@@ -2659,7 +2687,10 @@ Map<String, dynamic> _transferListJson(_FakeTransfer t) => {
   'quantityApproved': t.items.fold<int>(0, (a, i) => a + i.approved),
   'quantityDispatched': t.items.fold<int>(0, (a, i) => a + i.dispatched),
   'quantityReceived': t.items.fold<int>(0, (a, i) => a + i.received),
-  'quantityInTransit': t.items.fold<int>(0, (a, i) => a + i.dispatched - i.received),
+  'quantityInTransit': t.items.fold<int>(
+    0,
+    (a, i) => a + i.dispatched - i.received,
+  ),
   'requestedBy': t.requestedBy,
   'createdAt': DateTime.now().toIso8601String(),
 };
@@ -2969,20 +3000,19 @@ class FakeApi implements PharmacyApi {
     DateTime? from,
     DateTime? to,
     String? branchId,
-  }) async =>
-      PagedCustomerLedger(
-        items: [
-          CustomerLedgerItem(
-            entryDate: DateTime(2026, 9, 4),
-            entryType: 'OpeningBalance',
-            amount: 250,
-            runningBalance: 250,
-            branchName: user.branch.name,
-            notes: 'Opening',
-          ),
-        ],
-        totalCount: 1,
-      );
+  }) async => PagedCustomerLedger(
+    items: [
+      CustomerLedgerItem(
+        entryDate: DateTime(2026, 9, 4),
+        entryType: 'OpeningBalance',
+        amount: 250,
+        runningBalance: 250,
+        branchName: user.branch.name,
+        notes: 'Opening',
+      ),
+    ],
+    totalCount: 1,
+  );
 
   @override
   Future<void> recordCustomerPayment(
@@ -3613,7 +3643,8 @@ class FakeApi implements PharmacyApi {
       customerCashReceived: current.customerCashReceived,
       cashPaidOut: current.cashPaidOut,
       manualCashIn: current.manualCashIn + (entryType == 'CashIn' ? amount : 0),
-      manualCashOut: current.manualCashOut + (entryType == 'CashOut' ? amount : 0),
+      manualCashOut:
+          current.manualCashOut + (entryType == 'CashOut' ? amount : 0),
       paymentBreakdown: current.paymentBreakdown,
       drawerEntries: entries,
     );
@@ -3654,7 +3685,11 @@ class FakeApi implements PharmacyApi {
       manualCashIn: current.manualCashIn,
       manualCashOut: current.manualCashOut,
       paymentBreakdown: const [
-        CashierShiftPaymentSummary(paymentMethod: 'Cash', salesAmount: 100, refundsAmount: 0),
+        CashierShiftPaymentSummary(
+          paymentMethod: 'Cash',
+          salesAmount: 100,
+          refundsAmount: 0,
+        ),
       ],
       drawerEntries: current.drawerEntries,
     );
@@ -3702,32 +3737,35 @@ class FakeApi implements PharmacyApi {
   }
 
   @override
-  Future<CashierShift> cashierShiftDetails(String token, String id) async => _cashierShift!;
+  Future<CashierShift> cashierShiftDetails(String token, String id) async =>
+      _cashierShift!;
 
   @override
-  Future<PagedCashierShifts> listCashierShifts(String token, {String? status}) async =>
-      PagedCashierShifts(
-        items: _cashierShift == null
-            ? []
-            : [
-                CashierShiftListItem(
-                  id: _cashierShift!.id,
-                  branchId: _cashierShift!.branchId,
-                  branchName: _cashierShift!.branchName,
-                  cashierUserId: _cashierShift!.cashierUserId,
-                  cashierName: _cashierShift!.cashierName,
-                  terminalName: _cashierShift!.terminalName,
-                  openingCash: _cashierShift!.openingCash,
-                  openedAtUtc: _cashierShift!.openedAtUtc,
-                  status: _cashierShift!.status,
-                  closedAtUtc: _cashierShift!.closedAtUtc,
-                  expectedCash: _cashierShift!.expectedCash,
-                  actualCountedCash: _cashierShift!.actualCountedCash,
-                  cashVariance: _cashierShift!.cashVariance,
-                ),
-              ],
-        totalCount: _cashierShift == null ? 0 : 1,
-      );
+  Future<PagedCashierShifts> listCashierShifts(
+    String token, {
+    String? status,
+  }) async => PagedCashierShifts(
+    items: _cashierShift == null
+        ? []
+        : [
+            CashierShiftListItem(
+              id: _cashierShift!.id,
+              branchId: _cashierShift!.branchId,
+              branchName: _cashierShift!.branchName,
+              cashierUserId: _cashierShift!.cashierUserId,
+              cashierName: _cashierShift!.cashierName,
+              terminalName: _cashierShift!.terminalName,
+              openingCash: _cashierShift!.openingCash,
+              openedAtUtc: _cashierShift!.openedAtUtc,
+              status: _cashierShift!.status,
+              closedAtUtc: _cashierShift!.closedAtUtc,
+              expectedCash: _cashierShift!.expectedCash,
+              actualCountedCash: _cashierShift!.actualCountedCash,
+              cashVariance: _cashierShift!.cashVariance,
+            ),
+          ],
+    totalCount: _cashierShift == null ? 0 : 1,
+  );
 
   @override
   Future<DailyClosingSummary> dailyCashierClosingSummary(
@@ -3845,10 +3883,7 @@ class FakeApi implements PharmacyApi {
     final branchId = _godowns[index].branchId;
     for (var i = 0; i < _godowns.length; i++) {
       if (_godowns[i].branchId == branchId) {
-        _godowns[i] = _copyGodown(
-          _godowns[i],
-          isDefault: _godowns[i].id == id,
-        );
+        _godowns[i] = _copyGodown(_godowns[i], isDefault: _godowns[i].id == id);
       }
     }
     return _godowns[index];
@@ -3959,20 +3994,19 @@ class FakeApi implements PharmacyApi {
     DateTime? from,
     DateTime? to,
     String? branchId,
-  }) async =>
-      PagedSupplierLedger(
-        items: [
-          SupplierLedgerItem(
-            entryDate: DateTime(2026, 9, 2),
-            entryType: 'OpeningBalance',
-            amount: 10000,
-            runningBalance: 10000,
-            branchName: user.branch.name,
-            notes: 'Opening balance',
-          ),
-        ],
-        totalCount: 1,
-      );
+  }) async => PagedSupplierLedger(
+    items: [
+      SupplierLedgerItem(
+        entryDate: DateTime(2026, 9, 2),
+        entryType: 'OpeningBalance',
+        amount: 10000,
+        runningBalance: 10000,
+        branchName: user.branch.name,
+        notes: 'Opening balance',
+      ),
+    ],
+    totalCount: 1,
+  );
 
   @override
   Future<void> recordSupplierPayment(
@@ -4691,7 +4725,9 @@ class FakeApi implements PharmacyApi {
       }
       final transferNumber = query?['transferNumber'];
       if (transferNumber != null && transferNumber.isNotEmpty) {
-        items = items.where((t) => t.transferNumber.contains(transferNumber)).toList();
+        items = items
+            .where((t) => t.transferNumber.contains(transferNumber))
+            .toList();
       }
       return <String, dynamic>{
         'items': items.map(_transferListJson).toList(),
@@ -4735,7 +4771,7 @@ class FakeApi implements PharmacyApi {
         destGodownName: godownName(body['destinationGodownId'] as String),
         transferDate:
             DateTime.tryParse(body['transferDate'] as String? ?? '') ??
-                DateTime.now(),
+            DateTime.now(),
         notes: body['notes'] as String?,
       )..createdBy = user.fullName;
       transfer.items.addAll(requestItems);
@@ -4786,7 +4822,8 @@ class FakeApi implements PharmacyApi {
           requested: m['quantityRequested'] as int,
         );
       }).toList();
-      String godownName(String id) => _godowns.firstWhere((g) => g.id == id).name;
+      String godownName(String id) =>
+          _godowns.firstWhere((g) => g.id == id).name;
       transfer.sourceBranchId = body['sourceBranchId'] as String;
       transfer.sourceBranchName = user.branch.name;
       transfer.sourceGodownId = body['sourceGodownId'] as String;
@@ -4794,10 +4831,12 @@ class FakeApi implements PharmacyApi {
       transfer.destBranchId = body['destinationBranchId'] as String;
       transfer.destBranchName = user.branch.name;
       transfer.destGodownId = body['destinationGodownId'] as String;
-      transfer.destGodownName = godownName(body['destinationGodownId'] as String);
+      transfer.destGodownName = godownName(
+        body['destinationGodownId'] as String,
+      );
       transfer.transferDate =
           DateTime.tryParse(body['transferDate'] as String? ?? '') ??
-              transfer.transferDate;
+          transfer.transferDate;
       transfer.notes = body['notes'] as String?;
       transfer.items
         ..clear()
@@ -4859,9 +4898,17 @@ class FakeApi implements PharmacyApi {
             ? headerNote.trim()
             : '${transfer.notes}\n${headerNote.trim()}';
       }
-      final totalDispatched = transfer.items.fold<int>(0, (a, i) => a + i.dispatched);
-      final totalReceived = transfer.items.fold<int>(0, (a, i) => a + i.received);
-      transfer.status = totalReceived >= totalDispatched ? 'Received' : 'PartiallyReceived';
+      final totalDispatched = transfer.items.fold<int>(
+        0,
+        (a, i) => a + i.dispatched,
+      );
+      final totalReceived = transfer.items.fold<int>(
+        0,
+        (a, i) => a + i.received,
+      );
+      transfer.status = totalReceived >= totalDispatched
+          ? 'Received'
+          : 'PartiallyReceived';
       transfer.receivedBy = user.fullName;
       transfer.receivedAt = DateTime.now();
       return _transferDetailJson(transfer);
@@ -4956,6 +5003,22 @@ class FakeApi implements PharmacyApi {
     return null;
   }
 
+  @override
+  Future<dynamic> phase6(
+    String token,
+    String path, {
+    String method = 'GET',
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+  }) async => path == 'sale-price'
+      ? <String, dynamic>{
+          'price': null,
+          'source': 'Default',
+          'priceLevelId': null,
+          'defaultRetailPrice': product.retailPrice,
+        }
+      : <dynamic>[];
+
   final List<Map<String, dynamic>> _quotations = [];
   int _quotationSeq = 0;
   Map<String, dynamic>? lastQuotationBody;
@@ -5007,7 +5070,10 @@ class FakeApi implements PharmacyApi {
                     : (q['items'] as List<dynamic>).fold<double>(
                         0,
                         (sum, i) =>
-                            sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+                            sum +
+                            product.retailPrice *
+                                ((i as Map<String, dynamic>)['quantity']
+                                    as int),
                       ),
                 'createdByName': user.fullName,
               },
@@ -5023,7 +5089,8 @@ class FakeApi implements PharmacyApi {
       lastQuotationBody = body;
       final quotation = <String, dynamic>{
         'id': 'quotation-$_quotationSeq',
-        'quotationNumber': 'QT-2026-${_quotationSeq.toString().padLeft(6, '0')}',
+        'quotationNumber':
+            'QT-2026-${_quotationSeq.toString().padLeft(6, '0')}',
         'branchId': user.branch.id,
         'branchName': user.branch.name,
         'godownId': null,
@@ -5057,13 +5124,18 @@ class FakeApi implements PharmacyApi {
     final id = segments.first;
     final quotation = _quotations.firstWhere((q) => q['id'] == id);
     if (segments.length == 1 && method == 'GET') {
-      return _quotationJson(Map<String, dynamic>.from(quotation)
-        ..['subtotal'] = 0
-        ..['discountTotal'] = 0
-        ..['netTotal'] = (quotation['items'] as List<dynamic>).fold<double>(
-          0,
-          (sum, i) => sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
-        ));
+      return _quotationJson(
+        Map<String, dynamic>.from(quotation)
+          ..['subtotal'] = 0
+          ..['discountTotal'] = 0
+          ..['netTotal'] = (quotation['items'] as List<dynamic>).fold<double>(
+            0,
+            (sum, i) =>
+                sum +
+                product.retailPrice *
+                    ((i as Map<String, dynamic>)['quantity'] as int),
+          ),
+      );
     }
     if (segments.length == 2 && segments[1] == 'send') {
       quotation['status'] = 'Sent';
@@ -5112,7 +5184,10 @@ class FakeApi implements PharmacyApi {
       quotation['status'] = 'Converted';
       quotation['convertedToSaleId'] = 'sale-from-quotation';
       quotation['convertedToSaleInvoiceNumber'] = 'INV-2026-000001';
-      return <String, dynamic>{'id': 'sale-from-quotation', 'invoiceNumber': 'INV-2026-000001'};
+      return <String, dynamic>{
+        'id': 'sale-from-quotation',
+        'invoiceNumber': 'INV-2026-000001',
+      };
     }
     return _quotationJson(quotation);
   }
@@ -5128,7 +5203,10 @@ class FakeApi implements PharmacyApi {
     'discountTotal': 0,
     'netTotal': (o['items'] as List<dynamic>).fold<double>(
       0,
-      (sum, i) => sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+      (sum, i) =>
+          sum +
+          product.retailPrice *
+              ((i as Map<String, dynamic>)['quantity'] as int),
     ),
     'items': (o['items'] as List<dynamic>).map((raw) {
       final m = raw as Map<String, dynamic>;
@@ -5171,11 +5249,14 @@ class FakeApi implements PharmacyApi {
                 'netTotal': (o['items'] as List<dynamic>).fold<double>(
                   0,
                   (sum, i) =>
-                      sum + product.retailPrice * ((i as Map<String, dynamic>)['quantity'] as int),
+                      sum +
+                      product.retailPrice *
+                          ((i as Map<String, dynamic>)['quantity'] as int),
                 ),
                 'orderedQuantity': (o['items'] as List<dynamic>).fold<int>(
                   0,
-                  (sum, i) => sum + ((i as Map<String, dynamic>)['quantity'] as int),
+                  (sum, i) =>
+                      sum + ((i as Map<String, dynamic>)['quantity'] as int),
                 ),
                 'fulfilledQuantity': 0,
               },
@@ -5234,18 +5315,26 @@ class FakeApi implements PharmacyApi {
       order['cancellationReason'] = body?['reason'];
     } else if (segments.length == 2 && segments[1] == 'fulfill') {
       lastFulfillSalesOrderBody = body;
-      final items = (order['items'] as List<dynamic>).cast<Map<String, dynamic>>();
+      final items = (order['items'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
       for (final requested in (body?['items'] as List<dynamic>? ?? [])) {
         final requestedMap = requested as Map<String, dynamic>;
-        final match = items.firstWhere((x) => x['productId'] == requestedMap['productId']);
+        final match = items.firstWhere(
+          (x) => x['productId'] == requestedMap['productId'],
+        );
         match['fulfilledQuantity'] =
-            ((match['fulfilledQuantity'] as int?) ?? 0) + (requestedMap['quantity'] as int);
+            ((match['fulfilledQuantity'] as int?) ?? 0) +
+            (requestedMap['quantity'] as int);
       }
       final fullyFulfilled = items.every(
-        (x) => ((x['fulfilledQuantity'] as int?) ?? 0) >= (x['quantity'] as int),
+        (x) =>
+            ((x['fulfilledQuantity'] as int?) ?? 0) >= (x['quantity'] as int),
       );
       order['status'] = fullyFulfilled ? 'Fulfilled' : 'PartiallyFulfilled';
-      return <String, dynamic>{'id': 'sale-from-order', 'invoiceNumber': 'INV-2026-000002'};
+      return <String, dynamic>{
+        'id': 'sale-from-order',
+        'invoiceNumber': 'INV-2026-000002',
+      };
     }
     return _salesOrderJson(order);
   }
@@ -5262,7 +5351,11 @@ class FakeApi implements PharmacyApi {
       return <Map<String, dynamic>>[cashAccount, salesAccount];
     }
     if (path == 'chart' && method == 'POST') {
-      return <String, dynamic>{...cashAccount, 'id': 'account-new', 'balance': 0};
+      return <String, dynamic>{
+        ...cashAccount,
+        'id': 'account-new',
+        'balance': 0,
+      };
     }
     if (path.startsWith('chart/') && path.endsWith('/activate')) return null;
     if (path.startsWith('chart/') && path.endsWith('/deactivate')) return null;
@@ -5288,7 +5381,10 @@ class FakeApi implements PharmacyApi {
       };
     }
     if (path == 'journal' && method == 'POST') {
-      return journalDetails(id: 'journal-manual', entryNumber: 'JE-2026-000002');
+      return journalDetails(
+        id: 'journal-manual',
+        entryNumber: 'JE-2026-000002',
+      );
     }
     if (path.startsWith('journal/')) return journalDetails();
     if (path == 'trial-balance') {
@@ -5353,7 +5449,11 @@ class FakeApi implements PharmacyApi {
         'fromUtc': '2026-09-01T00:00:00.000Z',
         'toUtc': '2026-09-10T00:00:00.000Z',
         'revenue': [
-          <String, dynamic>{'accountCode': '4010', 'accountName': 'Sales Revenue', 'amount': 500},
+          <String, dynamic>{
+            'accountCode': '4010',
+            'accountName': 'Sales Revenue',
+            'amount': 500,
+          },
         ],
         'netRevenue': 500,
         'costOfGoodsSold': <dynamic>[],
@@ -5368,7 +5468,11 @@ class FakeApi implements PharmacyApi {
       return <String, dynamic>{
         'asOfUtc': '2026-09-10T00:00:00.000Z',
         'assets': [
-          <String, dynamic>{'accountCode': '1010', 'accountName': 'Cash', 'amount': 500},
+          <String, dynamic>{
+            'accountCode': '1010',
+            'accountName': 'Cash',
+            'amount': 500,
+          },
         ],
         'totalAssets': 500,
         'liabilities': <dynamic>[],

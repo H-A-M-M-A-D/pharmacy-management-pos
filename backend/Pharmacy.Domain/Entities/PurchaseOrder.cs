@@ -6,6 +6,8 @@ public class PurchaseOrder : Entity
 {
     public Guid BranchId { get; set; }
     public Branch? Branch { get; set; }
+    public Guid? GodownId { get; set; }
+    public Godown? Godown { get; set; }
     public Guid SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
     public required string OrderNumber { get; set; }

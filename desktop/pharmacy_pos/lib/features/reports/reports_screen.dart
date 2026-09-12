@@ -25,6 +25,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   List<String> get _sections => [
     if (widget.authState.can('reports.view')) 'Overview',
+    if (widget.authState.can('reports.view')) 'Phase 6',
     if (widget.authState.can('reports.sales')) 'Sales',
     if (widget.authState.can('reports.purchases')) 'Purchases',
     if (widget.authState.can('reports.inventory')) 'Inventory',
@@ -81,6 +82,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   static const _reports = <String, Map<String, String>>{
+    'Phase 6': {
+      'Price Change History': 'phase6/price-history', 'Promotion Performance': 'phase6/promotion-performance',
+      'Margin Exceptions': 'phase6/margin-exceptions', 'Low Margin Products': 'phase6/low-margin',
+      'Reorder Suggestions': 'phase6/reorder', 'Stockout Risk': 'phase6/stockout-risk',
+      'Slow/Dead Stock Summary': 'phase6/slow-dead-stock', 'Expiry Alert Summary': 'phase6/expiry-summary',
+      'Automation Execution Log': 'phase6/automation-log', 'Alert Summary': 'phase6/alert-summary',
+    },
     'Sales': {
       'Summary': 'sales/summary',
       'Daily Sales': 'sales/daily',

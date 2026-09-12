@@ -81,6 +81,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
             await RequireActiveBranch(request.BranchId, ct);
             await RequireActiveSupplier(request.SupplierId, ct);
             var old = OrderValues(order);
+            if (order.GodownId.HasValue && order.BranchId != request.BranchId) throw new RequestValidationException("A godown-scoped reorder draft cannot be moved to another branch.");
             order.BranchId = request.BranchId;
             order.SupplierId = request.SupplierId;
             order.OrderDate = request.OrderDate;
@@ -94,6 +95,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 replacementItems.Add(new PurchaseOrderItem
                 {
                     ProductId = product.Id,
+                    SuggestedOrderQuantity = order.Items.FirstOrDefault(x => x.ProductId == product.Id)?.SuggestedOrderQuantity,
                     OrderedQuantity = item.OrderedQuantity,
                     ExpectedPurchasePrice = item.ExpectedPurchasePrice,
                     Notes = Clean(item.Notes)
@@ -179,6 +181,10 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
             if (order is not null)
             {
                 if (order.BranchId != branch.Id || order.SupplierId != supplier.Id) throw new RequestValidationException("Purchase order does not match branch and supplier.");
+                if (order.GodownId.HasValue) {
+                    if (request.GodownId.HasValue && request.GodownId != order.GodownId) throw new RequestValidationException("Receipt godown must match the reorder purchase order.");
+                    godownId = await ResolveGodownAsync(actor, branch.Id, order.GodownId, ct);
+                }
                 if (order.Status is not PurchaseOrderStatus.Submitted and not PurchaseOrderStatus.PartiallyReceived)
                     throw new RequestValidationException("Only submitted or partially received purchase orders can be received.");
             }
@@ -209,6 +215,15 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
                 var totals = CalculateLine(item);
                 var inventoryQuantity = item.PurchasedQuantity + item.BonusQuantity;
                 var inventory = await InventoryFor(batch, product, ct);
+                var effectiveCost = inventoryQuantity <= 0 ? item.PurchasePrice : Money(totals.Net / inventoryQuantity);
+                if (Math.Abs(effectiveCost - product.PurchasePrice) >= Math.Max(.01m, product.PurchasePrice * .05m))
+                {
+                    var margin = product.RetailPrice <= 0 ? 0 : Money((product.RetailPrice - effectiveCost) / product.RetailPrice * 100);
+                    var oldMargin = product.RetailPrice <= 0 ? .10m : Math.Clamp((product.RetailPrice - product.PurchasePrice) / product.RetailPrice, 0, .95m);
+                    var suggestion = new Pharmacy.Application.DTOs.Phase6.PurchaseCostSuggestionDto(Guid.NewGuid(), product.Id, product.Name, branch.Id, receipt.Id,
+                        product.PurchasePrice, effectiveCost, product.RetailPrice, margin, Money(effectiveCost / (1 - oldMargin)), product.UpdatedAt);
+                    await Audit(actorId, "PurchaseCostSuggestion", "Product", suggestion.Id, null, suggestion, ct);
+                }
                 batch.QuantityReceived += inventoryQuantity;
                 batch.QuantityAvailable += inventoryQuantity;
                 batch.UpdatedAt = UtcNow();

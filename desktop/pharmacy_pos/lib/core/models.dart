@@ -1506,6 +1506,8 @@ class PurchaseOrderListItem {
     required this.receivedQuantity,
     required this.status,
     this.expectedDate,
+    this.godownId,
+    this.godownName,
   });
   final String id,
       orderNumber,
@@ -1515,12 +1517,15 @@ class PurchaseOrderListItem {
       branchName,
       status;
   final DateTime orderDate;
+  final String? godownId, godownName;
   final DateTime? expectedDate;
   final int itemCount, orderedQuantity, receivedQuantity;
   factory PurchaseOrderListItem.fromJson(Map<String, dynamic> json) =>
       PurchaseOrderListItem(
         id: json['id'] as String,
         orderNumber: json['orderNumber'] as String? ?? '',
+        godownId: json['godownId'] as String?,
+        godownName: json['godownName'] as String?,
         orderDate: _date(json['orderDate']) ?? DateTime.now(),
         expectedDate: _date(json['expectedDate']),
         supplierId: json['supplierId'] as String? ?? '',
@@ -1549,6 +1554,8 @@ class PurchaseOrderDetails extends PurchaseOrderListItem {
     required super.status,
     required this.items,
     super.expectedDate,
+    super.godownId,
+    super.godownName,
   });
   final List<PurchaseOrderItem> items;
   factory PurchaseOrderDetails.fromJson(Map<String, dynamic> json) {
@@ -1558,6 +1565,8 @@ class PurchaseOrderDetails extends PurchaseOrderListItem {
     return PurchaseOrderDetails(
       id: json['id'] as String,
       orderNumber: json['orderNumber'] as String? ?? '',
+      godownId: json['godownId'] as String?,
+      godownName: json['godownName'] as String?,
       orderDate: _date(json['orderDate']) ?? DateTime.now(),
       expectedDate: _date(json['expectedDate']),
       supplierId: json['supplierId'] as String? ?? '',

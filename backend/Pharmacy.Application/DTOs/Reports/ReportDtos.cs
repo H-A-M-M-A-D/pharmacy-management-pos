@@ -13,6 +13,9 @@ public sealed record ReportQuery(Guid? BranchId, DateTime FromUtc, DateTime ToUt
     public Guid? GodownUserId { get; init; }
     public IReadOnlyList<Guid>? BranchIds { get; init; }
     public Guid? BatchId { get; init; }
+    public bool CanViewReceivables { get; init; }
+    public bool CanViewPayables { get; init; }
+    public PriceSource? PriceSourceFilter { get; init; }
 }
 public sealed record PagedReport<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 

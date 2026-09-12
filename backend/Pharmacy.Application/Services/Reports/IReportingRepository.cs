@@ -5,6 +5,7 @@ namespace Pharmacy.Application.Services.Reports;
 
 public interface IReportingRepository
 {
+    Task<object> Phase6ReportAsync(ReportQuery query, string report, CancellationToken ct) => throw new NotSupportedException();
     IReportingRepository WithFilters(ReportQuery query) => this;
     Task<Godown?> GetReportGodownAsync(Guid id, CancellationToken ct) => Task.FromResult<Godown?>(null);
     Task<bool> HasGodownAccessAsync(Guid userId, Guid godownId, CancellationToken ct) => Task.FromResult(false);
