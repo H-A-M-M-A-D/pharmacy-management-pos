@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Pharmacy.Application.DTOs.Administration;
@@ -57,23 +58,24 @@ public sealed class AdministrationRepository(
             File.Move(partialPath,finalPath);
             record.Status="Completed";record.SizeBytes=new FileInfo(finalPath).Length;record.CompletedAtUtc=DateTime.UtcNow;
             await context.SaveChangesAsync(ct);
-            ApplyRetention(root);
+            await ApplyRetention(root,ct);
             return record;
         }
         catch(Exception exception) when(exception is not OperationCanceledException)
         {
             if(File.Exists(partialPath))File.Delete(partialPath);
-            record.Status="Failed";record.ErrorMessage="Backup creation or validation failed.";record.CompletedAtUtc=DateTime.UtcNow;
+            var detail=exception.Message;
+            record.Status="Failed";record.ErrorMessage=detail.Length>500?detail[..500]:detail;record.CompletedAtUtc=DateTime.UtcNow;
             await context.SaveChangesAsync(CancellationToken.None);
             logger.LogError(exception,"Database backup failed. BackupRecordId: {BackupRecordId}",record.Id);
-            throw new InvalidOperationException(record.ErrorMessage);
+            throw new InvalidOperationException("Backup creation or validation failed. See the backup record and server log for details.");
         }
         finally
         {
             cs.Password=string.Empty;
         }
     }
-    public async Task<SystemInformationDto> GetSystemInformationAsync(CancellationToken ct){var ok=await context.Database.CanConnectAsync(ct);var version=ok?(await context.Database.SqlQueryRaw<string>("SELECT version() AS \"Value\"").FirstAsync(ct)):"Unavailable";var migration=(await context.Database.GetAppliedMigrationsAsync(ct)).LastOrDefault()??"None";var root=GetBackupRoot();var writable=false;try{Directory.CreateDirectory(root);var probe=SafePath(root,$".write-{Guid.NewGuid():N}.tmp");await File.WriteAllTextAsync(probe,string.Empty,ct);File.Delete(probe);writable=true;}catch(Exception exception) when(exception is IOException or UnauthorizedAccessException){logger.LogWarning("Backup directory write probe failed: {ErrorType}",exception.GetType().Name);}var apiVersion=System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString()??"0.1.0-rc.1";var last=await context.BackupRecords.Where(x=>x.Status=="Completed").MaxAsync(x=>(DateTime?)x.CompletedAtUtc,ct);return new(ok?"healthy":"unhealthy","PostgreSQL",version,migration,ok,"Asia/Karachi","PKR",apiVersion,FindPostgresTool("pg_dump.exe") is not null&&FindPostgresTool("pg_restore.exe") is not null,writable,last);}
+    public async Task<SystemInformationDto> GetSystemInformationAsync(CancellationToken ct){var ok=await context.Database.CanConnectAsync(ct);var version=ok?(await context.Database.SqlQueryRaw<string>("SELECT version() AS \"Value\"").FirstAsync(ct)):"Unavailable";var migration=(await context.Database.GetAppliedMigrationsAsync(ct)).LastOrDefault()??"None";var root=GetBackupRoot();var writable=false;try{Directory.CreateDirectory(root);var probe=SafePath(root,$".write-{Guid.NewGuid():N}.tmp");await File.WriteAllTextAsync(probe,string.Empty,ct);File.Delete(probe);writable=true;}catch(Exception exception) when(exception is IOException or UnauthorizedAccessException){logger.LogWarning("Backup directory write probe failed: {ErrorType}",exception.GetType().Name);}var apiVersion=Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion??"0.1.0-rc.1";var last=await context.BackupRecords.Where(x=>x.Status=="Completed").MaxAsync(x=>(DateTime?)x.CompletedAtUtc,ct);return new(ok?"healthy":"unhealthy","PostgreSQL",version,migration,ok,"Asia/Karachi","PKR",apiVersion,FindPostgresTool("pg_dump.exe") is not null&&FindPostgresTool("pg_restore.exe") is not null,writable,last);}
     public Task SaveAsync(CancellationToken ct)=>context.SaveChangesAsync(ct);
     private string GetBackupRoot()=>Path.GetFullPath(configuration["Backup:Directory"]??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"PharmacyPOS","Backups"));
     private string? FindPostgresTool(string name)
@@ -88,6 +90,6 @@ public sealed class AdministrationRepository(
     private static string SafePath(string root,string name){var canonicalRoot=Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(canonicalRoot,name));if(!path.StartsWith(canonicalRoot,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Backup path escaped the configured directory.");return path;}
     private void EnsureDiskSpace(string root){var drive=new DriveInfo(Path.GetPathRoot(root)!);var minimum=long.TryParse(configuration["Backup:MinimumFreeSpaceBytes"],out var value)?value:104857600;if(drive.AvailableFreeSpace<minimum)throw new InvalidOperationException("Insufficient free disk space for backup.");}
     private ProcessStartInfo CreateToolStartInfo(string executable,NpgsqlConnectionStringBuilder cs){var start=new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,RedirectStandardOutput=true};start.ArgumentList.Add("--host");start.ArgumentList.Add(cs.Host!);start.ArgumentList.Add("--port");start.ArgumentList.Add(cs.Port.ToString());start.ArgumentList.Add("--username");start.ArgumentList.Add(cs.Username!);start.Environment["PGPASSWORD"]=cs.Password;return start;}
-    private static async Task RunToolAsync(ProcessStartInfo start,string operation,CancellationToken ct){using var process=Process.Start(start)??throw new InvalidOperationException($"Could not start {operation}.");var stderrTask=process.StandardError.ReadToEndAsync(ct);var stdoutTask=process.StandardOutput.ReadToEndAsync(ct);await process.WaitForExitAsync(ct);await stdoutTask;await stderrTask;if(process.ExitCode!=0)throw new InvalidOperationException($"{operation} failed with exit code {process.ExitCode}.");}
-    private void ApplyRetention(string root){var configured=int.TryParse(configuration["Backup:RetentionCount"],out var value)?value:10;var retain=Math.Clamp(configured,1,100);var completed=context.BackupRecords.Where(x=>x.Status=="Completed").OrderByDescending(x=>x.CompletedAtUtc).Skip(retain).ToList();foreach(var item in completed){var path=SafePath(root,item.FileName);if(File.Exists(path))File.Delete(path);} }
+    private static async Task RunToolAsync(ProcessStartInfo start,string operation,CancellationToken ct){using var process=Process.Start(start)??throw new InvalidOperationException($"Could not start {operation}.");var stderrTask=process.StandardError.ReadToEndAsync(ct);var stdoutTask=process.StandardOutput.ReadToEndAsync(ct);await process.WaitForExitAsync(ct);await stdoutTask;var stderr=await stderrTask;if(process.ExitCode!=0){var detail=stderr.Length>500?stderr[..500]:stderr;throw new InvalidOperationException($"{operation} failed with exit code {process.ExitCode}.{(string.IsNullOrWhiteSpace(detail)?"":" "+detail.Trim())}");}}
+    private async Task ApplyRetention(string root,CancellationToken ct){var configured=int.TryParse(configuration["Backup:RetentionCount"],out var value)?value:10;var retain=Math.Clamp(configured,1,100);var completed=context.BackupRecords.Where(x=>x.Status=="Completed").OrderByDescending(x=>x.CompletedAtUtc).Skip(retain).ToList();if(completed.Count==0)return;foreach(var item in completed){var path=SafePath(root,item.FileName);if(File.Exists(path))File.Delete(path);item.Status="Purged";}await context.SaveChangesAsync(ct);}
 }

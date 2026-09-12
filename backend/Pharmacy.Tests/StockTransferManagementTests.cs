@@ -108,6 +108,23 @@ public sealed class StockTransferManagementTests
     }
 
     [Fact]
+    public async Task Duplicate_dispatch_submission_is_rejected_before_any_stock_effect()
+    {
+        var f = new Fixture(PermissionCatalog.StockTransfersCreate, PermissionCatalog.StockTransfersRequest,
+            PermissionCatalog.StockTransfersApprove, PermissionCatalog.StockTransfersDispatch);
+        var batch = f.AddSourceBatch(50, "LOT-1");
+        var created = await f.Service.CreateTransferAsync(f.Actor.Id, f.Request(batch, 20));
+        await f.Service.RequestTransferAsync(f.Actor.Id, created.Id);
+        await f.Service.ApproveTransferAsync(f.Actor.Id, created.Id, new(null));
+
+        f.DuplicateGuard.Reject = true;
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.DispatchTransferAsync(f.Actor.Id, created.Id, new(null)));
+        Assert.Equal(1, f.DuplicateGuard.CallCount);
+        Assert.Equal(50, batch.QuantityAvailable);
+        Assert.DoesNotContain(f.Movements, x => x.MovementType == StockMovementType.TransferOut);
+    }
+
+    [Fact]
     public async Task Approving_less_than_requested_caps_dispatch_and_leaves_the_remainder_unapproved()
     {
         var f = new Fixture(PermissionCatalog.StockTransfersCreate, PermissionCatalog.StockTransfersRequest,
@@ -465,6 +482,7 @@ public sealed class StockTransferManagementTests
         public readonly List<StockTransfer> Transfers = [];
         public RecordingJournalPostingService Journal { get; } = new();
         public readonly FakeGodownAccessService GodownAccess = new();
+        public readonly FakeDuplicateSubmissionGuard DuplicateGuard = new();
         public readonly Godown SourceGodown;
         public readonly Godown DestGodown;
         public IStockTransferService Service { get; }
@@ -478,7 +496,7 @@ public sealed class StockTransferManagementTests
             var role = new Role { Name = RoleCatalog.Manager };
             foreach (var permission in permissions) role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = BranchA.Id, RoleId = role.Id, Role = role, IsActive = true };
-            Service = new StockTransferService(this, GodownAccess, Journal, TimeProvider.System);
+            Service = new StockTransferService(this, GodownAccess, Journal, DuplicateGuard, TimeProvider.System);
         }
 
         public Godown AddGodown(Branch branch, string code)
@@ -574,5 +592,17 @@ public sealed class StockTransferManagementTests
         public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
         public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
         public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
+    }
+
+    private sealed class FakeDuplicateSubmissionGuard : Pharmacy.Application.Common.IDuplicateSubmissionGuard
+    {
+        public bool Reject;
+        public int CallCount;
+        public Task GuardAsync(string operation, Guid actorId, object fingerprintPayload, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            if (Reject) throw new Pharmacy.Application.Common.ResourceConflictException("This exact request was already submitted moments ago. Check the result before retrying.");
+            return Task.CompletedTask;
+        }
     }
 }

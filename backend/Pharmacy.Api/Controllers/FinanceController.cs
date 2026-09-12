@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Finance;
@@ -30,7 +31,9 @@ public sealed class FinanceController(IFinanceService finance) : ControllerBase
     [HttpGet("financial-accounts/{id:guid}/ledger"), HasPermission(PermissionCatalog.FinanceLedgerView)]
     public Task<IReadOnlyList<FinancialLedgerEntryDto>> Ledger(Guid id, [FromQuery] FinancialLedgerQuery query, CancellationToken ct) => finance.LedgerAsync(UserId(), id, query, ct);
 
-    [HttpGet("expense-categories")]
+    // ListCategoriesAsync internally accepts ExpensesView OR ExpensesCreate, which a single [HasPermission]
+    // cannot express - [Authorize] enforces the authenticated-user baseline while the service does the real check.
+    [HttpGet("expense-categories"), Authorize]
     public Task<IReadOnlyList<ExpenseCategoryDto>> Categories([FromQuery] bool? active, CancellationToken ct) => finance.ListCategoriesAsync(UserId(), active, ct);
     [HttpPost("expense-categories"), HasPermission(PermissionCatalog.AccountsManage)]
     public Task<ExpenseCategoryDto> CreateCategory(ExpenseCategoryRequest request, CancellationToken ct) => finance.CreateCategoryAsync(UserId(), request, ct);

@@ -251,26 +251,14 @@ These statements are verified in the EF model, migrations, and real PostgreSQL 1
 
 ## Migration Status
 
+*(Updated 2026-09-13 during Phase 7 hardening — the list below was last accurate at Phase 13/EnforceAuditImmutability; this repo has since grown through the multi-godown, stock-transfer, sales-expansion/wholesale, full accounting-engine, aging/vouchers, and Phase 6 pricing/automation additions. Re-run `dotnet ef migrations list` for the current source of truth rather than trusting a static list here going forward.)*
+
 - Directory: `backend/Pharmacy.Infrastructure/Migrations`
-- Migration: `20260829211152_InitialCreate`
-- Migration: `20260829223012_AddUserSecurityAndManagement`
-- Migration: `20260901194508_CompleteProductMaster`
-- Migration: `20260901215409_CompleteBatchAndInventoryManagement`
-- Migration: `20260902051500_CompleteSupplierManagement`
-- Migration: `20260902055022_CompletePurchasingAndGoodsReceiving`
-- Migration: `20260902114037_CompletePosAndSales`
-- Migration: `20260902222101_CompleteSalesReturnsAndRefunds`
-- Migration: `20260903231207_CompletePurchaseReturns`
-- Migration: `20260904125716_CompleteCustomerManagementAndCreditSales`
-- Migration: `20260907195029_CompleteAccountsExpensesAndCashManagement`
-- Migration: `20260907210154_AddReportingPermissions`
-- Migration: `20260907220809_CompleteSystemAdministration`
-- Migration: `20260907222557_EnforceAuditImmutability`
 - Snapshot: `PharmacyDbContextModelSnapshot.cs`
 - EF reports no pending model changes.
 - Applied to: local `pharmacy_dev` and isolated `pharmacy_test`
-- EF history: 14 migrations through Phase 13 recorded with product version `10.0.11`
-- Real schema: 39 application tables plus `__EFMigrationsHistory`, with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL
+- EF history: 36 migrations, latest `20260912184401_AddSubmissionFingerprintGuard`, recorded with product version `10.0.11`
+- Real schema: 84 application tables plus `__EFMigrationsHistory` (85 total), with foreign keys, constraints, triggers, and operational indexes verified in PostgreSQL 17
 
 ## Flutter Foundation
 
@@ -278,12 +266,16 @@ The Flutter project contains a Material desktop shell and permission-aware opera
 
 ## Current Limitations
 
-- Local PostgreSQL verification is complete; deployment database provisioning and production operations remain out of scope.
-- No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes.
-- Audit CSV export, point-in-time audit field snapshots, scheduled backups, retention/encryption management, backup download, and in-app restore are not implemented. Restore is deliberately an offline maintenance procedure.
+*(Updated 2026-09-13 — several bullets below were true at Phase 13 and are explicitly corrected; see `docs/PERMISSION_MATRIX.md` and the Phase 7 completion report for what actually exists today.)*
+
+- Deployment database provisioning and production operations are now covered by `docs/PRODUCTION_DEPLOYMENT.md`, `docs/DEPLOYMENT_CHECKLIST.md`, `docs/OPERATIONS_RUNBOOK.md`, and `docs/DISASTER_RECOVERY.md`.
+- No refresh tokens or general-purpose server-side token revocation list; token versions invalidate sessions after security-sensitive user changes. This is still accurate — session lifetime is bounded by `Jwt:ExpirationMinutes` plus explicit "sign out everywhere."
+- **No longer accurate**: a full double-entry chart-of-accounts/journal engine, typed vouchers with reversal, bank reconciliation, accounting periods with soft/hard close, budgets, cost centers, party credit/debit notes/write-offs/advances, supplier/customer payment allocation to specific documents, and true AR/AP aging all exist today (see the `AccountsX` permission groups in `docs/PERMISSION_MATRIX.md`).
+- **No longer accurate**: shift/cash-drawer closing exists (Cashier Shift feature — open/close/reconcile with expected-vs-counted cash variance).
+- Audit CSV export, point-in-time audit field snapshots, scheduled/automatic backups, and in-app restore are still not implemented. Backups are manual-trigger only (with retention); restore is deliberately an offline maintenance procedure — see `docs/DISASTER_RECOVERY.md`.
 - Settings currently cover business/receipt presentation only; currency is PKR and timezone is Asia/Karachi. Tax, numbering, and finance defaults remain owned by their existing modules.
-- No role-permission mutation UI/API yet; migration defaults remain directly customizable in later administration work.
-- No exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, unit conversion, accounting general ledger, supplier/customer payment allocation to specific documents, true AR/AP aging, shift/cash drawer closing, bank reconciliation, or background expiry processing.
+- No role-permission mutation UI/API yet — role grants are seeded via migration and are not editable at runtime.
+- Still genuinely absent: exchange/store-credit return flow, receipt-less return flow, supplier cash-refund settlement for purchase returns, unit conversion, background/scheduled job execution (automation and recurring journals are manually triggered), and physical (OS-level/thermal-printer) receipt printing (receipts are generated and viewable/reprintable on-screen, but nothing yet sends them to a printer — see `docs/RELEASE_NOTES.md`).
 
 ## Read-only Reporting
 
@@ -292,8 +284,10 @@ The Flutter project contains a Material desktop shell and permission-aware opera
 Sales net after returns equals posted sale net less separately posted returns. Payment-method totals include `SalePayment` only; credit is shown separately. Product profitability uses `SaleItemBatchAllocation.UnitCostPriceSnapshot` and reverses revenue and cost through `SalesReturnAllocation`, never current batch prices. Category reports use the current product category because no historical category snapshot exists.
 
 Purchase reports distinguish paid quantity, bonus quantity, and supplier credit. Inventory valuation is operational batch quantity multiplied by batch purchase price. Customer, supplier, and financial balances are ledger sums. Consolidated cash flow excludes transfer-in/out from external business activity while closing balance still includes all account ledger movements. Asia/Karachi business dates are converted to explicit half-open UTC ranges; date-only purchase fields are compared using Karachi business dates.
-- CORS is permissive for local foundation development and must be restricted before deployment.
-- API error handling and setup-owner exposure require deployment hardening.
+
+*(Updated 2026-09-13)* The two bullets that used to close this document are now stale and corrected:
+- CORS defaults to **deny cross-origin entirely** outside Development unless `Cors:AllowedOrigins` is explicitly configured — the opposite of "permissive." This was verified directly against `Program.cs` during Phase 7 hardening.
+- API error handling is a real, consistent `ProblemDetails` envelope (with a correlation ID) for validation/404/409/403/401/500, and Setup-Owner is rejected once any user exists — see the Phase 7 completion report for the full audit. Structured file logging (rotated, retention-limited) and startup/shutdown logging were added in Phase 7 as the one genuine gap this line was pointing at.
 
 
 

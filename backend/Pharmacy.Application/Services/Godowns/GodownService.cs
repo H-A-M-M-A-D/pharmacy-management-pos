@@ -205,7 +205,7 @@ public sealed class GodownService(IGodownRepository repository, TimeProvider tim
         await repository.GetGodownAsync(id, ct) ?? throw new ResourceNotFoundException("Godown was not found.");
 
     private static bool CanSelectBranch(User actor) =>
-        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.UsersView) == true;
+        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
 
     private static void EnsureBranchAccess(User actor, Guid branchId)
     {

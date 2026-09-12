@@ -8,26 +8,37 @@ public sealed partial class ReportingRepository
 {
     public async Task<object> InventoryAlertsAsync(ReportQuery q, CancellationToken ct)
     {
-        var positions = BatchPositions(q);
+        // Materialized once and reused in-memory below: the original re-queried `positions`/`grouped`
+        // (each re-evaluating a correlated per-product/per-batch subquery) up to eight separate times,
+        // which timed out under a realistic catalog size (~2k products). See Phase 7 performance audit.
         var day = BusinessDate(q.ToUtc.AddTicks(-1));
-        var grouped = positions.GroupBy(x => new { x.ProductId, x.ReorderLevel }).Select(g => new
-        {
-            g.Key.ProductId, g.Key.ReorderLevel, Qty = g.Sum(x => x.Quantity), Value = g.Sum(x => x.Quantity * x.Cost),
-            LastSale = db.SaleItems.Where(i => i.ProductId == g.Key.ProductId && i.Sale!.Status == SaleStatus.Posted &&
-                i.Sale.PostedAtUtc < q.ToUtc && (!q.BranchId.HasValue || i.Sale.BranchId == q.BranchId) &&
+        var positions = await BatchPositions(q).ToListAsync(ct);
+        var lastSaleByProduct = await db.SaleItems.AsNoTracking()
+            .Where(i => i.Sale!.Status == SaleStatus.Posted && i.Sale.PostedAtUtc < q.ToUtc &&
+                (!q.BranchId.HasValue || i.Sale.BranchId == q.BranchId) &&
                 (!q.GodownId.HasValue || i.Sale.GodownId == q.GodownId) &&
-                (!q.GodownUserId.HasValue || db.UserGodowns.Any(u => u.UserId == q.GodownUserId && u.GodownId == i.Sale.GodownId))).Max(i => i.Sale!.PostedAtUtc)
-        });
+                (!q.GodownUserId.HasValue || db.UserGodowns.Any(u => u.UserId == q.GodownUserId && u.GodownId == i.Sale.GodownId)))
+            .GroupBy(i => i.ProductId)
+            .Select(g => new { ProductId = g.Key, LastSale = g.Max(i => i.Sale!.PostedAtUtc) })
+            .ToDictionaryAsync(x => x.ProductId, x => x.LastSale, ct);
+
+        var grouped = positions.GroupBy(x => x.ProductId).Select(g => new
+        {
+            ProductId = g.Key, ReorderLevel = g.First().ReorderLevel,
+            Qty = g.Sum(x => x.Quantity), Value = g.Sum(x => x.Quantity * x.Cost),
+            LastSale = lastSaleByProduct.TryGetValue(g.Key, out var lastSale) ? lastSale : (DateTime?)null
+        }).ToList();
+
         return new
         {
-            InventoryValue = await positions.SumAsync(x => (decimal?)(x.Quantity * x.Cost), ct) ?? 0,
-            CurrentStock = await positions.SumAsync(x => (int?)x.Quantity, ct) ?? 0,
-            LowStockItems = await grouped.CountAsync(x => x.Qty > 0 && x.Qty <= x.ReorderLevel, ct),
-            OutOfStockItems = await grouped.CountAsync(x => x.Qty <= 0, ct),
-            NearExpiryValue = await positions.Where(x => x.Quantity > 0 && x.Expiry >= day && x.Expiry <= day.AddDays(30)).SumAsync(x => (decimal?)(x.Quantity * x.Cost), ct) ?? 0,
-            ExpiredStockValue = await positions.Where(x => x.Quantity > 0 && x.Expiry < day).SumAsync(x => (decimal?)(x.Quantity * x.Cost), ct) ?? 0,
-            SlowMovingInventoryValue = await grouped.Where(x => x.Qty > 0 && x.LastSale < q.ToUtc.AddDays(-q.SlowMovingDays) && x.LastSale >= q.ToUtc.AddDays(-q.DeadStockDays)).SumAsync(x => (decimal?)x.Value, ct) ?? 0,
-            DeadStockValue = await grouped.Where(x => x.Qty > 0 && (x.LastSale == null || x.LastSale < q.ToUtc.AddDays(-q.DeadStockDays))).SumAsync(x => (decimal?)x.Value, ct) ?? 0
+            InventoryValue = positions.Sum(x => x.Quantity * x.Cost),
+            CurrentStock = positions.Sum(x => x.Quantity),
+            LowStockItems = grouped.Count(x => x.Qty > 0 && x.Qty <= x.ReorderLevel),
+            OutOfStockItems = grouped.Count(x => x.Qty <= 0),
+            NearExpiryValue = positions.Where(x => x.Quantity > 0 && x.Expiry >= day && x.Expiry <= day.AddDays(30)).Sum(x => x.Quantity * x.Cost),
+            ExpiredStockValue = positions.Where(x => x.Quantity > 0 && x.Expiry < day).Sum(x => x.Quantity * x.Cost),
+            SlowMovingInventoryValue = grouped.Where(x => x.Qty > 0 && x.LastSale < q.ToUtc.AddDays(-q.SlowMovingDays) && x.LastSale >= q.ToUtc.AddDays(-q.DeadStockDays)).Sum(x => x.Value),
+            DeadStockValue = grouped.Where(x => x.Qty > 0 && (x.LastSale == null || x.LastSale < q.ToUtc.AddDays(-q.DeadStockDays))).Sum(x => x.Value)
         };
     }
     private sealed class BatchPosition

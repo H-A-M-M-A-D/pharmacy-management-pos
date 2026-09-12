@@ -116,11 +116,11 @@ class _AdjustmentFormState extends State<_AdjustmentForm> {
   @override
   Widget build(BuildContext context) => AlertDialog(title: Text(widget.type.label), content: SizedBox(width: 440,
     child: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      DropdownButtonFormField<String>(key: const Key('adjustment_party'), initialValue: _partyId, decoration: const InputDecoration(labelText: 'Party'),
+      DropdownButtonFormField<String>(key: const Key('adjustment_party'), initialValue: _partyId, isExpanded: true, decoration: const InputDecoration(labelText: 'Party'),
         items: _parties.map((p) => DropdownMenuItem(value: p.$1, child: Text(p.$2))).toList(), onChanged: (id) => setState(() => _partyId = id)),
       TextField(key: const Key('adjustment_amount'), controller: _amount, decoration: const InputDecoration(labelText: 'Amount')),
       TextField(key: const Key('adjustment_reason'), controller: _reason, decoration: InputDecoration(labelText: widget.type.advance ? 'Reference' : 'Reason')),
-      if (widget.type.advance) DropdownButtonFormField<String>(key: const Key('adjustment_account'), initialValue: _accountId, decoration: const InputDecoration(labelText: 'Financial account'),
+      if (widget.type.advance) DropdownButtonFormField<String>(key: const Key('adjustment_account'), initialValue: _accountId, isExpanded: true, decoration: const InputDecoration(labelText: 'Financial account'),
         items: _accounts.map((a) => DropdownMenuItem(value: a.$1, child: Text(a.$2))).toList(), onChanged: (id) => setState(() => _accountId = id)),
       if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
     ]))), actions: [TextButton(onPressed: _saving ? null : () => Navigator.pop(context, false), child: const Text('Cancel')),

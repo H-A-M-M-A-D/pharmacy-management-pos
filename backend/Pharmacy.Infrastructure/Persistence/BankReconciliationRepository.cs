@@ -98,5 +98,9 @@ public sealed class BankReconciliationRepository(PharmacyDbContext context) : IB
         {
             throw new RequestValidationException("Bank reconciliation constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This reconciliation changed while saving. Refresh and try again.");
+        }
     }
 }

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Reports;
@@ -19,7 +20,11 @@ public sealed class ReportsController(IReportingService reports) : ControllerBas
     public Task<object> Overview([FromQuery] ReportRequest request, CancellationToken ct) =>
         reports.DashboardAsync(UserId(), request.Query(), ct);
 
-    [HttpGet("{category}/{name}")]
+    // Permission required varies per report category/name (resolved dynamically inside
+    // ReportingService.ExecuteAsync), so a single static [HasPermission] cannot express it here without
+    // either over- or under-restricting - [Authorize] enforces the authenticated-user baseline for
+    // defense-in-depth while the service performs the real, per-report permission check.
+    [HttpGet("{category}/{name}"), Authorize]
     public Task<object> Report(string category, string name, [FromQuery] ReportRequest request, CancellationToken ct) =>
         reports.ExecuteAsync(UserId(), $"{category}/{name}", request.Query(), request.Option, ct);
 

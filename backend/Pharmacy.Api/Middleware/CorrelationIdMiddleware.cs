@@ -1,3 +1,5 @@
+using Serilog.Context;
+
 namespace Pharmacy.Api.Middleware;
 
 public sealed class CorrelationIdMiddleware(RequestDelegate next)
@@ -12,6 +14,9 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next)
             : Guid.NewGuid().ToString("N");
         context.TraceIdentifier = correlationId;
         context.Response.Headers[HeaderName] = correlationId;
-        await next(context);
+        using (LogContext.PushProperty("CorrelationId", correlationId))
+        {
+            await next(context);
+        }
     }
 }

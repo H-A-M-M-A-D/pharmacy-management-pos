@@ -124,7 +124,9 @@ public sealed class VoucherServiceTests
             repository.Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<IsolationLevel>(), It.IsAny<CancellationToken>())).Returns((Func<CancellationToken, Task> action, IsolationLevel _, CancellationToken ct) => action(ct));
             repository.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(async (CancellationToken ct) => { await Db.SaveChangesAsync(ct); });
             repository.Setup(x => x.AllowPostingIntoSoftClosedPeriod()).Callback(() => Db.AllowPostingIntoSoftClosedPeriod = true);
-            Service = new VoucherService(repository.Object, TimeProvider.System);
+            var duplicateGuard = new Mock<IDuplicateSubmissionGuard>();
+            duplicateGuard.Setup(x => x.GuardAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            Service = new VoucherService(repository.Object, duplicateGuard.Object, TimeProvider.System);
         }
         public Task<VoucherDto> Create(VoucherType type) => Service.CreateDraftAsync(Actor.Id, new(type, Date, Branch.Id, null, "Test voucher", ChartOfAccountId: OtherAccount, Amount: 125, FinancialAccountId: Financial.Id));
         public void Dispose() => Db.Dispose();

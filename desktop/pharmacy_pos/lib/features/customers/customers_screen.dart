@@ -461,6 +461,7 @@ class _CustomerFormState extends State<_CustomerForm> {
                 DropdownButtonFormField<String>(
                   key: const Key('customer_type'),
                   initialValue: _customerType,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Customer Type',
                   ),
@@ -481,6 +482,7 @@ class _CustomerFormState extends State<_CustomerForm> {
                 DropdownButtonFormField<String?>(
                   key: const Key('customer_price_level'),
                   initialValue: _priceLevelId,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Price Level',
                     helperText: 'Leave blank for the default retail price.',
@@ -639,29 +641,34 @@ class _CustomerLedgerDialogState extends State<_CustomerLedgerDialog> {
       width: 720,
       child: _ledger == null
           ? const Center(child: CircularProgressIndicator())
-          : DataTable(
-              columns: const [
-                DataColumn(label: Text('Date')),
-                DataColumn(label: Text('Branch')),
-                DataColumn(label: Text('Type')),
-                DataColumn(label: Text('Amount')),
-                DataColumn(label: Text('Balance')),
-                DataColumn(label: Text('Notes')),
-              ],
-              rows: _ledger!.items
-                  .map(
-                    (x) => DataRow(
-                      cells: [
-                        DataCell(Text(_date(x.entryDate))),
-                        DataCell(Text(x.branchName)),
-                        DataCell(Text(x.entryType)),
-                        DataCell(Text(_money(x.amount))),
-                        DataCell(Text(_money(x.runningBalance))),
-                        DataCell(Text(x.notes ?? '-')),
-                      ],
-                    ),
-                  )
-                  .toList(),
+          : SingleChildScrollView(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Date')),
+                    DataColumn(label: Text('Branch')),
+                    DataColumn(label: Text('Type')),
+                    DataColumn(label: Text('Amount')),
+                    DataColumn(label: Text('Balance')),
+                    DataColumn(label: Text('Notes')),
+                  ],
+                  rows: _ledger!.items
+                      .map(
+                        (x) => DataRow(
+                          cells: [
+                            DataCell(Text(_date(x.entryDate))),
+                            DataCell(Text(x.branchName)),
+                            DataCell(Text(x.entryType)),
+                            DataCell(Text(_money(x.amount))),
+                            DataCell(Text(_money(x.runningBalance))),
+                            DataCell(Text(x.notes ?? '-')),
+                          ],
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
             ),
     ),
     actions: [

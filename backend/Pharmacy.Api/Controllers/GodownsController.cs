@@ -26,7 +26,7 @@ public sealed class GodownsController(IGodownService godowns) : ControllerBase
     /// (POS, GRN, Direct Purchase, Purchase Return) to populate/auto-select the source or
     /// destination godown selector without trusting a client-supplied value alone.
     /// </summary>
-    [HttpGet("mine")]
+    [HttpGet("mine"), HasPermission(PermissionCatalog.GodownsView)]
     public Task<IReadOnlyList<GodownLookupDto>> Mine([FromQuery] Guid? branchId, CancellationToken ct) =>
         godowns.GetMyGodownsAsync(UserId(), branchId, ct);
 

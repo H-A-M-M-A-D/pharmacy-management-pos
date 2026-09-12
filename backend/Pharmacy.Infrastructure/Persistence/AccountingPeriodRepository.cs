@@ -62,5 +62,9 @@ public sealed class AccountingPeriodRepository(PharmacyDbContext context) : IAcc
         {
             throw new RequestValidationException("Accounting period constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This period changed while saving. Refresh and try again.");
+        }
     }
 }

@@ -192,6 +192,10 @@ public sealed class InventoryRepository(PharmacyDbContext context) : IInventoryR
         {
             throw new RequestValidationException("Inventory quantity constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This stock was changed by another action at the same time. Refresh and try again.");
+        }
     }
 
     public async Task<string> NextStockCountNumberAsync(DateOnly countDate, CancellationToken cancellationToken = default)

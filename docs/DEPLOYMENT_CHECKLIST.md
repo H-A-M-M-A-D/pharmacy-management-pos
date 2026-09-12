@@ -6,6 +6,7 @@
 - Create separate PostgreSQL migration/maintenance and application roles. The runtime role must not have `SUPERUSER`, `CREATEDB`, `CREATEROLE`, replication, or bypass-RLS privileges. The locally verified maintenance role has `LOGIN` and `CREATEDB` only; it is supplied externally through `PHARMACY_MAINTENANCE_CONNECTION_STRING` for isolated restore validation and is never an application runtime credential.
 - Supply `ConnectionStrings__DefaultConnection` and `Jwt__Key` from the Windows service environment or another external secret provider.
 - Set explicit `Cors__AllowedOrigins__0` values only when browser clients require cross-origin access.
+- Optionally set `Logging__FileDirectory` and `Logging__RetainedDays` to control where rotated log files are written and how long they are kept (defaults to `%LOCALAPPDATA%\PharmacyPOS\Logs` under the service account, 31 days).
 - Apply migrations as a controlled deployment step. The API intentionally does not auto-migrate.
 
 ## Release

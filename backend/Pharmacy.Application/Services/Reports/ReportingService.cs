@@ -86,7 +86,7 @@ public sealed partial class ReportingService(IReportingRepository repository, Ti
         if (report is "purchases/price-history" or "purchases/price-comparison" or "purchases/last-rate" or "purchases/price-variance" or
             "purchases/pending-po" or "purchases/po-vs-grn" or "purchases/supplier-performance")
             return ProtectCostFields(await scopedRepository.PurchasingDetailAsync(query, report.Split('/')[1], ct), actor);
-        if (report == "sales/staff-performance") return await scopedRepository.StaffPerformanceAsync(query, ct);
+        if (report == "sales/staff-performance") return ProtectCostFields(await scopedRepository.StaffPerformanceAsync(query, ct), actor);
         if (report is "inventory/batch-position" or "inventory/stock-adjustments" or "inventory/movement-summary" or "inventory/turnover" or "inventory/in-transit")
         {
             if (report == "inventory/turnover" && !CanViewCost(actor)) throw new ForbiddenOperationException("Inventory turnover requires cost permission.");

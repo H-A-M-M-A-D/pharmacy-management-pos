@@ -17,6 +17,8 @@ class _PosScreenState extends State<PosScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  bool _searched = false;
   final _customer = TextEditingController();
   final _phone = TextEditingController();
   final List<_CartLine> _cart = [];
@@ -66,6 +68,7 @@ class _PosScreenState extends State<PosScreen>
   void dispose() {
     _tabs.dispose();
     _search.dispose();
+    _searchFocus.dispose();
     _customer.dispose();
     _phone.dispose();
     super.dispose();
@@ -82,7 +85,10 @@ class _PosScreenState extends State<PosScreen>
         godownId: _godownId,
       );
       if (mounted) {
-        setState(() => _products = products);
+        setState(() {
+          _products = products;
+          _searched = true;
+        });
       }
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -130,11 +136,17 @@ class _PosScreenState extends State<PosScreen>
     final existing = _cart
         .where((x) => x.product.productId == product.productId)
         .firstOrNull;
+    if (existing == null && product.availableQuantity <= 0) {
+      setState(() => _error = '${product.name} is out of stock.');
+      return;
+    }
     setState(() {
       if (existing == null) {
         _cart.add(_CartLine(product));
       } else if (existing.quantity < product.availableQuantity) {
         existing.quantity++;
+      } else {
+        _error = 'No more stock available for ${product.name}.';
       }
     });
     final line = _cart
@@ -253,6 +265,7 @@ class _PosScreenState extends State<PosScreen>
         accounts: accounts.where((x) => x.isActive).toList(),
       ),
     );
+    if (mounted) _searchFocus.requestFocus();
     if (payments == null) return;
     setState(() => _loading = true);
     try {
@@ -366,6 +379,7 @@ class _PosScreenState extends State<PosScreen>
       child: DropdownButtonFormField<String>(
         key: const Key('pos_godown'),
         initialValue: _godownId,
+        isExpanded: true,
         decoration: const InputDecoration(labelText: 'Selling from godown'),
         items: _godowns
             .map((g) => DropdownMenuItem(value: g.id, child: Text(g.name)))
@@ -390,6 +404,8 @@ class _PosScreenState extends State<PosScreen>
               TextField(
                 key: const Key('pos_search'),
                 controller: _search,
+                focusNode: _searchFocus,
+                autofocus: true,
                 decoration: InputDecoration(
                   labelText: 'Search or scan barcode',
                   suffixIcon: IconButton(
@@ -400,7 +416,13 @@ class _PosScreenState extends State<PosScreen>
                 ),
                 onSubmitted: (_) async {
                   await _searchProducts();
-                  if (_products.length == 1) _addProduct(_products.single);
+                  if (_products.length == 1) {
+                    _addProduct(_products.single);
+                    // Clear the barcode so the next scan isn't appended to
+                    // this one, and keep focus here for continuous scanning.
+                    _search.clear();
+                  }
+                  _searchFocus.requestFocus();
                 },
               ),
               const SizedBox(height: 12),
@@ -530,36 +552,45 @@ class _PosScreenState extends State<PosScreen>
   );
   Widget _productsTable() {
     if (_products.isEmpty) {
-      return const Center(child: Text('No products loaded'));
+      return Center(
+        child: Text(
+          _searched
+              ? 'No products matched that search or barcode.'
+              : 'Search or scan a barcode to load products.',
+        ),
+      );
     }
     return SingleChildScrollView(
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Product')),
-          DataColumn(label: Text('SKU')),
-          DataColumn(label: Text('Stock')),
-          DataColumn(label: Text('Price')),
-          DataColumn(label: Text('')),
-        ],
-        rows: _products
-            .map(
-              (p) => DataRow(
-                cells: [
-                  DataCell(Text(p.name)),
-                  DataCell(Text(p.sku)),
-                  DataCell(Text('${p.availableQuantity}')),
-                  DataCell(Text(_money(p.indicativeRetailPrice ?? 0))),
-                  DataCell(
-                    IconButton(
-                      tooltip: 'Add',
-                      onPressed: () => _addProduct(p),
-                      icon: const Icon(Icons.add_shopping_cart),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Product')),
+            DataColumn(label: Text('SKU')),
+            DataColumn(label: Text('Stock')),
+            DataColumn(label: Text('Price')),
+            DataColumn(label: Text('')),
+          ],
+          rows: _products
+              .map(
+                (p) => DataRow(
+                  cells: [
+                    DataCell(Text(p.name)),
+                    DataCell(Text(p.sku)),
+                    DataCell(Text('${p.availableQuantity}')),
+                    DataCell(Text(_money(p.indicativeRetailPrice ?? 0))),
+                    DataCell(
+                      IconButton(
+                        tooltip: 'Add',
+                        onPressed: () => _addProduct(p),
+                        icon: const Icon(Icons.add_shopping_cart),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            )
-            .toList(),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
       ),
     );
   }
@@ -809,7 +840,9 @@ class _PosScreenState extends State<PosScreen>
     final sales = _history?.items ?? const <SaleListItem>[];
     if (sales.isEmpty) return const Center(child: Text('No sales found'));
     return SingleChildScrollView(
-      child: DataTable(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
         columnSpacing: 8,
         horizontalMargin: 8,
         columns: const [
@@ -875,6 +908,7 @@ class _PosScreenState extends State<PosScreen>
               ),
             )
             .toList(),
+        ),
       ),
     );
   }
@@ -973,6 +1007,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           ),
           DropdownButtonFormField<String>(
             initialValue: _cashAccountId,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Cash account'),
             items: widget.accounts
                 .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
@@ -986,6 +1021,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           ),
           DropdownButtonFormField<String>(
             initialValue: _cardAccountId,
+            isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Card settlement account',
             ),
@@ -1197,6 +1233,7 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _reason,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Reason'),
               items: const [
                 'CustomerReturn',
@@ -1289,6 +1326,7 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
             DropdownButtonFormField<String>(
               key: ValueKey(_refundAccountId),
               initialValue: _refundAccountId,
+              isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Refund financial account',
               ),

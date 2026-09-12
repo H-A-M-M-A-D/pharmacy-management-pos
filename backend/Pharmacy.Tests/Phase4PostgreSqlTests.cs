@@ -10,6 +10,7 @@ using Pharmacy.Application.Services.Finance;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
+using Pharmacy.Infrastructure.Services;
 
 namespace Pharmacy.Tests;
 
@@ -108,7 +109,7 @@ public sealed class Phase4PostgreSqlTests
     {
         await using var db = Open();
         var seed = await SeedAsync(db);
-        var service = new VoucherService(new VoucherRepository(db), TimeProvider.System);
+        var service = new VoucherService(new VoucherRepository(db), new DuplicateSubmissionGuard(db, TimeProvider.System), TimeProvider.System);
         var draft = await service.CreateDraftAsync(seed.Actor.Id, new(VoucherType.CashReceipt, DateTime.UtcNow, seed.Branch.Id, null, "Phase4 repository regression",
             ChartOfAccountId: seed.Accounts[1].Id, Amount: 125, FinancialAccountId: seed.Financial.Id));
         await service.PostAsync(seed.Actor.Id, draft.Id);

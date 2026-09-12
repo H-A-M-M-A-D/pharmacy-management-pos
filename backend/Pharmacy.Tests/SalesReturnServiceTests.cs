@@ -45,6 +45,24 @@ public sealed class SalesReturnServiceTests
     }
 
     [Fact]
+    public async Task Duplicate_return_submission_is_rejected_before_any_stock_or_refund_effect()
+    {
+        var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund);
+        var allocation = f.AddOriginalSaleAllocation("A", 5, 100, 90);
+        f.DuplicateGuard.Reject = true;
+
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostReturnAsync(f.Actor.Id, f.Sale.Id, new(
+            SalesReturnReason.CustomerReturn, null,
+            [new(allocation.Id, 5, SalesReturnDisposition.Restockable)],
+            [new(SalePaymentMethod.Cash, 450)])));
+
+        Assert.Equal(1, f.DuplicateGuard.CallCount);
+        Assert.Equal(0, f.Batch.QuantityAvailable);
+        Assert.Empty(f.Movements);
+        Assert.Empty(f.Journal.Posted);
+    }
+
+    [Fact]
     public async Task Non_resellable_return_does_not_reverse_cogs_but_still_reverses_revenue()
     {
         var f = new Fixture(PermissionCatalog.SalesReturnsView, PermissionCatalog.SalesReturnsCreate, PermissionCatalog.SalesReturnsRefund);
@@ -241,6 +259,7 @@ public sealed class SalesReturnServiceTests
         public readonly List<CustomerLedgerEntry> CustomerLedger = [];
         public readonly List<AuditLog> Audits = [];
         public readonly FakeJournalPostingService Journal = new();
+        public readonly FakeDuplicateSubmissionGuard DuplicateGuard = new();
         public SalesReturnService Service { get; }
 
         public Fixture(params string[] permissions)
@@ -253,7 +272,7 @@ public sealed class SalesReturnServiceTests
             }
             Actor = new User { Username = "manager", NormalizedUsername = "MANAGER", FullName = "Manager User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
             Sale = new Sale { BranchId = Branch.Id, Branch = Branch, CashierUserId = Actor.Id, CashierUser = Actor, InvoiceNumber = "INV-2026-000001", Status = SaleStatus.Posted, PostedAtUtc = DateTime.UtcNow, NetTotal = 0, AmountPaid = 0 };
-            Service = new(this, Journal, TimeProvider.System);
+            Service = new(this, Journal, DuplicateGuard, TimeProvider.System);
         }
 
         public SaleItemBatchAllocation AddOriginalSaleAllocation(string batchNumber, int quantity, decimal unitRetail, decimal unitSale, decimal? netAmount = null, DateOnly? expiry = null, bool disposed = false)
@@ -339,6 +358,18 @@ public sealed class SalesReturnServiceTests
         {
             if (ThrowOnPost) throw new InvalidOperationException("forced journal failure");
             Posted.Add(request);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeDuplicateSubmissionGuard : Pharmacy.Application.Common.IDuplicateSubmissionGuard
+    {
+        public bool Reject;
+        public int CallCount;
+        public Task GuardAsync(string operation, Guid actorId, object fingerprintPayload, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            if (Reject) throw new Pharmacy.Application.Common.ResourceConflictException("This exact request was already submitted moments ago. Check the result before retrying.");
             return Task.CompletedTask;
         }
     }

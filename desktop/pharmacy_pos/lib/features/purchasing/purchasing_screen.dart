@@ -547,6 +547,7 @@ class _PurchaseReturnDialogState extends State<_PurchaseReturnDialog> {
               DropdownButtonFormField<String>(
                 key: const Key('purchase_return_reason'),
                 initialValue: _reason,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Reason'),
                 items: const [
                   DropdownMenuItem(value: 'Damaged', child: Text('Damaged')),
@@ -1158,6 +1159,7 @@ Widget _lookup(
   ValueChanged<String?> onChanged,
 ) => DropdownButtonFormField<String>(
   initialValue: value,
+  isExpanded: true,
   decoration: InputDecoration(labelText: label),
   items: items
       .map(

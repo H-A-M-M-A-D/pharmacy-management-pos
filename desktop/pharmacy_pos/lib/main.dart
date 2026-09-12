@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/api_client.dart';
@@ -7,7 +9,46 @@ import 'features/auth/force_change_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/shell/app_shell.dart';
 
-void main() => runApp(const PharmacyPOSApp());
+void main() {
+  // An unexpected exception anywhere in the widget tree must show a readable
+  // message, never Flutter's default red/grey error box or a blank frame.
+  ErrorWidget.builder = (details) => Material(
+    color: const Color(0xFFF4F6F5),
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: Colors.redAccent),
+            const SizedBox(height: 12),
+            const Text(
+              'Something went wrong displaying this screen.',
+              style: TextStyle(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Try going back or restarting the app. If this keeps happening, contact support.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  runZonedGuarded(
+    () {
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+        debugPrint('Unhandled Flutter error: ${details.exceptionAsString()}');
+      };
+      runApp(const PharmacyPOSApp());
+    },
+    (error, stack) => debugPrint('Unhandled error: $error\n$stack'),
+  );
+}
 
 class PharmacyPOSApp extends StatefulWidget {
   const PharmacyPOSApp({super.key, this.authState});

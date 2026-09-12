@@ -157,5 +157,9 @@ public sealed class PartyAdjustmentRepository(PharmacyDbContext context) : IPart
             var error = (PostgresException)ex.InnerException!;
             throw new RequestValidationException($"A data constraint was violated ({error.ConstraintName ?? error.MessageText}).");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This record changed while saving. Refresh and try again.");
+        }
     }
 }

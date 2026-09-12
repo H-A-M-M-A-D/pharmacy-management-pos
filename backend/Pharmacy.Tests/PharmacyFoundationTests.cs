@@ -709,7 +709,8 @@ public class AuthenticationTests
             hasher.Object,
             tokenService.Object,
             new AuthenticationSecurityOptions(),
-            TimeProvider.System);
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
 
         var result = await service.LoginAsync(new LoginRequest("inactive", "not-checked"));
 

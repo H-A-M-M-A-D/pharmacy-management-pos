@@ -87,5 +87,9 @@ public sealed class ProductMasterRepository(PharmacyDbContext context) : IProduc
                 _ => new ResourceConflictException("A catalog record with the same unique value already exists.")
             };
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This catalog record changed while saving. Refresh and try again.");
+        }
     }
 }

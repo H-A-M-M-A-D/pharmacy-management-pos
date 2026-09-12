@@ -74,6 +74,26 @@ public sealed class PricingManagementTests
         Assert.Empty(all);
     }
 
+    [Fact]
+    public async Task Non_multi_branch_actor_cannot_create_or_see_price_levels_for_another_branch()
+    {
+        var f = new Fixture("Cashier", [PermissionCatalog.PricingManage, PermissionCatalog.PricingView]);
+        var otherBranchId = Guid.NewGuid();
+
+        var own = await f.Service.CreatePriceLevelAsync(f.Actor.Id, new("Own Branch", "OWN", 1, false, true, f.Actor.BranchId));
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() =>
+            f.Service.CreatePriceLevelAsync(f.Actor.Id, new("Other Branch", "OTH", 2, false, true, otherBranchId)));
+
+        // Seed a level for the other branch directly (bypassing the service) to prove listing filters it out.
+        f.Levels.Add(new PriceLevel { Name = "Other Branch Direct", Code = "OTHD", BranchId = otherBranchId, IsActive = true });
+        var visible = await f.Service.ListPriceLevelsAsync(f.Actor.Id, false);
+        Assert.Contains(visible, x => x.Id == own.Id);
+        Assert.DoesNotContain(visible, x => x.Code == "OTHD");
+
+        await Assert.ThrowsAsync<ForbiddenOperationException>(() =>
+            f.Service.UpdatePriceLevelAsync(f.Actor.Id, own.Id, new("Own Branch", "OWN", 1, false, true, otherBranchId)));
+    }
+
     private sealed class Fixture : IPricingRepository
     {
         public readonly Product Product = new()
@@ -88,21 +108,26 @@ public sealed class PricingManagementTests
         public readonly List<AuditLog> Audits = [];
         public PricingService Service { get; }
 
-        public Fixture(params string[] permissions)
+        public Fixture(params string[] permissions) : this(RoleCatalog.Manager, permissions) { }
+
+        public Fixture(string roleName, string[] permissions)
         {
-            var role = new Role { Name = RoleCatalog.Manager };
+            var role = new Role { Name = roleName };
             foreach (var permission in permissions)
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
-            Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", RoleId = role.Id, Role = role, IsActive = true };
+            Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = HomeBranchId, RoleId = role.Id, Role = role, IsActive = true };
             Service = new(this, new NullResolver(), TimeProvider.System);
         }
+
+        public static readonly Guid HomeBranchId = Guid.NewGuid();
 
         public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => Task.FromResult<User?>(Actor.Id == actorId ? Actor : null);
         public Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default) => Task.FromResult<Product?>(Product.Id == productId ? Product : null);
         public Task<PriceLevel?> GetPriceLevelAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Levels.FirstOrDefault(x => x.Id == id));
         public Task<bool> PriceLevelCodeExistsAsync(string code, Guid? excludingId, CancellationToken cancellationToken = default) => Task.FromResult(Levels.Any(x => x.Code == code && x.Id != excludingId));
-        public Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, Guid? scopeBranchId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<PriceLevelDto>>(Levels.Where(x => !activeOnly || x.IsActive)
+                .Where(x => !scopeBranchId.HasValue || x.BranchId == null || x.BranchId == scopeBranchId)
                 .Select(x => new PriceLevelDto(x.Id, x.Name, x.Code, x.Priority, x.IsDefault, x.IsActive, x.BranchId, null)).ToList());
         public Task AddPriceLevelAsync(PriceLevel level, CancellationToken cancellationToken = default) { Levels.Add(level); return Task.CompletedTask; }
         public Task ClearDefaultPriceLevelAsync(Guid? excludingId, CancellationToken cancellationToken = default)

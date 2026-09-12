@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Pricing;
 using Pharmacy.Application.Services.Pricing;
 using Pharmacy.Domain.Entities;
@@ -21,10 +23,11 @@ public sealed class PricingRepository(PharmacyDbContext context) : IPricingRepos
     public Task<bool> PriceLevelCodeExistsAsync(string code, Guid? excludingId, CancellationToken cancellationToken = default) =>
         context.PriceLevels.AnyAsync(x => x.Code == code && (!excludingId.HasValue || x.Id != excludingId.Value), cancellationToken);
 
-    public async Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, Guid? scopeBranchId, CancellationToken cancellationToken = default)
     {
         var query = context.PriceLevels.AsNoTracking().Include(x => x.Branch).AsQueryable();
         if (activeOnly) query = query.Where(x => x.IsActive);
+        if (scopeBranchId.HasValue) query = query.Where(x => x.BranchId == null || x.BranchId == scopeBranchId);
         return await query.OrderBy(x => x.Priority).ThenBy(x => x.Name)
             .Select(x => new PriceLevelDto(x.Id, x.Name, x.Code, x.Priority, x.IsDefault, x.IsActive, x.BranchId, x.Branch != null ? x.Branch.Name : null))
             .ToListAsync(cancellationToken);
@@ -77,5 +80,20 @@ public sealed class PricingRepository(PharmacyDbContext context) : IPricingRepos
     public Task RemoveProductPriceBreakAsync(ProductPriceBreak entry, CancellationToken cancellationToken = default) { context.ProductPriceBreaks.Remove(entry); return Task.CompletedTask; }
 
     public async Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) => await context.AuditLogs.AddAsync(audit, cancellationToken);
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) => context.SaveChangesAsync(cancellationToken);
+    public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new ResourceConflictException("A pricing record with the same unique value already exists.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.CheckViolation })
+        {
+            throw new RequestValidationException("Pricing constraints were violated.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This pricing record changed while saving. Refresh and try again.");
+        }
+    }
 }

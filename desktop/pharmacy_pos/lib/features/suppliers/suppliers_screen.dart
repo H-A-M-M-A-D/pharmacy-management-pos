@@ -503,29 +503,34 @@ class _SupplierLedgerDialogState extends State<_SupplierLedgerDialog> {
       width: 720,
       child: _ledger == null
           ? const Center(child: CircularProgressIndicator())
-          : DataTable(
-              columns: const [
-                DataColumn(label: Text('Date')),
-                DataColumn(label: Text('Branch')),
-                DataColumn(label: Text('Type')),
-                DataColumn(label: Text('Amount')),
-                DataColumn(label: Text('Balance')),
-                DataColumn(label: Text('Notes')),
-              ],
-              rows: _ledger!.items
-                  .map(
-                    (x) => DataRow(
-                      cells: [
-                        DataCell(Text(_date(x.entryDate))),
-                        DataCell(Text(x.branchName)),
-                        DataCell(Text(x.entryType)),
-                        DataCell(Text(_money(x.amount))),
-                        DataCell(Text(_balance(x.runningBalance))),
-                        DataCell(Text(x.notes ?? '-')),
-                      ],
-                    ),
-                  )
-                  .toList(),
+          : SingleChildScrollView(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Date')),
+                    DataColumn(label: Text('Branch')),
+                    DataColumn(label: Text('Type')),
+                    DataColumn(label: Text('Amount')),
+                    DataColumn(label: Text('Balance')),
+                    DataColumn(label: Text('Notes')),
+                  ],
+                  rows: _ledger!.items
+                      .map(
+                        (x) => DataRow(
+                          cells: [
+                            DataCell(Text(_date(x.entryDate))),
+                            DataCell(Text(x.branchName)),
+                            DataCell(Text(x.entryType)),
+                            DataCell(Text(_money(x.amount))),
+                            DataCell(Text(_balance(x.runningBalance))),
+                            DataCell(Text(x.notes ?? '-')),
+                          ],
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
             ),
     ),
     actions: [

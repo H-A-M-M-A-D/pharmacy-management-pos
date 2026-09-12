@@ -57,6 +57,7 @@ public class PharmacyDbContext : DbContext
     public DbSet<FinancialTransfer> FinancialTransfers { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
     public DbSet<BackupRecord> BackupRecords { get; set; } = null!;
+    public DbSet<SubmissionFingerprint> SubmissionFingerprints { get; set; } = null!;
     public DbSet<StockCountSession> StockCountSessions { get; set; } = null!;
     public DbSet<StockCountItem> StockCountItems { get; set; } = null!;
     public DbSet<CashierShift> CashierShifts { get; set; } = null!;
@@ -619,6 +620,7 @@ public class PharmacyDbContext : DbContext
         ConfigureFinancialTransfer(modelBuilder);
         ConfigureSystemSetting(modelBuilder);
         ConfigureBackupRecord(modelBuilder);
+        ConfigureSubmissionFingerprint(modelBuilder);
         ConfigureCustomerPaymentAllocation(modelBuilder);
         ConfigureSupplierPaymentAllocation(modelBuilder);
         ConfigureVoucher(modelBuilder);
@@ -2240,6 +2242,14 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.ErrorMessage).HasMaxLength(500);
         entity.HasIndex(e => e.CreatedAt);
         entity.HasIndex(e => new { e.Status, e.CreatedAt });
+    }
+
+    private static void ConfigureSubmissionFingerprint(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SubmissionFingerprint>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Operation).IsRequired().HasMaxLength(100);
+        entity.HasIndex(e => new { e.Operation, e.FingerprintHash, e.CreatedAt });
     }
 
     private void ProtectAuditLog()

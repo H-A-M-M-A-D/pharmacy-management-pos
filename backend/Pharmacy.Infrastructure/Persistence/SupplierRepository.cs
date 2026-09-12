@@ -143,5 +143,9 @@ public sealed class SupplierRepository(PharmacyDbContext context) : ISupplierRep
         {
             throw new RequestValidationException("Supplier financial constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This supplier record changed while saving. Refresh and try again.");
+        }
     }
 }

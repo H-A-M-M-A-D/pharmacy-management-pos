@@ -163,7 +163,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
           child: SingleChildScrollView(
             child: SizedBox(
               width: double.infinity,
-              child: DataTable(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Account')),
                   DataColumn(label: Text('Actions')),
@@ -195,6 +197,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       ),
                     )
                     .toList(),
+                ),
               ),
             ),
           ),
@@ -222,7 +225,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
           child: SingleChildScrollView(
             child: SizedBox(
               width: double.infinity,
-              child: DataTable(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Expense #')),
                   DataColumn(label: Text('Date')),
@@ -247,6 +252,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       ),
                     )
                     .toList(),
+                ),
               ),
             ),
           ),
@@ -331,6 +337,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField(
                   initialValue: type,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Account type'),
                   items:
                       [
@@ -426,6 +433,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               children: [
                 DropdownButtonFormField(
                   initialValue: account.id,
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Financial account',
                     helperText:
@@ -445,6 +453,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField(
                   initialValue: category.id,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: categories
                       .map(
@@ -543,6 +552,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               children: [
                 DropdownButtonFormField(
                   initialValue: source.id,
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Source account',
                     helperText: 'Available: ${_money(source.currentBalance)}',
@@ -560,6 +570,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField(
                   initialValue: destination.id,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Destination account',
                   ),
@@ -639,6 +650,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               children: [
                 DropdownButtonFormField(
                   initialValue: account.id,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Account'),
                   items: active
                       .map(
@@ -704,7 +716,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
             child: entries.isEmpty
                 ? const Center(child: Text('No ledger entries'))
                 : SingleChildScrollView(
-                    child: DataTable(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
                       columns: const [
                         DataColumn(label: Text('Date/time')),
                         DataColumn(label: Text('Type')),
@@ -731,6 +745,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             ),
                           )
                           .toList(),
+                      ),
                     ),
                   ),
           ),

@@ -337,6 +337,7 @@ class _GodownFormState extends State<_GodownForm> {
               children: [
                 DropdownButtonFormField<String>(
                   initialValue: _branchId,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Branch'),
                   items: widget.branches
                       .map(
@@ -510,6 +511,7 @@ class _GodownUsersDialogState extends State<_GodownUsersDialog> {
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: _selectedUserId,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Assign user',
                         ),

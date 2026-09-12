@@ -53,4 +53,5 @@ public sealed class ManagementReportingTests
         await Assert.ThrowsAsync<ForbiddenOperationException>(() => service.ExecuteAsync(user.Id, "profitability/products", q, null, default));
         await Assert.ThrowsAsync<ForbiddenOperationException>(() => service.ExecuteAsync(user.Id, "management/overview", q, null, default));
     }
+
 }

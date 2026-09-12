@@ -10,7 +10,7 @@ using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Purchasing;
 
-public sealed class PurchasingService(IPurchasingRepository repository, IJournalPostingService journalPosting, IGodownAccessService godownAccess, TimeProvider timeProvider) : IPurchasingService
+public sealed class PurchasingService(IPurchasingRepository repository, IJournalPostingService journalPosting, IGodownAccessService godownAccess, IDuplicateSubmissionGuard duplicateGuard, TimeProvider timeProvider) : IPurchasingService
 {
     public async Task<PagedResult<PurchaseOrderListItemDto>> ListPurchaseOrdersAsync(Guid actorId, PurchaseOrderListQuery query, CancellationToken cancellationToken = default)
     {
@@ -170,6 +170,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         GoodsReceipt? receipt = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("Purchasing.PostGoodsReceipt", actorId, new { request.BranchId, request.GodownId, request.SupplierId, request.PurchaseOrderId, request.SupplierInvoiceNumber, request.Items }, ct);
             var branch = await RequireActiveBranch(request.BranchId, ct);
             var godownId = await ResolveGodownAsync(actor, branch.Id, request.GodownId, ct);
             var supplier = await RequireActiveSupplier(request.SupplierId, ct);
@@ -320,6 +321,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
         PurchaseReturn? posted = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("Purchasing.PostPurchaseReturn", actorId, new { goodsReceiptId, request.Reason, request.Items }, ct);
             var receipt = await repository.GetGoodsReceiptAsync(goodsReceiptId, ct) ?? throw new ResourceNotFoundException("Purchase was not found.");
             EnsureBranchAccess(actor, receipt.BranchId);
             if (receipt.GodownId.HasValue) await EnsureGodownAccessAsync(actor, receipt.BranchId, receipt.GodownId.Value, ct);
@@ -501,7 +503,7 @@ public sealed class PurchasingService(IPurchasingRepository repository, IJournal
     }
 
     private static bool CanSelectBranch(User actor) =>
-        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.UsersView) == true;
+        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
 
     private static void EnsureBranchAccess(User actor, Guid branchId)
     {

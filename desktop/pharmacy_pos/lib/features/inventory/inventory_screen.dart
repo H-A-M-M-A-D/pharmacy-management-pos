@@ -537,6 +537,7 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _branchId,
                 key: const Key('stock_count_branch'),
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Branch'),
                 items: widget.options.branches
                     .map(
@@ -582,6 +583,7 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _scope,
                 key: const Key('stock_count_scope'),
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Scope'),
                 items: const [
                   DropdownMenuItem(value: 'Full', child: Text('Full Inventory')),
@@ -593,6 +595,7 @@ class _NewStockCountDialogState extends State<_NewStockCountDialog> {
                 DropdownButtonFormField<String>(
                   initialValue: _categoryId,
                   key: const Key('stock_count_category'),
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: widget.options.categories
                       .map(
@@ -1014,6 +1017,7 @@ class _OpeningStockDialogState extends State<_OpeningStockDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _branchId,
                 key: const Key('opening_branch'),
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Branch'),
                 items: widget.options.branches
                     .map(
@@ -1026,6 +1030,7 @@ class _OpeningStockDialogState extends State<_OpeningStockDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _productId,
                 key: const Key('opening_product'),
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Product'),
                 items: widget.options.products
                     .map(
@@ -1185,6 +1190,7 @@ class _BatchPickerFieldsState extends State<_BatchPickerFields> {
       DropdownButtonFormField<String>(
         initialValue: _branchId,
         key: const Key('picker_branch'),
+        isExpanded: true,
         decoration: const InputDecoration(labelText: 'Branch'),
         items: widget.options.branches
             .map((x) => DropdownMenuItem(value: x.id, child: Text(x.name)))
@@ -1200,6 +1206,7 @@ class _BatchPickerFieldsState extends State<_BatchPickerFields> {
       DropdownButtonFormField<String>(
         initialValue: _productId,
         key: const Key('picker_product'),
+        isExpanded: true,
         decoration: const InputDecoration(labelText: 'Product'),
         items: widget.options.products
             .map(
@@ -1221,6 +1228,7 @@ class _BatchPickerFieldsState extends State<_BatchPickerFields> {
         DropdownButtonFormField<String?>(
           initialValue: _godownId,
           key: const Key('picker_godown'),
+          isExpanded: true,
           decoration: const InputDecoration(labelText: 'Godown (optional filter)'),
           items: [
             const DropdownMenuItem<String?>(
@@ -1347,6 +1355,7 @@ class _AdjustmentDialogState extends State<_AdjustmentDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _reason,
                 key: const Key('adjust_reason'),
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Reason'),
                 items: _adjustmentReasonLabels.entries
                     .map(

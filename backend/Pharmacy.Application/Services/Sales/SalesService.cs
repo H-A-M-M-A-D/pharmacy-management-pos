@@ -22,6 +22,7 @@ public sealed class SalesService(
     IPriceResolutionService priceResolver,
     ISalesOrderRepository salesOrderRepository,
     ISalesQuotationRepository salesQuotationRepository,
+    IDuplicateSubmissionGuard duplicateGuard,
     TimeProvider timeProvider) : ISalesService
 {
     public async Task<IReadOnlyList<PosProductDto>> SearchProductsAsync(Guid actorId, PosProductSearchQuery query, CancellationToken cancellationToken = default)
@@ -140,6 +141,7 @@ public sealed class SalesService(
         Sale? sale = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("Sale.Post", actorId, new { branchId, request.GodownId, request.CustomerId, request.SaleType, request.QuotationId, request.SalesOrderId, request.Items, request.Payments }, ct);
             sale = await BuildPostedSale(actor, branchId, request.GodownId, request.CustomerId, request.CustomerName, request.CustomerPhone, request.Notes, request.Items, request.Payments,
                 request.SaleType, request.PriceLevelId, request.QuotationId, request.SalesOrderId, request.CustomerPoNumber, request.DueDateOverride, request.CreditLimitOverrideReason, ct);
             await repository.AddSaleAsync(sale, ct);
@@ -156,6 +158,7 @@ public sealed class SalesService(
         Guid postedId = id;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("Sale.PostHeld", actorId, new { id, request.CustomerId, request.Payments }, ct);
             var held = await RequiredSale(id, ct);
             EnsureBranchAccess(actor, held.BranchId);
             if (held.Status != SaleStatus.Held) throw new RequestValidationException("Only held sales can be posted.");
@@ -604,7 +607,7 @@ public sealed class SalesService(
         return (requestedBranchId, true);
     }
 
-    private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.UsersView) == true;
+    private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
     private static void EnsureBranchAccess(User actor, Guid branchId)
     {
         if (!CanSelectBranch(actor) && actor.BranchId != branchId) throw new ForbiddenOperationException("The current user is not permitted to manage this branch.");

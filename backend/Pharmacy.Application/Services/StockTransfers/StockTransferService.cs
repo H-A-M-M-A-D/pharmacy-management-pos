@@ -24,6 +24,7 @@ public sealed class StockTransferService(
     IStockTransferRepository repository,
     IGodownAccessService godownAccess,
     IJournalPostingService journalPosting,
+    IDuplicateSubmissionGuard duplicateGuard,
     TimeProvider timeProvider) : IStockTransferService
 {
     public async Task<PagedResult<StockTransferListItemDto>> ListTransfersAsync(Guid actorId, StockTransferListQuery query, CancellationToken cancellationToken = default)
@@ -169,6 +170,7 @@ public sealed class StockTransferService(
         var actor = await Require(actorId, PermissionCatalog.StockTransfersDispatch, cancellationToken);
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("StockTransfer.Dispatch", actorId, new { id, request.Items }, ct);
             var transfer = await RequiredTransfer(id, ct);
             EnsureTransferBranchAccess(actor, transfer);
             if (transfer.Status != StockTransferStatus.Approved) throw new RequestValidationException("Only approved transfers can be dispatched.");
@@ -211,6 +213,7 @@ public sealed class StockTransferService(
         if (request.Items.Count == 0) throw new RequestValidationException("At least one item is required.");
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("StockTransfer.Receive", actorId, new { id, request.Items }, ct);
             var transfer = await RequiredTransfer(id, ct);
             EnsureTransferBranchAccess(actor, transfer);
             if (transfer.Status is not (StockTransferStatus.Dispatched or StockTransferStatus.PartiallyReceived))
@@ -434,7 +437,7 @@ public sealed class StockTransferService(
     }
 
     private static bool CanSelectBranch(User actor) =>
-        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.UsersView) == true;
+        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
 
     private static void EnsureBranchAccess(User actor, Guid branchId)
     {

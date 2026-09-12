@@ -29,6 +29,26 @@ void main() {
     expect(find.text('Welcome, Test User'), findsOneWidget);
   });
 
+  for (final size in [
+    const Size(800, 600),
+    const Size(1024, 768),
+    const Size(1366, 768),
+    const Size(1920, 1080),
+  ]) {
+    testWidgets('login and dashboard shell support desktop size $size', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = TestFixture();
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('login displays safe error', (tester) async {
     final fixture = TestFixture(loginError: true);
     await tester.pumpWidget(fixture.app);
@@ -1115,6 +1135,29 @@ void main() {
     expect(find.byKey(const Key('receipt_preview')), findsOneWidget);
     expect(find.textContaining('INV-2026-000001'), findsOneWidget);
   });
+
+  for (final size in [
+    const Size(800, 600),
+    const Size(1024, 768),
+    const Size(1366, 768),
+    const Size(1920, 1080),
+  ]) {
+    testWidgets('POS supports desktop size $size', (tester) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = TestFixture(permissions: {'sales.view', 'sales.create'});
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+      await tester.tap(find.text('Sales'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('pos_search')), 'Panadol');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.text('Total PKR 12.00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'pos with a single godown auto-selects it for search, hold and checkout',

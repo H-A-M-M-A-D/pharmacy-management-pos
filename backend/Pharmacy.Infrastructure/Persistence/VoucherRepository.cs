@@ -164,6 +164,10 @@ public sealed class VoucherRepository(PharmacyDbContext context) : IVoucherRepos
         {
             throw new RequestValidationException("Voucher financial constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This voucher was changed by another action at the same time. Refresh and try again.");
+        }
     }
 
     public void AllowPostingIntoSoftClosedPeriod() => context.AllowPostingIntoSoftClosedPeriod = true;

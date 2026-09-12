@@ -211,7 +211,7 @@ public sealed class IdentityManagementTests
         var token = new Mock<ITokenService>();
         token.Setup(service => service.CreateToken(It.IsAny<CurrentUserDto>(), It.IsAny<int>()))
             .Returns(new AccessTokenResult("test-token", _now.AddHours(1).UtcDateTime));
-        var auth = new AuthService(repository, hasher, token.Object, new AuthenticationSecurityOptions(), time);
+        var auth = new AuthService(repository, hasher, token.Object, new AuthenticationSecurityOptions(), time, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
         var users = new UserManagementService(repository, hasher, time);
         return new Fixture(repository, hasher, auth, users, user, branch, ownerRole, cashierRole);
     }

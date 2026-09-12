@@ -10,13 +10,15 @@ public sealed class PricingService(IPricingRepository repository, IPriceResoluti
 {
     public async Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(Guid actorId, bool activeOnly, CancellationToken cancellationToken = default)
     {
-        await Require(actorId, PermissionCatalog.PricingView, cancellationToken);
-        return await repository.ListPriceLevelsAsync(activeOnly, cancellationToken);
+        var actor = await Require(actorId, PermissionCatalog.PricingView, cancellationToken);
+        var scopeBranchId = CanSelectBranch(actor) ? null : (Guid?)actor.BranchId;
+        return await repository.ListPriceLevelsAsync(activeOnly, scopeBranchId, cancellationToken);
     }
 
     public async Task<PriceLevelDto> CreatePriceLevelAsync(Guid actorId, PriceLevelRequest request, CancellationToken cancellationToken = default)
     {
-        await Require(actorId, PermissionCatalog.PricingManage, cancellationToken);
+        var actor = await Require(actorId, PermissionCatalog.PricingManage, cancellationToken);
+        EnsureBranchAccess(actor, request.BranchId);
         Validate(request);
         if (await repository.PriceLevelCodeExistsAsync(NormalizeCode(request.Code), null, cancellationToken))
             throw new RequestValidationException("A price level with this code already exists.");
@@ -33,14 +35,16 @@ public sealed class PricingService(IPricingRepository repository, IPriceResoluti
         await repository.AddPriceLevelAsync(level, cancellationToken);
         await Audit(actorId, "PriceLevelCreated", level.Id, new { level.Name, level.Code, level.Priority, level.IsDefault, level.IsActive }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
-        return (await repository.ListPriceLevelsAsync(false, cancellationToken)).Single(x => x.Id == level.Id);
+        return (await repository.ListPriceLevelsAsync(false, null, cancellationToken)).Single(x => x.Id == level.Id);
     }
 
     public async Task<PriceLevelDto> UpdatePriceLevelAsync(Guid actorId, Guid id, PriceLevelRequest request, CancellationToken cancellationToken = default)
     {
-        await Require(actorId, PermissionCatalog.PricingManage, cancellationToken);
+        var actor = await Require(actorId, PermissionCatalog.PricingManage, cancellationToken);
         Validate(request);
         var level = await repository.GetPriceLevelAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Price level was not found.");
+        EnsureBranchAccess(actor, level.BranchId);
+        EnsureBranchAccess(actor, request.BranchId);
         var normalizedCode = NormalizeCode(request.Code);
         if (await repository.PriceLevelCodeExistsAsync(normalizedCode, id, cancellationToken))
             throw new RequestValidationException("A price level with this code already exists.");
@@ -54,7 +58,7 @@ public sealed class PricingService(IPricingRepository repository, IPriceResoluti
         level.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await Audit(actorId, "PriceLevelUpdated", level.Id, new { level.Name, level.Code, level.Priority, level.IsDefault, level.IsActive }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
-        return (await repository.ListPriceLevelsAsync(false, cancellationToken)).Single(x => x.Id == level.Id);
+        return (await repository.ListPriceLevelsAsync(false, null, cancellationToken)).Single(x => x.Id == level.Id);
     }
 
     public async Task<IReadOnlyList<ProductPriceLevelDto>> ListProductPricesAsync(Guid actorId, Guid? productId, Guid? priceLevelId, CancellationToken cancellationToken = default)
@@ -164,6 +168,15 @@ public sealed class PricingService(IPricingRepository repository, IPriceResoluti
         if (actor is null || !actor.IsActive || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == permission) != true)
             throw new ForbiddenOperationException("The current user is not permitted to perform this operation.");
         return actor;
+    }
+
+    private static bool CanSelectBranch(User actor) =>
+        actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
+
+    private static void EnsureBranchAccess(User actor, Guid? branchId)
+    {
+        if (branchId.HasValue && !CanSelectBranch(actor) && actor.BranchId != branchId)
+            throw new ForbiddenOperationException("The current user is not permitted to manage this branch.");
     }
 
     private static void Validate(PriceLevelRequest request)

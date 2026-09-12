@@ -55,6 +55,49 @@ public sealed class ManagementPostgreSqlTests(ITestOutputHelper output)
         await Assert.ThrowsAsync<ForbiddenOperationException>(() => service.ExecuteAsync(reader.Id, "profitability/products", q, null, default));
     }
     [PostgreSqlFact, Trait("Category", "PostgreSQL")]
+    public async Task Staff_performance_report_redacts_cash_variance_without_financial_permission()
+    {
+        await using var db = Open(); await using var tx = await db.Database.BeginTransactionAsync();
+        var key = Guid.NewGuid().ToString("N");
+        var branch = new Branch { Code = key[..12], NormalizedCode = key[..12].ToUpperInvariant(), Name = "Perf " + key };
+        var godown = new Godown { BranchId = branch.Id, Name = "Perf store " + key, Code = "PERF", NormalizedCode = "PERF", IsDefault = true };
+        var cashier = new User { Username = "cash" + key, NormalizedUsername = ("cash" + key).ToUpperInvariant(), FullName = "Cashier", PasswordHash = "hash", BranchId = branch.Id,
+            RoleId = (await db.Roles.SingleAsync(x => x.Name == RoleCatalog.Cashier)).Id };
+        db.AddRange(branch, godown, cashier);
+        var salesPermission = await db.Permissions.SingleAsync(x => x.Code == PermissionCatalog.ReportsSales);
+        var financialPermission = await db.Permissions.SingleAsync(x => x.Code == PermissionCatalog.ReportsFinancial);
+        var salesOnlyRole = new Role { Name = "SalesOnlyViewer " + key };
+        salesOnlyRole.RolePermissions.Add(new RolePermission { PermissionId = salesPermission.Id });
+        var financeRole = new Role { Name = "FinanceViewer " + key };
+        financeRole.RolePermissions.Add(new RolePermission { PermissionId = salesPermission.Id });
+        financeRole.RolePermissions.Add(new RolePermission { PermissionId = financialPermission.Id });
+        var salesOnlyViewer = new User { Username = "sv" + key, NormalizedUsername = ("sv" + key).ToUpperInvariant(), FullName = "Sales Viewer", PasswordHash = "hash", BranchId = branch.Id, Role = salesOnlyRole };
+        var financeViewer = new User { Username = "fv" + key, NormalizedUsername = ("fv" + key).ToUpperInvariant(), FullName = "Finance Viewer", PasswordHash = "hash", BranchId = branch.Id, Role = financeRole };
+        db.AddRange(salesOnlyViewer, financeViewer);
+        // Non-Owner/Manager report readers are implicitly restricted to their assigned godowns
+        // (ReportingService.ExecuteAsync sets GodownUserId for them), so both viewers need explicit access.
+        db.UserGodowns.Add(new UserGodown { UserId = salesOnlyViewer.Id, GodownId = godown.Id });
+        db.UserGodowns.Add(new UserGodown { UserId = financeViewer.Id, GodownId = godown.Id });
+        var now = DateTime.UtcNow;
+        db.Sales.Add(new Sale { BranchId = branch.Id, GodownId = godown.Id, CashierUserId = cashier.Id, InvoiceNumber = key[..12], Status = SaleStatus.Posted, PostedAtUtc = now.AddHours(-2), NetTotal = 100, AmountPaid = 100 });
+        db.CashierShifts.Add(new CashierShift { BranchId = branch.Id, CashierUserId = cashier.Id, OpeningCash = 1000, OpenedAtUtc = now.AddHours(-8),
+            Status = CashierShiftStatus.Closed, ClosedAtUtc = now.AddHours(-1), ExpectedCash = 1500, ActualCountedCash = 1450, CashVariance = -50 });
+        await db.SaveChangesAsync();
+        var service = new ReportingService(new ReportingRepository(db), TimeProvider.System);
+        var q = new ReportQuery(branch.Id, now.AddDays(-1), now.AddDays(1));
+
+        var restricted = JsonSerializer.SerializeToElement(await service.ExecuteAsync(salesOnlyViewer.Id, "sales/staff-performance", q, null, default), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var restrictedItems = restricted.GetProperty("items").EnumerateArray().ToList();
+        Assert.NotEmpty(restrictedItems);
+        Assert.All(restrictedItems, row => Assert.False(row.TryGetProperty("cashVariance", out _)));
+
+        var full = JsonSerializer.SerializeToElement(await service.ExecuteAsync(financeViewer.Id, "sales/staff-performance", q, null, default), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var fullItems = full.GetProperty("items").EnumerateArray().ToList();
+        Assert.NotEmpty(fullItems);
+        Assert.Contains(fullItems, row => row.TryGetProperty("cashVariance", out var v) && v.GetDecimal() == -50);
+    }
+
+    [PostgreSqlFact, Trait("Category", "PostgreSQL")]
     public async Task Major_report_queries_have_real_PostgreSql_execution_plans()
     {
         var capture = new ReportSqlCapture();

@@ -171,6 +171,7 @@ class _PricingRuleDialogState extends State<PricingRuleDialog> {
               for (final choice in _choices.entries)
                 DropdownButtonFormField<String>(
                   initialValue: _values[choice.key] as String?,
+                  isExpanded: true,
                   decoration: InputDecoration(labelText: choice.key),
                   items: [
                     if (choice.key == 'customerType' ||

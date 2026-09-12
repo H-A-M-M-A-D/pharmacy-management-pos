@@ -15,6 +15,23 @@ namespace Pharmacy.Tests;
 public sealed class SalesServiceTests
 {
     [Fact]
+    public async Task Duplicate_sale_submission_is_rejected_before_any_stock_or_journal_effect()
+    {
+        var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
+        var batch = f.AddBatch("A", 10, f.Today.AddDays(5), 8, 12);
+        f.DuplicateGuard.Reject = true;
+
+        var request = new PostSaleRequest(f.Branch.Id, null, "Walk-in", null, null, [new(f.Product.Id, 5)], [new(SalePaymentMethod.Cash, 60, 60)]);
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostSaleAsync(f.Actor.Id, request));
+
+        Assert.Equal(1, f.DuplicateGuard.CallCount);
+        Assert.Empty(f.Sales);
+        Assert.Equal(10, batch.QuantityAvailable);
+        Assert.Empty(f.Movements);
+        Assert.Empty(f.Journal.Posted);
+    }
+
+    [Fact]
     public async Task Posting_sale_allocates_fefo_across_batches_updates_stock_and_records_payment()
     {
         var f = new Fixture(PermissionCatalog.SalesCreate, PermissionCatalog.SalesView);
@@ -512,6 +529,7 @@ public sealed class SalesServiceTests
         public readonly FakePriceResolutionService PriceResolver = new();
         public readonly FakeSalesOrderRepository SalesOrders = new();
         public readonly FakeSalesQuotationRepository SalesQuotations = new();
+        public readonly FakeDuplicateSubmissionGuard DuplicateGuard = new();
         public SalesService Service { get; }
 
         public Fixture(params string[] permissions)
@@ -546,7 +564,7 @@ public sealed class SalesServiceTests
                 role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             }
             Actor = new User { Username = "cashier", NormalizedUsername = "CASHIER", FullName = "Cashier User", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role, IsActive = true };
-            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, PriceResolver, SalesOrders, SalesQuotations, TimeProvider.System);
+            Service = new(this, new FefoAllocationService(), Journal, GodownAccess, PriceResolver, SalesOrders, SalesQuotations, DuplicateGuard, TimeProvider.System);
         }
 
         public ProductBatch AddBatch(string number, int quantity, DateOnly expiry, decimal purchasePrice, decimal retailPrice, bool disposed = false, Guid? branchId = null, Guid? godownId = null)
@@ -650,6 +668,20 @@ public sealed class SalesServiceTests
         public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
         public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
         public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
+    }
+
+    /// <summary>Always allows by default so pre-existing tests are unaffected; a test that wants to
+    /// prove duplicate-submission rejection can set <see cref="Reject"/> to true.</summary>
+    private sealed class FakeDuplicateSubmissionGuard : Pharmacy.Application.Common.IDuplicateSubmissionGuard
+    {
+        public bool Reject;
+        public int CallCount;
+        public Task GuardAsync(string operation, Guid actorId, object fingerprintPayload, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            if (Reject) throw new Pharmacy.Application.Common.ResourceConflictException("This exact request was already submitted moments ago. Check the result before retrying.");
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>Defaults to "no override" (Source=Default, Price=null) so every pre-existing test in

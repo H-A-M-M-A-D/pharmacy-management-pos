@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Administration;
@@ -41,7 +42,7 @@ public sealed class AdministrationController(IAdministrationService service) : C
     public Task<BackupRecordDto> Backup(CancellationToken ct)=>service.CreateBackupAsync(UserId,ct);
     [HttpGet("system-info")][HasPermission(PermissionCatalog.SystemView)]
     public Task<SystemInformationDto> SystemInfo(CancellationToken ct)=>service.GetSystemInformationAsync(UserId,ct);
-    [HttpPost("sessions/revoke")]
+    [HttpPost("sessions/revoke"), Authorize]
     public async Task<IActionResult> RevokeSessions(CancellationToken ct){await service.SignOutEverywhereAsync(UserId,ct);return NoContent();}
     private Guid UserId=>Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier),out var id)?id:throw new UnauthorizedAccessException();
 }

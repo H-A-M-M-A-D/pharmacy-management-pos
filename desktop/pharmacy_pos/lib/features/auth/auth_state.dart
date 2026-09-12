@@ -25,6 +25,10 @@ class AuthState extends ChangeNotifier {
   bool get mustChangePassword => currentUser?.mustChangePassword ?? false;
   bool can(String permission) => currentUser?.can(permission) ?? false;
 
+  /// The backend URL this client is talking to, for display in System
+  /// Information/support diagnostics. Null for a fake API used in tests.
+  Uri? get serverUri => _api is ApiClient ? _api.baseUri : null;
+
   Future<void> initialize() async {
     final token = await _tokenStore.read();
     if (token == null) {

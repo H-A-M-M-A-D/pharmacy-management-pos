@@ -10,7 +10,7 @@ public interface IPricingRepository
     Task<Product?> GetProductAsync(Guid productId, CancellationToken cancellationToken = default);
     Task<PriceLevel?> GetPriceLevelAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> PriceLevelCodeExistsAsync(string code, Guid? excludingId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PriceLevelDto>> ListPriceLevelsAsync(bool activeOnly, Guid? scopeBranchId, CancellationToken cancellationToken = default);
     Task AddPriceLevelAsync(PriceLevel level, CancellationToken cancellationToken = default);
     Task ClearDefaultPriceLevelAsync(Guid? excludingId, CancellationToken cancellationToken = default);
 

@@ -37,8 +37,15 @@ public sealed class StockTransferRepository(PharmacyDbContext context) : IStockT
 
     public async Task AddTransferAsync(StockTransfer transfer, CancellationToken cancellationToken = default) => await context.StockTransfers.AddAsync(transfer, cancellationToken);
 
-    public Task<StockTransfer?> GetTransferForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
-        context.StockTransfers.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public async Task<StockTransfer?> GetTransferForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        // Lock the transfer row itself (a scalar FOR UPDATE cannot carry the Items include), then load
+        // the tracked entity graph normally - this closes the race between two actors mutating the same
+        // transfer's status/quantities concurrently instead of relying incidentally on that write itself.
+        var locked = await context.Database.SqlQuery<Guid>($"SELECT \"Id\" FROM \"StockTransfers\" WHERE \"Id\" = {id} FOR UPDATE").ToListAsync(cancellationToken);
+        if (locked.Count == 0) return null;
+        return await context.StockTransfers.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
 
     public void ReplaceTransferItems(StockTransfer transfer, IReadOnlyCollection<StockTransferItem> items)
     {

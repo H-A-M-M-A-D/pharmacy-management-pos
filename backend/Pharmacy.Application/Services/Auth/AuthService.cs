@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Pharmacy.Application.Common;
 using Pharmacy.Application.DTOs.Auth;
 using Pharmacy.Application.Security;
@@ -13,19 +14,22 @@ public sealed class AuthService : IAuthService
     private readonly ITokenService _tokenService;
     private readonly AuthenticationSecurityOptions _securityOptions;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         IUserAccountRepository repository,
         IPasswordHasher passwordHasher,
         ITokenService tokenService,
         AuthenticationSecurityOptions securityOptions,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<AuthService> logger)
     {
         _repository = repository;
         _passwordHasher = passwordHasher;
         _tokenService = tokenService;
         _securityOptions = securityOptions;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
@@ -35,16 +39,18 @@ public sealed class AuthService : IAuthService
             return null;
         }
 
-        var user = await _repository.GetByNormalizedUsernameAsync(
-            IdentityValidation.NormalizeUsername(request.Username), cancellationToken);
+        var normalizedUsername = IdentityValidation.NormalizeUsername(request.Username);
+        var user = await _repository.GetByNormalizedUsernameAsync(normalizedUsername, cancellationToken);
         if (user is null)
         {
+            _logger.LogWarning("Login attempt for an unknown username. NormalizedUsername: {NormalizedUsername}", normalizedUsername);
             return null;
         }
 
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         if (!user.IsActive || user.LockoutEndUtc > now)
         {
+            _logger.LogWarning("Login attempt for a {Reason} account. UserId: {UserId}", !user.IsActive ? "deactivated" : "locked-out", user.Id);
             return null;
         }
 
@@ -57,6 +63,8 @@ public sealed class AuthService : IAuthService
             }
 
             user.UpdatedAt = now;
+            _logger.LogWarning("Failed login attempt (wrong password). UserId: {UserId}, FailedAttempts: {FailedAttempts}, Locked: {Locked}",
+                user.Id, user.FailedLoginAttempts, user.LockoutEndUtc > now);
             await AddAuditAsync(user.Id, "LoginFailed", user.Id, new
             {
                 user.FailedLoginAttempts,

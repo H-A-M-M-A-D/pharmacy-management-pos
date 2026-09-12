@@ -223,23 +223,26 @@ class _ShiftDetailCard extends StatelessWidget {
             const SizedBox(height: 20),
             Text('Payment Method Breakdown', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
-            DataTable(
-              columns: const [
-                DataColumn(label: Text('Method')),
-                DataColumn(label: Text('Sales')),
-                DataColumn(label: Text('Refunds')),
-              ],
-              rows: shift.paymentBreakdown
-                  .map(
-                    (x) => DataRow(
-                      cells: [
-                        DataCell(Text(x.paymentMethod)),
-                        DataCell(Text(_money(x.salesAmount))),
-                        DataCell(Text(_money(x.refundsAmount))),
-                      ],
-                    ),
-                  )
-                  .toList(),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('Method')),
+                  DataColumn(label: Text('Sales')),
+                  DataColumn(label: Text('Refunds')),
+                ],
+                rows: shift.paymentBreakdown
+                    .map(
+                      (x) => DataRow(
+                        cells: [
+                          DataCell(Text(x.paymentMethod)),
+                          DataCell(Text(_money(x.salesAmount))),
+                          DataCell(Text(_money(x.refundsAmount))),
+                        ],
+                      ),
+                    )
+                    .toList(),
+              ),
             ),
           ],
           if (shift.drawerEntries.isNotEmpty) ...[

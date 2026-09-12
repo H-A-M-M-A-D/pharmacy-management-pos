@@ -428,6 +428,28 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
       ]);
     }
     final map = _data as Map<String, dynamic>;
+    if (_selected == 'System Info') {
+      final user = widget.authState.currentUser;
+      final clientFacts = <String, String>{
+        'Current user': user == null ? '-' : '${user.fullName} (${user.username})',
+        'Current branch': user?.branch.name ?? '-',
+        'Server URL': widget.authState.serverUri?.toString() ?? '-',
+      };
+      return ListView(
+        children: [
+          ...clientFacts.entries.map(
+            (x) => ListTile(title: Text(x.key), subtitle: Text(x.value)),
+          ),
+          const Divider(),
+          ...map.entries.map(
+            (x) => ListTile(
+              title: Text(_label(x.key)),
+              subtitle: Text('${x.value ?? ''}'),
+            ),
+          ),
+        ],
+      );
+    }
     return ListView(
       children: map.entries
           .map(

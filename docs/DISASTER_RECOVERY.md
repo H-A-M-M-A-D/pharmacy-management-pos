@@ -2,7 +2,7 @@
 
 ## Backup Strategy
 
-Keep multiple custom-format PostgreSQL backups on storage separate from the database host. The built-in local retention default is 10 completed archives; operators must copy verified archives to protected storage and periodically test restoration. RPO and RTO are operator-defined goals, not software guarantees.
+Keep multiple custom-format PostgreSQL backups on storage separate from the database host. The built-in local retention default is 10 completed archives (`Backup:RetentionCount`); operators must copy verified archives to protected storage and periodically test restoration. When retention removes an old archive's file, its backup record is marked `Purged` rather than left showing `Completed` — treat any record not marked `Completed` as unavailable on disk. Retention always keeps at least the most recent archive regardless of configuration, so the only valid backup is never automatically deleted. RPO and RTO are operator-defined goals, not software guarantees.
 
 ## Restore Validation
 

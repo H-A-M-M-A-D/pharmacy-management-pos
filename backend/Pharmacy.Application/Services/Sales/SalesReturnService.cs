@@ -9,7 +9,7 @@ using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.Services.Sales;
 
-public sealed class SalesReturnService(ISalesReturnRepository repository, IJournalPostingService journalPosting, TimeProvider timeProvider) : ISalesReturnService
+public sealed class SalesReturnService(ISalesReturnRepository repository, IJournalPostingService journalPosting, IDuplicateSubmissionGuard duplicateGuard, TimeProvider timeProvider) : ISalesReturnService
 {
     public async Task<ReturnableSaleDto> GetReturnableSaleAsync(Guid actorId, Guid saleId, CancellationToken cancellationToken = default)
     {
@@ -26,6 +26,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, IJourn
         SalesReturn? posted = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("SalesReturn.Post", actorId, new { saleId, request.Allocations, request.RefundPayments }, ct);
             var sale = await repository.GetOriginalSaleAsync(saleId, ct) ?? throw new ResourceNotFoundException("Original sale was not found.");
             if (sale.Status != SaleStatus.Posted || sale.InvoiceNumber is null) throw new RequestValidationException("Only posted sales can be returned.");
             EnsureBranchAccess(actor, sale.BranchId);
@@ -284,7 +285,7 @@ public sealed class SalesReturnService(ISalesReturnRepository repository, IJourn
         return (requestedBranchId, true);
     }
 
-    private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.UsersView) == true;
+    private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager || actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.BranchesView) == true;
     private static void EnsureBranchAccess(User actor, Guid branchId)
     {
         if (!CanSelectBranch(actor) && actor.BranchId != branchId) throw new ForbiddenOperationException("The current user is not permitted to manage this branch.");

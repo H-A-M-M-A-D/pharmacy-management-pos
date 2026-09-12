@@ -123,6 +123,7 @@ class _BulkPricingDialogState extends State<BulkPricingDialog> {
                     SizedBox(height: 110, child: SingleChildScrollView(child: Wrap(spacing: 8, children: [for (final product in (_options['products'] as List<dynamic>? ?? []).where((p) => '${p['name']}'.toLowerCase().contains(_productSearch.toLowerCase()))) FilterChip(label: Text('${product['name']}'), selected: _selectedProducts.contains(product['id']), onSelected: (selected) => setState(() { if (selected) { _selectedProducts.add(product['id'] as String); } else { _selectedProducts.remove(product['id']); } _products.text = _selectedProducts.join(','); }))]))),
                     DropdownButtonFormField<String>(
                       initialValue: _action,
+                      isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Action'),
                       items: const [
                         DropdownMenuItem(

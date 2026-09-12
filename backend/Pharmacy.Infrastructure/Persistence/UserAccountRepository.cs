@@ -143,6 +143,11 @@ public sealed class UserAccountRepository : IUserAccountRepository
         {
             throw new ResourceConflictException("A user with the same username or email already exists.");
         }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This user record changed while saving. Refresh and try again.");
+        }
     }
 
     private IQueryable<User> IdentityQuery() =>

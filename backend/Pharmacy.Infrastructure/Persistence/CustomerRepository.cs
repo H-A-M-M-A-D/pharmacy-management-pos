@@ -177,6 +177,10 @@ public sealed class CustomerRepository(PharmacyDbContext context) : ICustomerRep
         {
             throw new ResourceConflictException("A customer with this unique value already exists.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This customer record changed while saving. Refresh and try again.");
+        }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.CheckViolation })
         {
             throw new RequestValidationException("Customer financial constraints were violated.");

@@ -118,6 +118,10 @@ public sealed class CashierShiftRepository(PharmacyDbContext context) : ICashier
         {
             throw new RequestValidationException("Cashier shift constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This shift was changed by another action at the same time. Refresh and try again.");
+        }
     }
 
     private IQueryable<CashierShift> ShiftQuery() =>

@@ -337,6 +337,10 @@ public sealed partial class AccountingRepository(PharmacyDbContext context) : IA
         {
             throw new RequestValidationException("Accounting constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This record changed while saving. Refresh and try again.");
+        }
     }
 
     // ---- Journal reversal ----

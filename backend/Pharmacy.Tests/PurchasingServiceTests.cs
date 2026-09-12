@@ -52,6 +52,19 @@ public sealed class PurchasingServiceTests
     }
 
     [Fact]
+    public async Task Duplicate_goods_receipt_submission_is_rejected_before_any_stock_or_ledger_effect()
+    {
+        var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
+        f.DuplicateGuard.Reject = true;
+        await Assert.ThrowsAsync<ResourceConflictException>(() => f.Service.PostGoodsReceiptAsync(f.Actor.Id, f.DirectRequest(100, 10, 50, 5, 2)));
+        Assert.Equal(1, f.DuplicateGuard.CallCount);
+        Assert.Empty(f.Receipts);
+        Assert.Empty(f.Batches);
+        Assert.Empty(f.Movements);
+        Assert.Empty(f.Ledger);
+    }
+
+    [Fact]
     public async Task Direct_purchase_posts_inventory_stock_movement_supplier_ledger_and_bonus_correctly()
     {
         var f = new Fixture(PermissionCatalog.PurchasesReceive, PermissionCatalog.PurchasesCreate);
@@ -295,6 +308,7 @@ public sealed class PurchasingServiceTests
         public readonly List<AuditLog> Audits = [];
         public readonly FakeJournalPostingService Journal = new();
         public readonly FakeGodownAccessService GodownAccess = new();
+        public readonly FakeDuplicateSubmissionGuard DuplicateGuard = new();
         public readonly Godown MainGodown;
         public readonly Godown SecondGodown;
         public bool FailOnSave;
@@ -312,7 +326,7 @@ public sealed class PurchasingServiceTests
             var role = new Role { Name = RoleCatalog.Manager };
             foreach (var permission in permissions) role.RolePermissions.Add(new RolePermission { Permission = new Permission { Code = permission, Description = permission, Category = "test" } });
             Actor = new User { Username = "actor", NormalizedUsername = "ACTOR", FullName = "Actor", PasswordHash = "hash", BranchId = Branch.Id, RoleId = role.Id, Role = role };
-            Service = new(this, Journal, GodownAccess, TimeProvider.System);
+            Service = new(this, Journal, GodownAccess, DuplicateGuard, TimeProvider.System);
         }
 
         public PurchaseOrderRequest OrderRequest(int quantity) => new(Branch.Id, Supplier.Id, Today, Today.AddDays(3), null, null, [new(Product.Id, quantity, 50, null)]);
@@ -411,5 +425,17 @@ public sealed class PurchasingServiceTests
         public Task<Godown?> GetGodownAsync(Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(Godowns.GetValueOrDefault(godownId));
         public Task<Guid?> GetDefaultGodownIdAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult(branchId == DefaultBranchId ? DefaultGodownId : null);
         public Task<bool> UserHasAccessAsync(Guid userId, Guid godownId, CancellationToken cancellationToken = default) => Task.FromResult(AccessPredicate(userId, godownId));
+    }
+
+    private sealed class FakeDuplicateSubmissionGuard : Pharmacy.Application.Common.IDuplicateSubmissionGuard
+    {
+        public bool Reject;
+        public int CallCount;
+        public Task GuardAsync(string operation, Guid actorId, object fingerprintPayload, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            if (Reject) throw new Pharmacy.Application.Common.ResourceConflictException("This exact request was already submitted moments ago. Check the result before retrying.");
+            return Task.CompletedTask;
+        }
     }
 }

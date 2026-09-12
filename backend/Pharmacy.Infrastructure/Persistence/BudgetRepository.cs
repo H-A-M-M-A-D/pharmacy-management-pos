@@ -70,5 +70,9 @@ public sealed class BudgetRepository(PharmacyDbContext context) : IBudgetReposit
         {
             throw new RequestValidationException("Budget constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This budget changed while saving. Refresh and try again.");
+        }
     }
 }

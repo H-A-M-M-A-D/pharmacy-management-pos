@@ -20,7 +20,7 @@ namespace Pharmacy.Application.Services.Accounting.Vouchers;
 /// payment APIs would, so the operational subledger and the GL stay reconcilable — it never posts
 /// a bare AccountsReceivable/AccountsPayable line without also updating the subledger that backs it.
 /// </summary>
-public sealed class VoucherService(IVoucherRepository repository, TimeProvider timeProvider) : IVoucherService
+public sealed class VoucherService(IVoucherRepository repository, IDuplicateSubmissionGuard duplicateGuard, TimeProvider timeProvider) : IVoucherService
 {
     public async Task<VoucherDto> CreateDraftAsync(Guid actorId, VoucherCreateRequest request, CancellationToken cancellationToken = default)
     {
@@ -45,6 +45,7 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
         Voucher? voucher = null;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
+            await duplicateGuard.GuardAsync("Voucher.CreateDraft", actorId, request, ct);
             switch (request.Type)
             {
                 case VoucherType.CashReceipt or VoucherType.BankReceipt:

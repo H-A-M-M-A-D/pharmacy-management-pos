@@ -85,6 +85,10 @@ public sealed class RecurringJournalRepository(PharmacyDbContext context) : IRec
         {
             throw new RequestValidationException("Recurring journal constraints were violated.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This template changed while saving. Refresh and try again.");
+        }
     }
 
     public void AllowPostingIntoSoftClosedPeriod() => context.AllowPostingIntoSoftClosedPeriod = true;

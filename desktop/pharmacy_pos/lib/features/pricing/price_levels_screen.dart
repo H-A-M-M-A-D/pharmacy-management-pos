@@ -466,40 +466,47 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
                         ),
                     ],
                   ),
-                  DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Level')),
-                      DataColumn(label: Text('Price')),
-                      DataColumn(label: Text('Status')),
-                      DataColumn(label: Text('')),
-                    ],
-                    rows: _prices
-                        .map(
-                          (p) => DataRow(
-                            cells: [
-                              DataCell(Text(p.priceLevelName)),
-                              DataCell(Text(p.sellingPrice.toStringAsFixed(2))),
-                              DataCell(
-                                Text(p.isActive ? 'Active' : 'Inactive'),
-                              ),
-                              DataCell(
-                                can('pricing.manage')
-                                    ? IconButton(
-                                        icon: const Icon(Icons.delete_outline),
-                                        onPressed: () async {
-                                          await widget.authState.pricing(
-                                            'product-prices/${p.id}',
-                                            method: 'DELETE',
-                                          );
-                                          await _selectProduct(_selected!);
-                                        },
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                            ],
-                          ),
-                        )
-                        .toList(),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Level')),
+                        DataColumn(label: Text('Price')),
+                        DataColumn(label: Text('Status')),
+                        DataColumn(label: Text('')),
+                      ],
+                      rows: _prices
+                          .map(
+                            (p) => DataRow(
+                              cells: [
+                                DataCell(Text(p.priceLevelName)),
+                                DataCell(
+                                  Text(p.sellingPrice.toStringAsFixed(2)),
+                                ),
+                                DataCell(
+                                  Text(p.isActive ? 'Active' : 'Inactive'),
+                                ),
+                                DataCell(
+                                  can('pricing.manage')
+                                      ? IconButton(
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                          onPressed: () async {
+                                            await widget.authState.pricing(
+                                              'product-prices/${p.id}',
+                                              method: 'DELETE',
+                                            );
+                                            await _selectProduct(_selected!);
+                                          },
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
                   ),
                   const SizedBox(height: 20),
                   Row(
@@ -518,38 +525,47 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
                         ),
                     ],
                   ),
-                  DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Level')),
-                      DataColumn(label: Text('Min Qty')),
-                      DataColumn(label: Text('Price')),
-                      DataColumn(label: Text('')),
-                    ],
-                    rows: _breaks
-                        .map(
-                          (b) => DataRow(
-                            cells: [
-                              DataCell(Text(b.priceLevelName ?? 'Any level')),
-                              DataCell(Text('${b.minimumQuantity}')),
-                              DataCell(Text(b.sellingPrice.toStringAsFixed(2))),
-                              DataCell(
-                                can('pricing.manage')
-                                    ? IconButton(
-                                        icon: const Icon(Icons.delete_outline),
-                                        onPressed: () async {
-                                          await widget.authState.pricing(
-                                            'product-breaks/${b.id}',
-                                            method: 'DELETE',
-                                          );
-                                          await _selectProduct(_selected!);
-                                        },
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                            ],
-                          ),
-                        )
-                        .toList(),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Level')),
+                        DataColumn(label: Text('Min Qty')),
+                        DataColumn(label: Text('Price')),
+                        DataColumn(label: Text('')),
+                      ],
+                      rows: _breaks
+                          .map(
+                            (b) => DataRow(
+                              cells: [
+                                DataCell(
+                                  Text(b.priceLevelName ?? 'Any level'),
+                                ),
+                                DataCell(Text('${b.minimumQuantity}')),
+                                DataCell(
+                                  Text(b.sellingPrice.toStringAsFixed(2)),
+                                ),
+                                DataCell(
+                                  can('pricing.manage')
+                                      ? IconButton(
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                          onPressed: () async {
+                                            await widget.authState.pricing(
+                                              'product-breaks/${b.id}',
+                                              method: 'DELETE',
+                                            );
+                                            await _selectProduct(_selected!);
+                                          },
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
                   ),
                 ],
               ),
@@ -572,6 +588,7 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: levelId,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Price Level'),
                 items: _levels
                     .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
@@ -629,6 +646,7 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
             children: [
               DropdownButtonFormField<String?>(
                 initialValue: levelId,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Price Level (optional)',
                   helperText: 'Leave blank to apply regardless of level.',

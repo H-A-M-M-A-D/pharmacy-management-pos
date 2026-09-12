@@ -96,7 +96,7 @@ class _BudgetFormState extends State<_BudgetForm> {
   @override
   Widget build(BuildContext context) => AlertDialog(title: Text(widget.budget == null ? 'New budget' : 'Edit budget'), content: SizedBox(width: 440,
     child: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      DropdownButtonFormField<String>(key: const Key('budget_account'), initialValue: _accountId, decoration: const InputDecoration(labelText: 'Account'),
+      DropdownButtonFormField<String>(key: const Key('budget_account'), initialValue: _accountId, isExpanded: true, decoration: const InputDecoration(labelText: 'Account'),
         items: _accounts.map((a) => DropdownMenuItem(value: a.id, child: Text('${a.code} ${a.name}'))).toList(), onChanged: widget.budget == null ? (id) => setState(() => _accountId = id) : null),
       TextField(key: const Key('budget_amount'), controller: _amount, decoration: const InputDecoration(labelText: 'Budget amount')),
       TextField(key: const Key('budget_period'), controller: _period, enabled: widget.budget == null, decoration: const InputDecoration(labelText: 'Period (blank for annual)')),

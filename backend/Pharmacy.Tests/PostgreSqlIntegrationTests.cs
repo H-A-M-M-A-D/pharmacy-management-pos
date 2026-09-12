@@ -28,6 +28,7 @@ using Pharmacy.Application.Services.Suppliers;
 using Pharmacy.Domain.Entities;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Persistence;
+using Pharmacy.Infrastructure.Services;
 
 namespace Pharmacy.Tests;
 
@@ -712,7 +713,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            83L,
+            84L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -2836,7 +2837,7 @@ public sealed class PostgreSqlIntegrationTests
     }
 
     private static PurchasingService PurchasingServiceFor(PharmacyDbContext context) =>
-        new(new PurchasingRepository(context), JournalPostingFor(context), new GodownAccessService(context), TimeProvider.System);
+        new(new PurchasingRepository(context), JournalPostingFor(context), new GodownAccessService(context), new DuplicateSubmissionGuard(context, TimeProvider.System), TimeProvider.System);
 
     private static FinanceService FinanceServiceFor(PharmacyDbContext context) =>
         new(new FinanceRepository(context), JournalPostingFor(context), TimeProvider.System);
@@ -3646,11 +3647,11 @@ public sealed class PostgreSqlIntegrationTests
     }
 
     private static StockTransferService ServiceFor(PharmacyDbContext context) =>
-        new(new StockTransferRepository(context), new GodownAccessService(context), JournalPostingFor(context), TimeProvider.System);
+        new(new StockTransferRepository(context), new GodownAccessService(context), JournalPostingFor(context), new DuplicateSubmissionGuard(context, TimeProvider.System), TimeProvider.System);
 
     private static SalesService SalesServiceFor(PharmacyDbContext context) =>
         new(new SalesRepository(context), new FefoAllocationService(), JournalPostingFor(context), new GodownAccessService(context),
-            new PriceResolutionService(context), new SalesOrderRepository(context), new SalesQuotationRepository(context), TimeProvider.System);
+            new PriceResolutionService(context), new SalesOrderRepository(context), new SalesQuotationRepository(context), new DuplicateSubmissionGuard(context, TimeProvider.System), TimeProvider.System);
 
     private static SalesOrderService SalesOrderServiceFor(PharmacyDbContext context) =>
         new(new SalesOrderRepository(context), new GodownAccessService(context), new PriceResolutionService(context), SalesServiceFor(context), TimeProvider.System);

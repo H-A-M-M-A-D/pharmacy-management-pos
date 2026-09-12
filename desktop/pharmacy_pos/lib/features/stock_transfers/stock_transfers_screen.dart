@@ -408,6 +408,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                 child: DropdownButtonFormField<String>(
                   key: const Key('transfer_source_branch'),
                   initialValue: _sourceBranchId,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'From Branch'),
                   items: widget.options.branches
                       .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
@@ -423,6 +424,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                 child: DropdownButtonFormField<String>(
                   key: const Key('transfer_source_godown'),
                   initialValue: _sourceGodownId,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'From Godown'),
                   items: _sourceGodowns
                       .map((g) => DropdownMenuItem(value: g.id, child: Text(g.name)))
@@ -445,6 +447,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                 child: DropdownButtonFormField<String>(
                   key: const Key('transfer_dest_branch'),
                   initialValue: _destBranchId,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'To Branch'),
                   items: widget.options.branches
                       .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
@@ -460,6 +463,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                 child: DropdownButtonFormField<String>(
                   key: const Key('transfer_dest_godown'),
                   initialValue: _destGodownId,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'To Godown'),
                   items: _destGodowns
                       .map((g) => DropdownMenuItem(value: g.id, child: Text(g.name)))

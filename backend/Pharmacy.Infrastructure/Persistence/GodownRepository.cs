@@ -128,5 +128,9 @@ public sealed class GodownRepository(PharmacyDbContext context) : IGodownReposit
         {
             throw new ResourceConflictException("A godown with this code, or a default godown, already exists for this branch.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            throw new ResourceConflictException("This godown record changed while saving. Refresh and try again.");
+        }
     }
 }
