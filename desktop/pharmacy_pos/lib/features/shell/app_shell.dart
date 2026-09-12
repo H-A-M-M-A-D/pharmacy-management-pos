@@ -12,6 +12,7 @@ import '../pricing/price_levels_screen.dart';
 import '../purchasing/purchasing_screen.dart';
 import '../quotations/quotations_screen.dart';
 import '../reports/reports_screen.dart';
+import '../reports/mis_screen.dart';
 import '../sales/cashier_shift_screen.dart';
 import '../sales/pos_screen.dart';
 import '../sales_orders/sales_orders_screen.dart';
@@ -207,6 +208,12 @@ class _AppShellState extends State<AppShell> {
           selectedIcon: Icon(Icons.analytics),
           label: Text('Reports'),
         ),
+      if (widget.authState.can('reports.view'))
+        const NavigationRailDestination(
+          icon: Icon(Icons.insights_outlined),
+          selectedIcon: Icon(Icons.insights),
+          label: Text('Management / MIS'),
+        ),
       if (canViewAccounting)
         const NavigationRailDestination(
           icon: Icon(Icons.account_balance_outlined),
@@ -254,6 +261,8 @@ class _AppShellState extends State<AppShell> {
       if (canViewCashierShift) CashierShiftScreen(authState: widget.authState),
       if (canViewFinance) FinanceScreen(authState: widget.authState),
       if (canViewReports) ReportsScreen(authState: widget.authState),
+      if (widget.authState.can('reports.view'))
+        MisScreen(authState: widget.authState),
       if (canViewAccounting) AccountsScreen(authState: widget.authState),
       if (canViewAdministration)
         AdministrationScreen(authState: widget.authState),

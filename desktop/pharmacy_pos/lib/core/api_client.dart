@@ -341,6 +341,7 @@ abstract interface class PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   });
   Future<List<int>> exportReport(
     String token,
@@ -349,6 +350,7 @@ abstract interface class PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   });
   Future<dynamic> administration(
     String token,
@@ -1764,9 +1766,10 @@ class ApiClient implements PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) => _request(
     'GET',
-    _reportUri(path, fromUtc, toUtc, branchId, option),
+    _reportUri(path, fromUtc, toUtc, branchId, option, filters),
     token: token,
   );
 
@@ -1868,11 +1871,12 @@ class ApiClient implements PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) async {
     final request = await _httpClient.openUrl(
       'GET',
       baseUri.resolve(
-        _reportUri('$path/export.csv', fromUtc, toUtc, branchId, option),
+        _reportUri('$path/export.csv', fromUtc, toUtc, branchId, option, filters),
       ),
     );
     request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
@@ -1892,6 +1896,7 @@ class ApiClient implements PharmacyApi {
     DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   ) {
     final query = <String, String>{
       'fromUtc': fromUtc.toUtc().toIso8601String(),
@@ -1901,6 +1906,7 @@ class ApiClient implements PharmacyApi {
     };
     if (branchId != null) query['branchId'] = branchId;
     if (option != null) query['option'] = option;
+    if (filters != null) { query.addAll(filters); }
     return Uri(path: '/api/reports/$path', queryParameters: query).toString();
   }
 

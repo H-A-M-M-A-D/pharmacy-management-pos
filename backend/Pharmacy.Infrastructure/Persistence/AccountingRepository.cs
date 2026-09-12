@@ -10,7 +10,7 @@ using Pharmacy.Infrastructure.Data;
 
 namespace Pharmacy.Infrastructure.Persistence;
 
-public sealed class AccountingRepository(PharmacyDbContext context) : IAccountingRepository
+public sealed partial class AccountingRepository(PharmacyDbContext context) : IAccountingRepository
 {
     public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) =>
         context.Users.Include(x => x.Role).ThenInclude(x => x!.RolePermissions).ThenInclude(x => x.Permission)
@@ -105,7 +105,7 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
 
     public async Task<IReadOnlyList<TrialBalanceRowDto>> GetAccountActivityAsync(DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default)
     {
-        var lines = context.JournalEntryLines.AsNoTracking().Where(x => x.JournalEntry!.EntryDateUtc >= fromUtc && x.JournalEntry.EntryDateUtc <= toUtc);
+        var lines = AccountActivityLines(fromUtc, toUtc, branchId);
         if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
         var grouped = await lines.GroupBy(x => new { x.ChartOfAccountId, x.ChartOfAccount!.Code, x.ChartOfAccount.Name, x.ChartOfAccount.AccountType, x.ChartOfAccount.NormalBalance })
             .Select(g => new { g.Key.ChartOfAccountId, g.Key.Code, g.Key.Name, g.Key.AccountType, g.Key.NormalBalance, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) })

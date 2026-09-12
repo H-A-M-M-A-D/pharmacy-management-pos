@@ -4517,6 +4517,7 @@ class FakeApi implements PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) async {
     if (reportDelay != Duration.zero) await Future<void>.delayed(reportDelay);
     if (reportError) throw const ApiException('Internal report failure');
@@ -4544,6 +4545,7 @@ class FakeApi implements PharmacyApi {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) async => <int>[65, 44, 66, 10];
 
   @override

@@ -231,22 +231,7 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
         if (fromUtc > toUtc) throw new RequestValidationException("From date cannot be after to date.");
         var rows = await repository.GetAccountActivityAsync(fromUtc, toUtc, Scope(actor, branchId), cancellationToken);
         var mappings = await repository.GetAccountMappingLookupAsync(cancellationToken);
-        var otherIncomeAccountId = mappings.GetValueOrDefault(AccountMappingKey.OtherIncomeDefault);
-        var badDebtAccountId = mappings.GetValueOrDefault(AccountMappingKey.BadDebtExpense);
-        var revenue = StatementRows(rows.Where(x => x.AccountType == AccountType.Income && x.ChartOfAccountId != otherIncomeAccountId));
-        var otherIncome = StatementRows(rows.Where(x => x.AccountType == AccountType.Income && x.ChartOfAccountId == otherIncomeAccountId));
-        var cost = StatementRows(rows.Where(x => x.AccountType == AccountType.CostOfSales));
-        var expenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense && x.ChartOfAccountId != badDebtAccountId));
-        var otherExpenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense && x.ChartOfAccountId == badDebtAccountId));
-        var netRevenue = revenue.Sum(x => x.Amount);
-        var totalCost = cost.Sum(x => x.Amount);
-        var grossProfit = netRevenue - totalCost;
-        var totalExpenses = expenses.Sum(x => x.Amount);
-        var totalOtherIncome = otherIncome.Sum(x => x.Amount);
-        var totalOtherExpenses = otherExpenses.Sum(x => x.Amount);
-        var netProfit = grossProfit - totalExpenses + totalOtherIncome - totalOtherExpenses;
-        return new ProfitAndLossDto(fromUtc, toUtc, revenue, netRevenue, cost, totalCost, grossProfit, expenses, totalExpenses, netProfit,
-            otherIncome, totalOtherIncome, otherExpenses, totalOtherExpenses);
+        return FinancialStatements.ProfitAndLoss(fromUtc, toUtc, rows, mappings);
     }
 
     public async Task<BalanceSheetDto> GetBalanceSheetAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
@@ -492,10 +477,7 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
     }
 
     private static IReadOnlyList<FinancialStatementRowDto> StatementRows(IEnumerable<TrialBalanceRowDto> rows) =>
-        rows.Select(x => new FinancialStatementRowDto(x.ChartOfAccountId, x.AccountCode, x.AccountName,
-            x.AccountType is AccountType.Asset or AccountType.CostOfSales or AccountType.Expense
-                ? x.Debit - x.Credit : x.Credit - x.Debit))
-            .Where(x => x.Amount != 0).OrderBy(x => x.AccountCode).ToList();
+        FinancialStatements.Rows(rows);
 
     private async Task<ChartOfAccountDto> MapAccount(ChartOfAccount account, decimal balance, CancellationToken ct)
     {

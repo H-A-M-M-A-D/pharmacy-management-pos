@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Pharmacy.Api.Authorization;
 using Pharmacy.Application.DTOs.Reports;
@@ -15,7 +16,7 @@ namespace Pharmacy.Api.Controllers;
 public sealed class ReportsController(IReportingService reports) : ControllerBase
 {
     [HttpGet("overview"), HasPermission(PermissionCatalog.ReportsView)]
-    public Task<DashboardDto> Overview([FromQuery] ReportRequest request, CancellationToken ct) =>
+    public Task<object> Overview([FromQuery] ReportRequest request, CancellationToken ct) =>
         reports.DashboardAsync(UserId(), request.Query(), ct);
 
     [HttpGet("{category}/{name}")]
@@ -51,9 +52,14 @@ public sealed class ReportsController(IReportingService reports) : ControllerBas
 }
 
 public sealed record ReportRequest(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null, string? Option = null,
-    Guid? GodownId = null, Guid? SourceGodownId = null, Guid? DestinationGodownId = null, Guid? ProductId = null, string? Status = null)
+    Guid? GodownId = null, Guid? SourceGodownId = null, Guid? DestinationGodownId = null, Guid? ProductId = null, string? Status = null,
+    Pharmacy.Domain.Entities.SaleType? SaleType = null, Guid? CategoryId = null, Guid? ManufacturerId = null,
+    Guid? CustomerId = null, Guid? SupplierId = null, Guid? UserId = null, Guid? PriceLevelId = null,
+    int FastMovingQuantity = 100, int SlowMovingDays = 90, int DeadStockDays = 180, decimal AbcA = 80, decimal AbcB = 95, Guid? BatchId = null)
 {
-    public ReportQuery Query() => new(BranchId, FromUtc, ToUtc, Page, PageSize, Search, GodownId, SourceGodownId, DestinationGodownId, ProductId, Status);
+    public ReportQuery Query() => new(BranchId, FromUtc, ToUtc, Page, PageSize, Search, GodownId, SourceGodownId, DestinationGodownId,
+        ProductId, Status, SaleType, CategoryId, ManufacturerId, CustomerId, SupplierId, UserId, PriceLevelId,
+        FastMovingQuantity, SlowMovingDays, DeadStockDays, AbcA, AbcB) { BatchId = BatchId };
 }
 
 public static class CsvWriter
@@ -64,13 +70,35 @@ public static class CsvWriter
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(value, JsonOptions));
         var root = document.RootElement;
         if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("items", out var items)) root = items;
+        if (root.ValueKind == JsonValueKind.Object && root.EnumerateObject().Any(x => x.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array))
+        {
+            var summary = new StringBuilder().AppendLine("section,metric,value");
+            void Append(JsonElement element, string section)
+            {
+                if (element.ValueKind == JsonValueKind.Object)
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                            Append(property.Value, string.IsNullOrEmpty(section) ? property.Name : section + "/" + property.Name);
+                        else summary.AppendLine(string.Join(',', Escape(Heading(section)), Escape(Heading(property.Name)), Escape(Value(property.Value))));
+                    }
+                else if (element.ValueKind == JsonValueKind.Array)
+                {
+                    var row = 0;
+                    foreach (var item in element.EnumerateArray()) Append(item, section + "/" + (++row).ToString(CultureInfo.InvariantCulture));
+                }
+            }
+            Append(root, "");
+            return summary.ToString();
+        }
         var rows = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray().ToList() : [root];
         if (rows.Count == 0) return string.Empty;
         var properties = rows[0].EnumerateObject().Select(x => x.Name).ToList();
-        var output = new StringBuilder().AppendLine(string.Join(',', properties.Select(Escape)));
-        foreach (var row in rows) output.AppendLine(string.Join(',', properties.Select(p => Escape(Value(row.GetProperty(p))))));
+        var output = new StringBuilder().AppendLine(string.Join(',', properties.Select(p => Escape(Heading(p)))));
+        foreach (var row in rows) output.AppendLine(string.Join(',', properties.Select(p => Escape(row.TryGetProperty(p, out var cell) ? Value(cell) : ""))));
         return output.ToString();
     }
     private static string Value(JsonElement value) => value.ValueKind switch { JsonValueKind.String => value.GetString() ?? "", JsonValueKind.Null => "", _ => value.ToString() };
+    private static string Heading(string value) => Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
     private static string Escape(string value) => value.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? $"\"{value.Replace("\"", "\"\"")}\"" : value;
 }

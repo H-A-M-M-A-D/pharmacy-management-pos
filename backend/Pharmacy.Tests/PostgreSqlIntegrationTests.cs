@@ -31,6 +31,7 @@ using Pharmacy.Infrastructure.Persistence;
 
 namespace Pharmacy.Tests;
 
+[Collection("Management PostgreSQL reporting")]
 public sealed class PostgreSqlIntegrationTests
 {
     private const string ConnectionVariable = "PHARMACY_TEST_CONNECTION_STRING";

@@ -13,6 +13,7 @@ using Pharmacy.Infrastructure.Persistence;
 
 namespace Pharmacy.Tests;
 
+[Collection("Management PostgreSQL reporting")]
 public sealed class Phase4PostgreSqlTests
 {
     [PostgreSqlFact, Trait("Category", "PostgreSQL")]

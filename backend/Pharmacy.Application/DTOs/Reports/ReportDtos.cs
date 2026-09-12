@@ -4,7 +4,16 @@ namespace Pharmacy.Application.DTOs.Reports;
 
 public sealed record ReportQuery(Guid? BranchId, DateTime FromUtc, DateTime ToUtc, int Page = 1, int PageSize = 50, string? Search = null,
     Guid? GodownId = null, Guid? SourceGodownId = null, Guid? DestinationGodownId = null, Guid? ProductId = null, string? Status = null,
-    SaleType? SaleType = null);
+    SaleType? SaleType = null, Guid? CategoryId = null, Guid? ManufacturerId = null, Guid? CustomerId = null,
+    Guid? SupplierId = null, Guid? UserId = null, Guid? PriceLevelId = null,
+    int FastMovingQuantity = 100, int SlowMovingDays = 90, int DeadStockDays = 180,
+    decimal AbcA = 80, decimal AbcB = 95)
+{
+    // Set by the authorization service only; never accepted from HTTP query parameters.
+    public Guid? GodownUserId { get; init; }
+    public IReadOnlyList<Guid>? BranchIds { get; init; }
+    public Guid? BatchId { get; init; }
+}
 public sealed record PagedReport<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
 public sealed record SalesSummaryDto(decimal GrossSales, decimal Discounts, decimal NetSales, decimal PaymentsAtSale,

@@ -5,6 +5,25 @@ namespace Pharmacy.Application.Services.Reports;
 
 public interface IReportingRepository
 {
+    IReportingRepository WithFilters(ReportQuery query) => this;
+    Task<Godown?> GetReportGodownAsync(Guid id, CancellationToken ct) => Task.FromResult<Godown?>(null);
+    Task<bool> HasGodownAccessAsync(Guid userId, Guid godownId, CancellationToken ct) => Task.FromResult(false);
+    Task<object> FilterOptionsAsync(User actor, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> InventoryAlertsAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> PurchasingDetailAsync(ReportQuery query, string report, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> PartyDetailAsync(ReportQuery query, bool supplier, string report, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> AgingReportAsync(ReportQuery query, bool supplier, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> StaffPerformanceAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> InventoryDetailAsync(ReportQuery query, string report, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> BranchManagementAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<object> GodownManagementAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<PagedReport<AnalyticsRowDto>> SalesAnalyticsAsync(ReportQuery query, string dimension, CancellationToken ct) => throw new NotSupportedException();
+    Task<PagedReport<ProductPerformanceDto>> ProductPerformanceAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<PagedReport<ContributionDto>> AbcAsync(ReportQuery query, string basis, CancellationToken ct) => throw new NotSupportedException();
+    Task<IReadOnlyList<ExposureDto>> InventoryExposureAsync(ReportQuery query, bool expiry, CancellationToken ct) => throw new NotSupportedException();
+    Task<PagedReport<StockPositionDto>> StockPositionAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
+    Task<PagedReport<PurchaseAnalyticsDto>> PurchaseAnalyticsAsync(ReportQuery query, string dimension, CancellationToken ct) => throw new NotSupportedException();
+    Task<FinancialPositionDto> FinancialPositionAsync(ReportQuery query, CancellationToken ct) => throw new NotSupportedException();
     Task<User?> GetActorAsync(Guid id, CancellationToken ct);
     Task<SalesSummaryDto> SalesSummaryAsync(Guid? branchId, DateTime from, DateTime to, CancellationToken ct);
     Task<PagedReport<DailySaleDto>> DailySalesAsync(Guid? branchId, ReportQuery query, CancellationToken ct);

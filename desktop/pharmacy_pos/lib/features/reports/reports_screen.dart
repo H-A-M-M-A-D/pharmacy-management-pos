@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../auth/auth_state.dart';
+import 'report_periods.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({required this.authState, super.key});
@@ -46,26 +47,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   void _applyPreset(String value) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
     _preset = value;
-    switch (value) {
-      case 'Yesterday':
-        _from = today.subtract(const Duration(days: 1));
-        _to = today;
-      case 'This Week':
-        _from = today.subtract(Duration(days: today.weekday - 1));
-        _to = today.add(const Duration(days: 1));
-      case 'This Month':
-        _from = DateTime(today.year, today.month);
-        _to = today.add(const Duration(days: 1));
-      case '30 Days':
-        _from = today.subtract(const Duration(days: 29));
-        _to = today.add(const Duration(days: 1));
-      default:
-        _from = today;
-        _to = today.add(const Duration(days: 1));
-    }
+    final range = reportPeriod(value);
+    _from = range.$1;
+    _to = range.$2;
   }
 
   Future<void> _selectPreset(String value) async {
@@ -78,19 +63,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 1)),
       initialDateRange: DateTimeRange(
-        start: _from,
-        end: _to.subtract(const Duration(days: 1)),
+        start: _from.add(const Duration(hours: 5)),
+        end: _to.add(const Duration(hours: 5)).subtract(const Duration(days: 1)),
       ),
     );
     if (range != null) {
       setState(() {
         _preset = 'Custom';
-        _from = DateTime(range.start.year, range.start.month, range.start.day);
-        _to = DateTime(
+        _from = DateTime.utc(range.start.year, range.start.month, range.start.day).subtract(const Duration(hours: 5));
+        _to = DateTime.utc(
           range.end.year,
           range.end.month,
           range.end.day,
-        ).add(const Duration(days: 1));
+        ).add(const Duration(days: 1)).subtract(const Duration(hours: 5));
       });
     }
   }

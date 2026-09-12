@@ -508,6 +508,7 @@ class AuthState extends ChangeNotifier {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) => _api.report(
     _requiredToken,
     path,
@@ -515,6 +516,7 @@ class AuthState extends ChangeNotifier {
     toUtc: toUtc,
     branchId: branchId,
     option: option,
+    filters: filters,
   );
   Future<List<int>> exportReport(
     String path, {
@@ -522,6 +524,7 @@ class AuthState extends ChangeNotifier {
     required DateTime toUtc,
     String? branchId,
     String? option,
+    Map<String, String>? filters,
   }) => _api.exportReport(
     _requiredToken,
     path,
@@ -529,6 +532,7 @@ class AuthState extends ChangeNotifier {
     toUtc: toUtc,
     branchId: branchId,
     option: option,
+    filters: filters,
   );
   Future<void> logout() async {
     await _tokenStore.clear();
