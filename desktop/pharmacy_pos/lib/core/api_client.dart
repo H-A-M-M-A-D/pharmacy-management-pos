@@ -402,7 +402,7 @@ class ApiClient implements PharmacyApi {
             Platform.environment['PHARMACY_API_URL'] ??
                 const String.fromEnvironment(
                   'API_BASE_URL',
-                  defaultValue: 'http://localhost:5000',
+                  defaultValue: 'http://localhost:5273',
                 ),
           ),
       _httpClient = httpClient ?? HttpClient();
