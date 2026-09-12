@@ -292,6 +292,14 @@ class _AppShellState extends State<AppShell> {
             labelType: NavigationRailLabelType.all,
             selectedIndex: _selected,
             onDestinationSelected: (value) => setState(() => _selected = value),
+            // The destination list can exceed the window height once several
+            // permission-gated sections are enabled. `scrollable` makes the
+            // rail wrap its destinations in a SingleChildScrollView instead of
+            // overflowing; `leadingAtTop`/`trailingAtBottom` keep the branding
+            // icon and sign-out button fixed outside that scrollable area.
+            leadingAtTop: true,
+            trailingAtBottom: true,
+            scrollable: true,
             leading: Padding(
               padding: const EdgeInsets.symmetric(vertical: 18),
               child: Icon(
@@ -300,17 +308,12 @@ class _AppShellState extends State<AppShell> {
                 size: 32,
               ),
             ),
-            trailing: Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: IconButton(
-                    tooltip: 'Sign out',
-                    onPressed: widget.authState.logout,
-                    icon: const Icon(Icons.logout),
-                  ),
-                ),
+            trailing: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: IconButton(
+                tooltip: 'Sign out',
+                onPressed: widget.authState.logout,
+                icon: const Icon(Icons.logout),
               ),
             ),
             destinations: destinations,

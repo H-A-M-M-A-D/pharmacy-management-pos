@@ -101,6 +101,54 @@ void main() {
     expect(find.text('System Info'), findsOneWidget);
   });
 
+  testWidgets(
+    'sidebar scrolls to reach lower navigation items at 800x600 without overflow',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = TestFixture(
+        permissions: {
+          'users.view',
+          'products.view',
+          'categories.view',
+          'manufacturers.view',
+          'inventory.view',
+          'godowns.view',
+          'stock_transfers.view',
+          'suppliers.view',
+          'customers.view',
+          'purchases.view',
+          'sales.view',
+          'quotations.view',
+          'sales_orders.view',
+          'sales.wholesale',
+          'pricing.view',
+          'cashier_shift.view',
+          'accounts.view',
+          'reports.view',
+          'system.view',
+          'accounts.journal.view',
+        },
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+
+      // With every permission-gated section enabled, the destination list is
+      // far taller than the 800x600 window - this must not overflow.
+      expect(tester.takeException(), isNull);
+
+      // Scroll the rail down (mouse-wheel drag) and confirm a destination
+      // near the bottom of the list is reachable and tappable.
+      await tester.drag(find.byType(NavigationRail), const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Administration'));
+      await tester.pumpAndSettle();
+      expect(find.text('System Info'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('user list renders API results', (tester) async {
     final fixture = TestFixture(permissions: {'users.view'});
     await tester.pumpWidget(fixture.app);
