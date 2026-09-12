@@ -25,6 +25,8 @@ public sealed class JournalPostingService(IAccountingRepository repository, Time
                 throw new RequestValidationException("A journal line must carry a non-zero debit or credit.");
             if (!mappings.TryGetValue(line.Account, out var accountId))
                 throw new InvalidOperationException($"No chart of accounts mapping is configured for '{line.Account}'. Configure it under Accounts before posting.");
+            if (line.CostCenterId.HasValue && await repository.GetCostCenterAsync(line.CostCenterId.Value, cancellationToken) is not { IsActive: true })
+                throw new RequestValidationException("Cost center is invalid or inactive.");
 
             totalDebit += line.Debit;
             totalCredit += line.Credit;
@@ -36,7 +38,8 @@ public sealed class JournalPostingService(IAccountingRepository repository, Time
                 BranchId = request.BranchId,
                 CustomerId = line.CustomerId,
                 SupplierId = line.SupplierId,
-                Description = line.Description
+                Description = line.Description,
+                CostCenterId = line.CostCenterId
             });
         }
 

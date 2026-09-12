@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../auth/auth_state.dart';
+import 'bank_reconciliation_view.dart';
+import 'budgets_view.dart';
+import 'cash_bank_day_book_view.dart';
+import 'cash_flow_view.dart';
 import 'chart_of_accounts_view.dart';
 import 'journal_view.dart';
 import 'parties_view.dart';
+import 'party_adjustments_view.dart';
+import 'periods_view.dart';
+import 'reconciliations_view.dart';
+import 'recurring_journals_view.dart';
 import 'statements_view.dart';
 
 class AccountsScreen extends StatefulWidget {
@@ -35,6 +43,27 @@ class _AccountsScreenState extends State<AccountsScreen> {
         _AccountsSection('Receivables', Icons.people_outline, ReceivablesView(authState: widget.authState)),
       if (widget.authState.can('suppliers.view'))
         _AccountsSection('Payables', Icons.local_shipping_outlined, PayablesView(authState: widget.authState)),
+      if (widget.authState.can('accounts.journal.view')) ...[
+        _AccountsSection('Cash Book', Icons.payments_outlined, CashBookView(authState: widget.authState)),
+        _AccountsSection('Bank Book', Icons.account_balance_wallet_outlined, BankBookView(authState: widget.authState)),
+        _AccountsSection('Day Book', Icons.today_outlined, DayBookView(authState: widget.authState)),
+        _AccountsSection('Cash Flow', Icons.swap_vert_outlined, CashFlowView(authState: widget.authState)),
+      ],
+      if (widget.authState.can('accounts.reconciliation.view')) ...[
+        _AccountsSection('Bank Reconciliation', Icons.fact_check_outlined, BankReconciliationView(authState: widget.authState)),
+        _AccountsSection('AR Reconciliation', Icons.people_alt_outlined, ArReconciliationView(authState: widget.authState)),
+        _AccountsSection('AP Reconciliation', Icons.local_shipping_outlined, ApReconciliationView(authState: widget.authState)),
+        _AccountsSection('Inventory Reconciliation', Icons.inventory_2_outlined, InventoryReconciliationView(authState: widget.authState)),
+        _AccountsSection('Cash/Bank Reconciliation', Icons.account_balance_outlined, CashBankReconciliationView(authState: widget.authState)),
+      ],
+      if (widget.authState.can('accounts.periods.view'))
+        _AccountsSection('Accounting Periods', Icons.event_repeat_outlined, PeriodsView(authState: widget.authState)),
+      if (widget.authState.can('accounts.recurring.view'))
+        _AccountsSection('Recurring Journals', Icons.repeat_outlined, RecurringJournalsView(authState: widget.authState)),
+      if (widget.authState.can('accounts.budgets.view'))
+        _AccountsSection('Budgets', Icons.savings_outlined, BudgetsView(authState: widget.authState)),
+      if (['accounts.credit_notes.view', 'accounts.debit_notes.view', 'accounts.writeoffs.view', 'accounts.advances.view'].any(widget.authState.can))
+        _AccountsSection('Party Adjustments', Icons.swap_horiz, PartyAdjustmentsView(authState: widget.authState)),
     ];
     if (_selected >= sections.length) _selected = 0;
     if (sections.isEmpty) return const Center(child: Text('No accounting features are available for this user.'));

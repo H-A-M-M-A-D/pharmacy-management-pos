@@ -97,6 +97,22 @@ public sealed class AccountingManagementTests
     }
 
     [Fact]
+    public async Task Manual_journal_requests_the_soft_closed_period_override_only_when_the_actor_holds_it()
+    {
+        var withoutOverride = new Fixture(PermissionCatalog.AccountsJournalPost);
+        await withoutOverride.Service.PostManualJournalAsync(withoutOverride.Actor.Id, new(
+            DateTime.UtcNow, withoutOverride.Branch.Id, null, "no override",
+            [new(withoutOverride.CashAccount.Id, 100, 0), new(withoutOverride.SalesAccount.Id, 0, 100)]));
+        Assert.False(withoutOverride.SoftClosedOverrideRequested);
+
+        var withOverride = new Fixture(PermissionCatalog.AccountsJournalPost, PermissionCatalog.AccountsPostToSoftClosed);
+        await withOverride.Service.PostManualJournalAsync(withOverride.Actor.Id, new(
+            DateTime.UtcNow, withOverride.Branch.Id, null, "with override",
+            [new(withOverride.CashAccount.Id, 100, 0), new(withOverride.SalesAccount.Id, 0, 100)]));
+        Assert.True(withOverride.SoftClosedOverrideRequested);
+    }
+
+    [Fact]
     public async Task Account_mapping_rejects_inactive_or_header_target_then_upserts()
     {
         var f = new Fixture(PermissionCatalog.AccountsCoaManage);
@@ -161,6 +177,51 @@ public sealed class AccountingManagementTests
         Assert.Equal(350, balance.CurrentPeriodEarnings);
         Assert.Equal(850, balance.TotalEquity);
         Assert.True(balance.IsBalanced);
+    }
+
+    [Fact]
+    public async Task Reversing_a_manual_journal_flips_lines_and_links_back_to_the_original()
+    {
+        var f = new Fixture(PermissionCatalog.AccountsJournalPost, PermissionCatalog.AccountsJournalReverse);
+        var posted = await f.Service.PostManualJournalAsync(f.Actor.Id, new(
+            DateTime.UtcNow, f.Branch.Id, "REF-1", "Rent accrual", [new(f.CashAccount.Id, 500, 0), new(f.SalesAccount.Id, 0, 500)]));
+
+        var reversal = await f.Service.ReverseJournalEntryAsync(f.Actor.Id, posted.Id, new("Posted to the wrong account", null));
+        Assert.Equal(500, reversal.Lines.Single(x => x.ChartOfAccountId == f.CashAccount.Id).Credit);
+        Assert.Equal(500, reversal.Lines.Single(x => x.ChartOfAccountId == f.SalesAccount.Id).Debit);
+        Assert.Equal(JournalSourceType.JournalReversal, f.JournalEntries.Single(x => x.Id == reversal.Id).SourceType);
+        Assert.Equal(posted.Id, f.JournalEntries.Single(x => x.Id == reversal.Id).ReversesJournalEntryId);
+
+        await Assert.ThrowsAsync<RequestValidationException>(() =>
+            f.Service.ReverseJournalEntryAsync(f.Actor.Id, posted.Id, new("Trying again", null)));
+    }
+
+    [Fact]
+    public async Task Reversal_rejects_missing_reason_and_ineligible_source_types()
+    {
+        var f = new Fixture(PermissionCatalog.AccountsJournalPost, PermissionCatalog.AccountsJournalReverse);
+        var posted = await f.Service.PostManualJournalAsync(f.Actor.Id, new(
+            DateTime.UtcNow, f.Branch.Id, null, "Adjustment", [new(f.CashAccount.Id, 200, 0), new(f.SalesAccount.Id, 0, 200)]));
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.ReverseJournalEntryAsync(f.Actor.Id, posted.Id, new("", null)));
+
+        var saleEntry = new JournalEntry
+        {
+            EntryNumber = "JV-2026-000099", EntryDateUtc = DateTime.UtcNow, SourceType = JournalSourceType.Sale, SourceId = Guid.NewGuid(),
+            Description = "POS sale", BranchId = f.Branch.Id, PostedByUserId = f.Actor.Id, PostedAtUtc = DateTime.UtcNow,
+            Lines = [new JournalEntryLine { ChartOfAccountId = f.CashAccount.Id, Debit = 100, BranchId = f.Branch.Id }, new JournalEntryLine { ChartOfAccountId = f.SalesAccount.Id, Credit = 100, BranchId = f.Branch.Id }]
+        };
+        f.JournalEntries.Add(saleEntry);
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.ReverseJournalEntryAsync(f.Actor.Id, saleEntry.Id, new("Undo the sale", null)));
+
+        var customerAdjustment = new JournalEntry
+        {
+            EntryNumber = "JV-2026-000100", EntryDateUtc = DateTime.UtcNow, SourceType = JournalSourceType.ManualVoucher, SourceId = Guid.NewGuid(),
+            Description = "Manual AR touch", BranchId = f.Branch.Id, PostedByUserId = f.Actor.Id, PostedAtUtc = DateTime.UtcNow,
+            Lines = [new JournalEntryLine { ChartOfAccountId = f.CashAccount.Id, Debit = 50, BranchId = f.Branch.Id, CustomerId = Guid.NewGuid() },
+                     new JournalEntryLine { ChartOfAccountId = f.SalesAccount.Id, Credit = 50, BranchId = f.Branch.Id }]
+        };
+        f.JournalEntries.Add(customerAdjustment);
+        await Assert.ThrowsAsync<RequestValidationException>(() => f.Service.ReverseJournalEntryAsync(f.Actor.Id, customerAdjustment.Id, new("Undo", null)));
     }
 
     private static TrialBalanceRowDto Row(string code, string name, AccountType type, NormalBalance normal, decimal debit, decimal credit) =>
@@ -240,5 +301,39 @@ public sealed class AccountingManagementTests
         public Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default) { Audits.Add(audit); return Task.CompletedTask; }
         public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default) => operation(cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public readonly List<Guid> ReversedJournalEntryIds = [];
+        public readonly List<Guid> VoucherLinkedJournalEntryIds = [];
+        public AccountingPeriod? CoveringPeriod { get; set; }
+        public bool SoftClosedOverrideRequested;
+        public readonly List<CostCenter> CostCenters = [];
+
+        public Task<bool> JournalEntryHasReversalAsync(Guid journalEntryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ReversedJournalEntryIds.Contains(journalEntryId) || JournalEntries.Any(x => x.ReversesJournalEntryId == journalEntryId));
+        public Task<bool> JournalEntryLinkedToVoucherAsync(Guid journalEntryId, CancellationToken cancellationToken = default) => Task.FromResult(VoucherLinkedJournalEntryIds.Contains(journalEntryId));
+        public Task<AccountingPeriod?> GetCoveringPeriodAsync(DateOnly date, CancellationToken cancellationToken = default) => Task.FromResult(CoveringPeriod);
+        public void AllowPostingIntoSoftClosedPeriod() => SoftClosedOverrideRequested = true;
+
+        public Task<IReadOnlyList<CostCenter>> ListCostCentersAsync(bool includeInactive, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CostCenter>>(CostCenters.Where(x => includeInactive || x.IsActive).ToList());
+        public Task<CostCenter?> GetCostCenterAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(CostCenters.FirstOrDefault(x => x.Id == id));
+        public Task<CostCenter?> GetCostCenterByNormalizedCodeAsync(string normalizedCode, CancellationToken cancellationToken = default) => Task.FromResult(CostCenters.FirstOrDefault(x => x.NormalizedCode == normalizedCode));
+        public Task AddCostCenterAsync(CostCenter costCenter, CancellationToken cancellationToken = default) { CostCenters.Add(costCenter); return Task.CompletedTask; }
+
+        public Task<CashBankBookDto> GetCashBankBookAsync(AccountMappingKey mappingKey, CashBankBookQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CashBankBookDto(query.FromUtc, query.ToUtc, 0, 0, 0, 0, new PagedResult<CashBankBookLineDto>([], query.Page, query.PageSize, 0)));
+        public Task<DayBookDto> GetDayBookAsync(DayBookQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new DayBookDto(query.FromUtc, query.ToUtc, 0, 0, new PagedResult<DayBookLineDto>([], query.Page, query.PageSize, 0)));
+
+        public Task<decimal> GetCashAndBankBalanceAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult(0m);
+        public Task<IReadOnlyList<(Guid ChartOfAccountId, AccountType AccountType, CashFlowClassification? Classification, decimal OpeningBalance, decimal ClosingBalance)>> GetNonCashBalanceMovementsAsync(
+            DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<(Guid, AccountType, CashFlowClassification?, decimal, decimal)>>([]);
+
+        public Task<ControlReconciliationDto> GetArControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult(new ControlReconciliationDto(asOfUtc, 0, 0, 0, []));
+        public Task<ControlReconciliationDto> GetApControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult(new ControlReconciliationDto(asOfUtc, 0, 0, 0, []));
+        public Task<CashBankControlReconciliationDto> GetCashBankControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CashBankControlReconciliationDto(asOfUtc, 0, 0, 0, 0, 0, 0, []));
+        public Task<decimal> GetInventoryValuationAsync(Guid? branchId, Guid? godownId, CancellationToken cancellationToken = default) => Task.FromResult(0m);
+        public Task<decimal> GetMappedAccountBalanceAsync(AccountMappingKey key, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default) => Task.FromResult(0m);
     }
 }

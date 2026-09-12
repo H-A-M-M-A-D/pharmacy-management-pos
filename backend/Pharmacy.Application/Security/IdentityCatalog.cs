@@ -147,6 +147,29 @@ public static class PermissionCatalog
     public const string SalesCostView = "sales.cost_view";
     public const string PricingView = "pricing.view";
     public const string PricingManage = "pricing.manage";
+    public const string AccountsPeriodsView = "accounts.periods.view";
+    public const string AccountsPeriodsManage = "accounts.periods.manage";
+    public const string AccountsPeriodsClose = "accounts.periods.close";
+    public const string AccountsPeriodsReopen = "accounts.periods.reopen";
+    public const string AccountsPostToSoftClosed = "accounts.post_to_soft_closed";
+    public const string AccountsJournalReverse = "accounts.journal.reverse";
+    public const string AccountsRecurringView = "accounts.recurring.view";
+    public const string AccountsRecurringManage = "accounts.recurring.manage";
+    public const string AccountsReconciliationView = "accounts.reconciliation.view";
+    public const string AccountsReconciliationManage = "accounts.reconciliation.manage";
+    public const string AccountsBudgetsView = "accounts.budgets.view";
+    public const string AccountsBudgetsManage = "accounts.budgets.manage";
+    public const string AccountsCostCentersView = "accounts.cost_centers.view";
+    public const string AccountsCostCentersManage = "accounts.cost_centers.manage";
+    public const string AccountsCreditNotesView = "accounts.credit_notes.view";
+    public const string AccountsCreditNotesCreate = "accounts.credit_notes.create";
+    public const string AccountsDebitNotesView = "accounts.debit_notes.view";
+    public const string AccountsDebitNotesCreate = "accounts.debit_notes.create";
+    public const string AccountsWriteOffsView = "accounts.writeoffs.view";
+    public const string AccountsWriteOffsCreate = "accounts.writeoffs.create";
+    public const string AccountsAdvancesView = "accounts.advances.view";
+    public const string AccountsAdvancesCreate = "accounts.advances.create";
+    public const string AccountsAdvancesApply = "accounts.advances.apply";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -189,7 +212,14 @@ public static class PermissionCatalog
         QuotationsView, QuotationsCreate, QuotationsUpdate, QuotationsSend, QuotationsAccept, QuotationsCancel, QuotationsConvert,
         SalesOrdersView, SalesOrdersCreate, SalesOrdersUpdate, SalesOrdersConfirm, SalesOrdersFulfill, SalesOrdersCancel,
         SalesWholesale, SalesCreditLimitOverride, SalesDiscountOverride, SalesPriceOverride, SalesSellBelowCost, SalesCostView,
-        PricingView, PricingManage
+        PricingView, PricingManage,
+        AccountsPeriodsView, AccountsPeriodsManage, AccountsPeriodsClose, AccountsPeriodsReopen, AccountsPostToSoftClosed,
+        AccountsJournalReverse, AccountsRecurringView, AccountsRecurringManage,
+        AccountsReconciliationView, AccountsReconciliationManage,
+        AccountsBudgetsView, AccountsBudgetsManage, AccountsCostCentersView, AccountsCostCentersManage,
+        AccountsCreditNotesView, AccountsCreditNotesCreate, AccountsDebitNotesView, AccountsDebitNotesCreate,
+        AccountsWriteOffsView, AccountsWriteOffsCreate,
+        AccountsAdvancesView, AccountsAdvancesCreate, AccountsAdvancesApply
     ];
 }
 

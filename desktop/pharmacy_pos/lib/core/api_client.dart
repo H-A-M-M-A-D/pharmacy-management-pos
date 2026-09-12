@@ -320,7 +320,9 @@ abstract interface class PharmacyApi {
   Future<List<ExpenseCategoryInfo>> listExpenseCategories(String token);
   Future<List<ExpenseInfo>> listExpenses(String token);
   Future<ExpenseInfo> postExpense(String token, Map<String, dynamic> values);
+  Future<void> reverseExpense(String token, String id, String reason);
   Future<void> postOtherIncome(String token, Map<String, dynamic> values);
+  Future<void> reverseOtherIncome(String token, String id, String reason);
   Future<void> postFinancialTransfer(String token, Map<String, dynamic> values);
   Future<List<FinancialLedgerItem>> financialLedger(
     String token,
@@ -1685,11 +1687,30 @@ class ApiClient implements PharmacyApi {
     (await _request('POST', '/api/expenses', token: token, body: values))!,
   );
   @override
+  Future<void> reverseExpense(String token, String id, String reason) async =>
+      _request(
+        'POST',
+        '/api/expenses/$id/reverse',
+        token: token,
+        body: {'reason': reason},
+      );
+  @override
   Future<void> postOtherIncome(
     String token,
     Map<String, dynamic> values,
   ) async =>
       _request('POST', '/api/finance/other-income', token: token, body: values);
+  @override
+  Future<void> reverseOtherIncome(
+    String token,
+    String id,
+    String reason,
+  ) async => _request(
+    'POST',
+    '/api/finance/other-income/$id/reverse',
+    token: token,
+    body: {'reason': reason},
+  );
   @override
   Future<void> postFinancialTransfer(
     String token,

@@ -180,6 +180,10 @@ public sealed class CashierShiftManagementTests
 
         public Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default) => Task.FromResult(Actors.FirstOrDefault(x => x.Id == actorId));
         public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) => Task.FromResult<Branch?>(Branch.Id == branchId ? Branch : null);
+        public readonly List<FinancialAccount> FinancialAccounts = [];
+        public readonly List<FinancialLedgerEntry> FinancialLedgerEntries = [];
+        public Task<FinancialAccount?> GetFinancialAccountAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(FinancialAccounts.FirstOrDefault(x => x.Id == id));
+        public Task AddFinancialLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default) { FinancialLedgerEntries.Add(entry); return Task.CompletedTask; }
         public Task<CashierShift?> GetOpenShiftForCashierAsync(Guid cashierUserId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Shifts.FirstOrDefault(x => x.CashierUserId == cashierUserId && x.Status == CashierShiftStatus.Open));
         public Task<CashierShift?> GetShiftAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Shifts.FirstOrDefault(x => x.Id == id));

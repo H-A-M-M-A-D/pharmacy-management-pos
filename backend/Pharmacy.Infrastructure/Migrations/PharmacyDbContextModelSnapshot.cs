@@ -32,6 +32,14 @@ namespace Pharmacy.Infrastructure.Migrations
 
             modelBuilder.HasSequence("ContraVoucherNumberSequence");
 
+            modelBuilder.HasSequence("CreditNoteNumberSequence");
+
+            modelBuilder.HasSequence("CustomerAdvanceNumberSequence");
+
+            modelBuilder.HasSequence("CustomerWriteOffNumberSequence");
+
+            modelBuilder.HasSequence("DebitNoteNumberSequence");
+
             modelBuilder.HasSequence("ExpenseNumberSequence");
 
             modelBuilder.HasSequence("FinancialTransferNumberSequence");
@@ -45,6 +53,64 @@ namespace Pharmacy.Infrastructure.Migrations
             modelBuilder.HasSequence("SalesOrderNumberSequence");
 
             modelBuilder.HasSequence("StockTransferNumberSequence");
+
+            modelBuilder.HasSequence("SupplierAdvanceNumberSequence");
+
+            modelBuilder.HasSequence("SupplierWriteOffNumberSequence");
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountBudget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BudgetAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("ChartOfAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FiscalYear")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("PeriodNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ChartOfAccountId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FiscalYear", "PeriodNumber", "ChartOfAccountId", "BranchId")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("FiscalYear", "PeriodNumber", "ChartOfAccountId", "BranchId"), false);
+
+                    b.ToTable("AccountBudgets", t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountBudgets_PeriodNumber_Range", "\"PeriodNumber\" IS NULL OR \"PeriodNumber\" BETWEEN 1 AND 12");
+                        });
+                });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.AccountMapping", b =>
                 {
@@ -73,7 +139,76 @@ namespace Pharmacy.Infrastructure.Migrations
 
                     b.ToTable("AccountMappings", t =>
                         {
-                            t.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 18");
+                            t.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 22");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountingPeriod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("FiscalYear")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("PeriodNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ReopenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReopenedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedByUserId");
+
+                    b.HasIndex("ReopenedByUserId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("FiscalYear", "PeriodNumber")
+                        .IsUnique();
+
+                    b.HasIndex("StartDate", "EndDate");
+
+                    b.ToTable("AccountingPeriods", t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingPeriods_DateOrder", "\"EndDate\" >= \"StartDate\"");
+
+                            t.HasCheckConstraint("CK_AccountingPeriods_Status", "\"Status\" BETWEEN 1 AND 3");
                         });
                 });
 
@@ -172,6 +307,92 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.HasIndex("Status", "CreatedAt");
 
                     b.ToTable("BackupRecords");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.BankReconciliation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("BookBalanceAtFinalization")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("DifferenceAtFinalization")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("FinalizedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("FinalizedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FinancialAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ReopenReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReopenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReopenedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("StatementClosingBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateOnly>("StatementEndDate")
+                        .HasColumnType("date");
+
+                    b.Property<decimal>("StatementOpeningBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateOnly>("StatementStartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FinalizedByUserId");
+
+                    b.HasIndex("ReopenedByUserId");
+
+                    b.HasIndex("FinancialAccountId", "StatementEndDate");
+
+                    b.HasIndex("FinancialAccountId", "Status");
+
+                    b.ToTable("BankReconciliations", t =>
+                        {
+                            t.HasCheckConstraint("CK_BankReconciliations_DateOrder", "\"StatementEndDate\" >= \"StatementStartDate\"");
+
+                            t.HasCheckConstraint("CK_BankReconciliations_Status", "\"Status\" BETWEEN 1 AND 2");
+                        });
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.Branch", b =>
@@ -275,6 +496,9 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("FinancialAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("OpenedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -307,6 +531,8 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("FinancialAccountId");
 
                     b.HasIndex("ReconciledByUserId");
 
@@ -420,6 +646,9 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Property<int>("AccountType")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("CashFlowClassification")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -470,7 +699,120 @@ namespace Pharmacy.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("CK_ChartOfAccounts_AccountType", "\"AccountType\" IN (1, 2, 3, 4, 5, 6)");
 
+                            t.HasCheckConstraint("CK_ChartOfAccounts_CashFlowClassification", "\"CashFlowClassification\" IS NULL OR \"CashFlowClassification\" BETWEEN 1 AND 3");
+
                             t.HasCheckConstraint("CK_ChartOfAccounts_NormalBalance", "\"NormalBalance\" IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CostCenter", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NormalizedCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("NormalizedCode")
+                        .IsUnique();
+
+                    b.ToTable("CostCenters");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CreditNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("AppliedToSaleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreditNoteNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("IssueDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedToSaleId");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CreditNoteNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CustomerId", "IssueDateUtc");
+
+                    b.ToTable("CreditNotes", t =>
+                        {
+                            t.HasCheckConstraint("CK_CreditNotes_Amount_Positive", "\"Amount\" > 0");
                         });
                 });
 
@@ -596,6 +938,126 @@ namespace Pharmacy.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_Customers_CreditLimit_NonNegative", "\"CreditLimit\" >= 0");
 
                             t.HasCheckConstraint("CK_Customers_CustomerType", "\"CustomerType\" IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerAdvance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdvanceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("AmountApplied")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FinancialAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ReceivedDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdvanceNumber")
+                        .IsUnique();
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FinancialAccountId");
+
+                    b.HasIndex("CustomerId", "ReceivedDateUtc");
+
+                    b.ToTable("CustomerAdvances", t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerAdvances_AmountApplied_Range", "\"AmountApplied\" >= 0 AND \"AmountApplied\" <= \"Amount\"");
+
+                            t.HasCheckConstraint("CK_CustomerAdvances_Amount_Positive", "\"Amount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerAdvanceApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("AppliedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerAdvanceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerPaymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SaleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CustomerAdvanceId");
+
+                    b.HasIndex("CustomerPaymentId")
+                        .IsUnique();
+
+                    b.HasIndex("SaleId");
+
+                    b.ToTable("CustomerAdvanceApplications", t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerAdvanceApplications_Amount_Positive", "\"AppliedAmount\" > 0");
                         });
                 });
 
@@ -735,7 +1197,7 @@ namespace Pharmacy.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("CK_CustomerPayments_Amount_Positive", "\"Amount\" > 0");
 
-                            t.HasCheckConstraint("CK_CustomerPayments_Method", "\"PaymentMethod\" IN (1, 2, 3, 4, 5, 6, 7)");
+                            t.HasCheckConstraint("CK_CustomerPayments_Method", "\"PaymentMethod\" IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)");
                         });
                 });
 
@@ -791,6 +1253,146 @@ namespace Pharmacy.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerWriteOff", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("AppliedToSaleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerPaymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("WriteOffDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WriteOffNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedToSaleId");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CustomerPaymentId")
+                        .IsUnique();
+
+                    b.HasIndex("WriteOffNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CustomerId", "WriteOffDateUtc");
+
+                    b.ToTable("CustomerWriteOffs", t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerWriteOffs_Amount_Positive", "\"Amount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.DebitNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("AppliedToGoodsReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DebitNoteNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("IssueDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedToGoodsReceiptId");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DebitNoteNumber")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierId", "IssueDateUtc");
+
+                    b.ToTable("DebitNotes", t =>
+                        {
+                            t.HasCheckConstraint("CK_DebitNotes_Amount_Positive", "\"Amount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.Expense", b =>
                 {
                     b.Property<Guid>("Id")
@@ -802,6 +1404,9 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("numeric(18,2)");
 
                     b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CostCenterId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -844,15 +1449,29 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReversedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CostCenterId");
+
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("ExpenseNumber")
                         .IsUnique();
+
+                    b.HasIndex("ReversedByUserId");
 
                     b.HasIndex("BranchId", "ExpenseDateUtc");
 
@@ -978,6 +1597,9 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("BankReconciliationId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("BranchId")
                         .HasColumnType("uuid");
 
@@ -1001,6 +1623,9 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("ReconciledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("ReferenceId")
                         .HasColumnType("uuid");
 
@@ -1017,6 +1642,8 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BankReconciliationId");
 
                     b.HasIndex("CreatedByUserId");
 
@@ -1103,6 +1730,75 @@ namespace Pharmacy.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_FinancialTransfers_Amount_Positive", "\"Amount\" > 0");
 
                             t.HasCheckConstraint("CK_FinancialTransfers_DifferentAccounts", "\"SourceAccountId\" <> \"DestinationAccountId\"");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.FiscalYearClose", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FiscalYear")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("NetProfit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ReopenReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReopenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReopenedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TotalCostOfGoodsSold")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TotalOperatingExpenses")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TotalRevenue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedByUserId");
+
+                    b.HasIndex("FiscalYear")
+                        .IsUnique();
+
+                    b.HasIndex("ReopenedByUserId");
+
+                    b.ToTable("FiscalYearCloses", t =>
+                        {
+                            t.HasCheckConstraint("CK_FiscalYearCloses_Status", "\"Status\" BETWEEN 1 AND 2");
                         });
                 });
 
@@ -1452,6 +2148,13 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("ReversesJournalEntryId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("SourceId")
                         .HasColumnType("uuid");
 
@@ -1472,6 +2175,10 @@ namespace Pharmacy.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("PostedByUserId");
+
+                    b.HasIndex("ReversesJournalEntryId")
+                        .IsUnique()
+                        .HasFilter("\"ReversesJournalEntryId\" IS NOT NULL");
 
                     b.HasIndex("BranchId", "EntryDateUtc");
 
@@ -1495,6 +2202,9 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ChartOfAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CostCenterId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1527,6 +2237,8 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
+
+                    b.HasIndex("CostCenterId");
 
                     b.HasIndex("CustomerId");
 
@@ -1625,6 +2337,9 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Property<Guid>("BranchId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CostCenterId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1655,15 +2370,29 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReversedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReversedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CostCenterId");
+
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("IncomeNumber")
                         .IsUnique();
+
+                    b.HasIndex("ReversedByUserId");
 
                     b.HasIndex("BranchId", "OccurredAtUtc");
 
@@ -2367,6 +3096,144 @@ namespace Pharmacy.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_PurchaseReturnItems_Money_NonNegative", "\"PurchasePriceSnapshot\" >= 0 AND \"GrossReturnAmount\" >= 0 AND \"DiscountAdjustment\" >= 0 AND \"TaxAdjustment\" >= 0 AND \"NetSupplierCredit\" >= 0");
 
                             t.HasCheckConstraint("CK_PurchaseReturnItems_Quantities", "\"PaidReturnQuantity\" >= 0 AND \"BonusReturnQuantity\" >= 0 AND (\"PaidReturnQuantity\" + \"BonusReturnQuantity\") > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalOccurrence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("GeneratedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GeneratedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RecurringJournalTemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ScheduledDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeneratedByUserId");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("RecurringJournalTemplateId", "ScheduledDate")
+                        .IsUnique();
+
+                    b.ToTable("RecurringJournalOccurrences");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Frequency")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateOnly>("NextRunDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("NextRunDate");
+
+                    b.HasIndex("BranchId", "IsActive");
+
+                    b.ToTable("RecurringJournalTemplates", t =>
+                        {
+                            t.HasCheckConstraint("CK_RecurringJournalTemplates_Frequency", "\"Frequency\" BETWEEN 1 AND 4");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalTemplateLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ChartOfAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("Credit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("Debit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("RecurringJournalTemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChartOfAccountId");
+
+                    b.HasIndex("RecurringJournalTemplateId");
+
+                    b.ToTable("RecurringJournalTemplateLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_RecurringJournalTemplateLines_Amounts", "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)");
                         });
                 });
 
@@ -3917,6 +4784,126 @@ namespace Pharmacy.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierAdvance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdvanceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("AmountApplied")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FinancialAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PaidDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdvanceNumber")
+                        .IsUnique();
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FinancialAccountId");
+
+                    b.HasIndex("SupplierId", "PaidDateUtc");
+
+                    b.ToTable("SupplierAdvances", t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierAdvances_AmountApplied_Range", "\"AmountApplied\" >= 0 AND \"AmountApplied\" <= \"Amount\"");
+
+                            t.HasCheckConstraint("CK_SupplierAdvances_Amount_Positive", "\"Amount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierAdvanceApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("AppliedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GoodsReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierAdvanceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierLedgerEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("GoodsReceiptId");
+
+                    b.HasIndex("SupplierAdvanceId");
+
+                    b.HasIndex("SupplierLedgerEntryId")
+                        .IsUnique();
+
+                    b.ToTable("SupplierAdvanceApplications", t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierAdvanceApplications_Amount_Positive", "\"AppliedAmount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierLedgerEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4041,6 +5028,79 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.ToTable("SupplierPaymentAllocations", t =>
                         {
                             t.HasCheckConstraint("CK_SupplierPaymentAllocations_Amount_Positive", "\"AllocatedAmount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierWriteOff", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("AppliedToGoodsReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierLedgerEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("WriteOffDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WriteOffNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedToGoodsReceiptId");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("SupplierLedgerEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("WriteOffNumber")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierId", "WriteOffDateUtc");
+
+                    b.ToTable("SupplierWriteOffs", t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierWriteOffs_Amount_Positive", "\"Amount\" > 0");
                         });
                 });
 
@@ -4233,6 +5293,9 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<Guid?>("FinancialAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("JournalEntryId")
                         .HasColumnType("uuid");
 
@@ -4279,11 +5342,15 @@ namespace Pharmacy.Infrastructure.Migrations
 
                     b.HasIndex("CustomerId");
 
+                    b.HasIndex("FinancialAccountId");
+
                     b.HasIndex("JournalEntryId");
 
                     b.HasIndex("PostedByUserId");
 
-                    b.HasIndex("ReversalOfVoucherId");
+                    b.HasIndex("ReversalOfVoucherId")
+                        .IsUnique()
+                        .HasFilter("\"ReversalOfVoucherId\" IS NOT NULL");
 
                     b.HasIndex("SupplierId");
 
@@ -4356,6 +5423,32 @@ namespace Pharmacy.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountBudget", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ChartOfAccount")
+                        .WithMany()
+                        .HasForeignKey("ChartOfAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("ChartOfAccount");
+
+                    b.Navigation("CreatedByUser");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.AccountMapping", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ChartOfAccount")
@@ -4367,6 +5460,23 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("ChartOfAccount");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.AccountingPeriod", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ClosedByUser")
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ReopenedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReopenedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ClosedByUser");
+
+                    b.Navigation("ReopenedByUser");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.AuditLog", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.User", "User")
@@ -4376,6 +5486,39 @@ namespace Pharmacy.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.BankReconciliation", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "FinalizedByUser")
+                        .WithMany()
+                        .HasForeignKey("FinalizedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.FinancialAccount", "FinancialAccount")
+                        .WithMany()
+                        .HasForeignKey("FinancialAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ReopenedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReopenedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("FinalizedByUser");
+
+                    b.Navigation("FinancialAccount");
+
+                    b.Navigation("ReopenedByUser");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.CashierShift", b =>
@@ -4392,6 +5535,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Pharmacy.Domain.Entities.FinancialAccount", "FinancialAccount")
+                        .WithMany()
+                        .HasForeignKey("FinancialAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Pharmacy.Domain.Entities.User", "ReconciledByUser")
                         .WithMany()
                         .HasForeignKey("ReconciledByUserId")
@@ -4400,6 +5548,8 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("CashierUser");
+
+                    b.Navigation("FinancialAccount");
 
                     b.Navigation("ReconciledByUser");
                 });
@@ -4444,6 +5594,40 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("ParentAccount");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CreditNote", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Sale", "AppliedToSale")
+                        .WithMany()
+                        .HasForeignKey("AppliedToSaleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppliedToSale");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.Customer", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.PriceLevel", "PriceLevel")
@@ -4452,6 +5636,76 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("PriceLevel");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerAdvance", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.FinancialAccount", "FinancialAccount")
+                        .WithMany()
+                        .HasForeignKey("FinancialAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("FinancialAccount");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerAdvanceApplication", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.CustomerAdvance", "CustomerAdvance")
+                        .WithMany("Applications")
+                        .HasForeignKey("CustomerAdvanceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.CustomerPayment", "CustomerPayment")
+                        .WithMany()
+                        .HasForeignKey("CustomerPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Sale", "Sale")
+                        .WithMany()
+                        .HasForeignKey("SaleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("CustomerAdvance");
+
+                    b.Navigation("CustomerPayment");
+
+                    b.Navigation("Sale");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerLedgerEntry", b =>
@@ -4557,6 +5811,82 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Sale");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerWriteOff", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Sale", "AppliedToSale")
+                        .WithMany()
+                        .HasForeignKey("AppliedToSaleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.CustomerPayment", "CustomerPayment")
+                        .WithMany()
+                        .HasForeignKey("CustomerPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppliedToSale");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("CustomerPayment");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.DebitNote", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.GoodsReceipt", "AppliedToGoodsReceipt")
+                        .WithMany()
+                        .HasForeignKey("AppliedToGoodsReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppliedToGoodsReceipt");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Supplier");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.Expense", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
@@ -4564,6 +5894,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasForeignKey("BranchId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.CostCenter", "CostCenter")
+                        .WithMany()
+                        .HasForeignKey("CostCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
                         .WithMany()
@@ -4583,13 +5918,22 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ReversedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReversedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Branch");
+
+                    b.Navigation("CostCenter");
 
                     b.Navigation("CreatedByUser");
 
                     b.Navigation("ExpenseCategory");
 
                     b.Navigation("FinancialAccount");
+
+                    b.Navigation("ReversedByUser");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.FinancialAccount", b =>
@@ -4605,6 +5949,11 @@ namespace Pharmacy.Infrastructure.Migrations
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.FinancialLedgerEntry", b =>
                 {
+                    b.HasOne("Pharmacy.Domain.Entities.BankReconciliation", "BankReconciliation")
+                        .WithMany("MatchedEntries")
+                        .HasForeignKey("BankReconciliationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
                         .WithMany()
                         .HasForeignKey("BranchId")
@@ -4622,6 +5971,8 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasForeignKey("FinancialAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("BankReconciliation");
 
                     b.Navigation("Branch");
 
@@ -4663,6 +6014,24 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("DestinationAccount");
 
                     b.Navigation("SourceAccount");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.FiscalYearClose", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ClosedByUser")
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ReopenedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReopenedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ClosedByUser");
+
+                    b.Navigation("ReopenedByUser");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.Godown", b =>
@@ -4797,9 +6166,16 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Pharmacy.Domain.Entities.JournalEntry", "ReversesJournalEntry")
+                        .WithMany()
+                        .HasForeignKey("ReversesJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Branch");
 
                     b.Navigation("PostedByUser");
+
+                    b.Navigation("ReversesJournalEntry");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.JournalEntryLine", b =>
@@ -4815,6 +6191,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasForeignKey("ChartOfAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.CostCenter", "CostCenter")
+                        .WithMany()
+                        .HasForeignKey("CostCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Pharmacy.Domain.Entities.Customer", "Customer")
                         .WithMany()
@@ -4836,6 +6217,8 @@ namespace Pharmacy.Infrastructure.Migrations
 
                     b.Navigation("ChartOfAccount");
 
+                    b.Navigation("CostCenter");
+
                     b.Navigation("Customer");
 
                     b.Navigation("JournalEntry");
@@ -4851,6 +6234,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Pharmacy.Domain.Entities.CostCenter", "CostCenter")
+                        .WithMany()
+                        .HasForeignKey("CostCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
@@ -4863,11 +6251,20 @@ namespace Pharmacy.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Pharmacy.Domain.Entities.User", "ReversedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReversedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Branch");
+
+                    b.Navigation("CostCenter");
 
                     b.Navigation("CreatedByUser");
 
                     b.Navigation("FinancialAccount");
+
+                    b.Navigation("ReversedByUser");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.PriceLevel", b =>
@@ -5088,6 +6485,71 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("ProductBatch");
 
                     b.Navigation("PurchaseReturn");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalOccurrence", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "GeneratedByUser")
+                        .WithMany()
+                        .HasForeignKey("GeneratedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.RecurringJournalTemplate", "RecurringJournalTemplate")
+                        .WithMany("Occurrences")
+                        .HasForeignKey("RecurringJournalTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("GeneratedByUser");
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("RecurringJournalTemplate");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalTemplate", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalTemplateLine", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.ChartOfAccount", "ChartOfAccount")
+                        .WithMany()
+                        .HasForeignKey("ChartOfAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.RecurringJournalTemplate", "RecurringJournalTemplate")
+                        .WithMany("Lines")
+                        .HasForeignKey("RecurringJournalTemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChartOfAccount");
+
+                    b.Navigation("RecurringJournalTemplate");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.RolePermission", b =>
@@ -5721,6 +7183,76 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("StockTransfer");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierAdvance", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.FinancialAccount", "FinancialAccount")
+                        .WithMany()
+                        .HasForeignKey("FinancialAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("FinancialAccount");
+
+                    b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierAdvanceApplication", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.GoodsReceipt", "GoodsReceipt")
+                        .WithMany()
+                        .HasForeignKey("GoodsReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.SupplierAdvance", "SupplierAdvance")
+                        .WithMany("Applications")
+                        .HasForeignKey("SupplierAdvanceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.SupplierLedgerEntry", "SupplierLedgerEntry")
+                        .WithMany()
+                        .HasForeignKey("SupplierLedgerEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("GoodsReceipt");
+
+                    b.Navigation("SupplierAdvance");
+
+                    b.Navigation("SupplierLedgerEntry");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierLedgerEntry", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
@@ -5797,6 +7329,48 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("SupplierLedgerEntry");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierWriteOff", b =>
+                {
+                    b.HasOne("Pharmacy.Domain.Entities.GoodsReceipt", "AppliedToGoodsReceipt")
+                        .WithMany()
+                        .HasForeignKey("AppliedToGoodsReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmacy.Domain.Entities.SupplierLedgerEntry", "SupplierLedgerEntry")
+                        .WithMany()
+                        .HasForeignKey("SupplierLedgerEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppliedToGoodsReceipt");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Supplier");
+
+                    b.Navigation("SupplierLedgerEntry");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.User", b =>
                 {
                     b.HasOne("Pharmacy.Domain.Entities.Branch", "Branch")
@@ -5864,6 +7438,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Pharmacy.Domain.Entities.FinancialAccount", "FinancialAccount")
+                        .WithMany()
+                        .HasForeignKey("FinancialAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Pharmacy.Domain.Entities.JournalEntry", "JournalEntry")
                         .WithMany()
                         .HasForeignKey("JournalEntryId")
@@ -5893,6 +7472,8 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("CreatedByUser");
 
                     b.Navigation("Customer");
+
+                    b.Navigation("FinancialAccount");
 
                     b.Navigation("JournalEntry");
 
@@ -5936,6 +7517,11 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Voucher");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.BankReconciliation", b =>
+                {
+                    b.Navigation("MatchedEntries");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.Branch", b =>
                 {
                     b.Navigation("Godowns");
@@ -5968,6 +7554,11 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Payments");
 
                     b.Navigation("Sales");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.CustomerAdvance", b =>
+                {
+                    b.Navigation("Applications");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.FinancialAccount", b =>
@@ -6051,6 +7642,13 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("Pharmacy.Domain.Entities.RecurringJournalTemplate", b =>
+                {
+                    b.Navigation("Lines");
+
+                    b.Navigation("Occurrences");
+                });
+
             modelBuilder.Entity("Pharmacy.Domain.Entities.Role", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -6107,6 +7705,11 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("LedgerEntries");
 
                     b.Navigation("ProductBatches");
+                });
+
+            modelBuilder.Entity("Pharmacy.Domain.Entities.SupplierAdvance", b =>
+                {
+                    b.Navigation("Applications");
                 });
 
             modelBuilder.Entity("Pharmacy.Domain.Entities.User", b =>

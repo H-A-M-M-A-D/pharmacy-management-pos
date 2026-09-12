@@ -27,4 +27,29 @@ public interface IAccountingService
     Task<ArAgingDetailDto> GetArAgingDetailAsync(Guid actorId, Guid customerId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
     Task<ApAgingSummaryDto> GetApAgingSummaryAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? supplierId, CancellationToken cancellationToken = default);
     Task<ApAgingDetailDto> GetApAgingDetailAsync(Guid actorId, Guid supplierId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+
+    // ---- Journal reversal ----
+    Task<JournalEntryDto> ReverseJournalEntryAsync(Guid actorId, Guid journalEntryId, ReverseJournalEntryRequest request, CancellationToken cancellationToken = default);
+
+    // ---- Cost centers ----
+    Task<IReadOnlyList<CostCenterDto>> ListCostCentersAsync(Guid actorId, bool includeInactive, CancellationToken cancellationToken = default);
+    Task<CostCenterDto> CreateCostCenterAsync(Guid actorId, CostCenterRequest request, CancellationToken cancellationToken = default);
+    Task SetCostCenterActiveAsync(Guid actorId, Guid id, bool active, CancellationToken cancellationToken = default);
+
+    // ---- Enhanced Trial Balance ----
+    Task<TrialBalanceMovementDto> GetTrialBalanceMovementAsync(Guid actorId, DateTime fromUtc, DateTime asOfUtc, Guid? branchId, bool includeZeroBalances, CancellationToken cancellationToken = default);
+
+    // ---- Cash Book / Bank Book / Day Book ----
+    Task<CashBankBookDto> GetCashBookAsync(Guid actorId, CashBankBookQuery query, CancellationToken cancellationToken = default);
+    Task<CashBankBookDto> GetBankBookAsync(Guid actorId, CashBankBookQuery query, CancellationToken cancellationToken = default);
+    Task<DayBookDto> GetDayBookAsync(Guid actorId, DayBookQuery query, CancellationToken cancellationToken = default);
+
+    // ---- Cash flow statement ----
+    Task<CashFlowStatementDto> GetCashFlowStatementAsync(Guid actorId, DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default);
+
+    // ---- Control-account reconciliations ----
+    Task<ControlReconciliationDto> GetArControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<ControlReconciliationDto> GetApControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<CashBankControlReconciliationDto> GetCashBankControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default);
+    Task<InventoryReconciliationDto> GetInventoryReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? godownId, CancellationToken cancellationToken = default);
 }

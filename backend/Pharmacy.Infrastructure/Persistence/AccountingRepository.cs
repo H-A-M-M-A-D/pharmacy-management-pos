@@ -75,6 +75,7 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
         if (query.FromUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc >= query.FromUtc);
         if (query.ToUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc <= query.ToUtc);
         if (query.ChartOfAccountId.HasValue) entries = entries.Where(x => x.Lines.Any(l => l.ChartOfAccountId == query.ChartOfAccountId));
+        if (query.CostCenterId.HasValue) entries = entries.Where(x => x.Lines.Any(l => l.CostCenterId == query.CostCenterId));
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var search = query.Search.Trim();
@@ -336,5 +337,227 @@ public sealed class AccountingRepository(PharmacyDbContext context) : IAccountin
         {
             throw new RequestValidationException("Accounting constraints were violated.");
         }
+    }
+
+    // ---- Journal reversal ----
+
+    public Task<bool> JournalEntryHasReversalAsync(Guid journalEntryId, CancellationToken cancellationToken = default) =>
+        context.JournalEntries.AnyAsync(x => x.ReversesJournalEntryId == journalEntryId, cancellationToken);
+
+    public Task<bool> JournalEntryLinkedToVoucherAsync(Guid journalEntryId, CancellationToken cancellationToken = default) =>
+        context.Vouchers.AnyAsync(x => x.JournalEntryId == journalEntryId, cancellationToken);
+
+    public Task<AccountingPeriod?> GetCoveringPeriodAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+        context.AccountingPeriods.AsNoTracking().FirstOrDefaultAsync(x => x.StartDate <= date && x.EndDate >= date, cancellationToken);
+
+    public void AllowPostingIntoSoftClosedPeriod() => context.AllowPostingIntoSoftClosedPeriod = true;
+
+    // ---- Cost centers ----
+
+    public async Task<IReadOnlyList<CostCenter>> ListCostCentersAsync(bool includeInactive, CancellationToken cancellationToken = default) =>
+        await context.CostCenters.AsNoTracking().Where(x => includeInactive || x.IsActive).OrderBy(x => x.Code).ToListAsync(cancellationToken);
+    public Task<CostCenter?> GetCostCenterAsync(Guid id, CancellationToken cancellationToken = default) => context.CostCenters.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public Task<CostCenter?> GetCostCenterByNormalizedCodeAsync(string normalizedCode, CancellationToken cancellationToken = default) =>
+        context.CostCenters.FirstOrDefaultAsync(x => x.NormalizedCode == normalizedCode, cancellationToken);
+    public async Task AddCostCenterAsync(CostCenter costCenter, CancellationToken cancellationToken = default) => await context.CostCenters.AddAsync(costCenter, cancellationToken);
+
+    // ---- Cash Book / Bank Book / Day Book ----
+
+    public async Task<CashBankBookDto> GetCashBankBookAsync(AccountMappingKey mappingKey, CashBankBookQuery query, CancellationToken cancellationToken = default)
+    {
+        var mapping = await context.AccountMappings.AsNoTracking().FirstOrDefaultAsync(x => x.MappingKey == mappingKey, cancellationToken);
+        if (mapping is null) return new CashBankBookDto(query.FromUtc, query.ToUtc, 0, 0, 0, 0, new PagedResult<CashBankBookLineDto>([], query.Page, query.PageSize, 0));
+        var account = await context.ChartOfAccounts.AsNoTracking().SingleAsync(x => x.Id == mapping.ChartOfAccountId, cancellationToken);
+        var baseLines = context.JournalEntryLines.AsNoTracking().Where(x => x.ChartOfAccountId == mapping.ChartOfAccountId);
+        if (query.BranchId.HasValue) baseLines = baseLines.Where(x => x.BranchId == query.BranchId);
+
+        var opening = query.FromUtc.HasValue
+            ? Balance(account.NormalBalance,
+                await baseLines.Where(x => x.JournalEntry!.EntryDateUtc < query.FromUtc.Value).SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0,
+                await baseLines.Where(x => x.JournalEntry!.EntryDateUtc < query.FromUtc.Value).SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0)
+            : 0;
+
+        var period = baseLines;
+        if (query.FromUtc.HasValue) period = period.Where(x => x.JournalEntry!.EntryDateUtc >= query.FromUtc.Value);
+        if (query.ToUtc.HasValue) period = period.Where(x => x.JournalEntry!.EntryDateUtc <= query.ToUtc.Value);
+        var total = await period.CountAsync(cancellationToken);
+        var totalDebit = await period.SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+        var totalCredit = await period.SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+        var skip = (query.Page - 1) * query.PageSize;
+        var ordered = period.OrderBy(x => x.JournalEntry!.EntryDateUtc).ThenBy(x => x.JournalEntry!.EntryNumber).ThenBy(x => x.Id);
+        var priorRows = await ordered.Take(skip).Select(x => new { x.Debit, x.Credit }).ToListAsync(cancellationToken);
+        var running = opening + priorRows.Sum(x => Delta(account.NormalBalance, x.Debit, x.Credit));
+        var pageRows = await ordered.Skip(skip).Take(query.PageSize).Select(x => new
+        {
+            x.JournalEntryId, x.JournalEntry!.EntryNumber, x.JournalEntry.EntryDateUtc, x.JournalEntry.SourceType,
+            x.JournalEntry.Reference, JournalDescription = x.JournalEntry.Description, LineDescription = x.Description,
+            x.Debit, x.Credit, PostedBy = x.JournalEntry.PostedByUser!.FullName
+        }).ToListAsync(cancellationToken);
+        var items = pageRows.Select(x =>
+        {
+            running += Delta(account.NormalBalance, x.Debit, x.Credit);
+            return new CashBankBookLineDto(x.EntryDateUtc, x.Reference ?? x.EntryNumber, x.LineDescription ?? x.JournalDescription,
+                x.Debit, x.Credit, running, x.SourceType, x.PostedBy, x.JournalEntryId, x.EntryNumber);
+        }).ToList();
+        return new CashBankBookDto(query.FromUtc, query.ToUtc, opening, totalDebit, totalCredit,
+            opening + Delta(account.NormalBalance, totalDebit, totalCredit), new PagedResult<CashBankBookLineDto>(items, query.Page, query.PageSize, total));
+    }
+
+    public async Task<DayBookDto> GetDayBookAsync(DayBookQuery query, CancellationToken cancellationToken = default)
+    {
+        var entries = context.JournalEntries.AsNoTracking().Include(x => x.Branch).Include(x => x.PostedByUser).AsQueryable();
+        if (query.BranchId.HasValue) entries = entries.Where(x => x.BranchId == query.BranchId);
+        if (query.FromUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc >= query.FromUtc.Value);
+        if (query.ToUtc.HasValue) entries = entries.Where(x => x.EntryDateUtc <= query.ToUtc.Value);
+        var total = await entries.CountAsync(cancellationToken);
+        var totalDebit = await entries.SelectMany(x => x.Lines).SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+        var totalCredit = await entries.SelectMany(x => x.Lines).SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+        var items = await entries.OrderByDescending(x => x.EntryDateUtc).ThenByDescending(x => x.EntryNumber)
+            .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
+            .Select(x => new DayBookLineDto(x.EntryDateUtc, x.EntryNumber, x.SourceType, x.Reference, x.Description,
+                x.Lines.Sum(l => l.Debit), x.Lines.Sum(l => l.Credit), x.PostedByUser!.FullName, x.BranchId, x.Branch!.Name, x.Id))
+            .ToListAsync(cancellationToken);
+        return new DayBookDto(query.FromUtc, query.ToUtc, totalDebit, totalCredit, new PagedResult<DayBookLineDto>(items, query.Page, query.PageSize, total));
+    }
+
+    // ---- Cash flow statement ----
+
+    public async Task<decimal> GetCashAndBankBalanceAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var mappedIds = await context.AccountMappings.AsNoTracking()
+            .Where(x => x.MappingKey == AccountMappingKey.Cash || x.MappingKey == AccountMappingKey.Bank)
+            .Select(x => x.ChartOfAccountId).ToListAsync(cancellationToken);
+        if (mappedIds.Count == 0) return 0;
+        var lines = context.JournalEntryLines.AsNoTracking().Where(x => mappedIds.Contains(x.ChartOfAccountId) && x.JournalEntry!.EntryDateUtc <= asOfUtc);
+        if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
+        var debit = await lines.SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+        var credit = await lines.SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+        return debit - credit;
+    }
+
+    public async Task<IReadOnlyList<(Guid ChartOfAccountId, AccountType AccountType, CashFlowClassification? Classification, decimal OpeningBalance, decimal ClosingBalance)>>
+        GetNonCashBalanceMovementsAsync(DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var cashBankIds = await context.AccountMappings.AsNoTracking()
+            .Where(x => x.MappingKey == AccountMappingKey.Cash || x.MappingKey == AccountMappingKey.Bank)
+            .Select(x => x.ChartOfAccountId).ToListAsync(cancellationToken);
+        var accounts = await context.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.AccountType == AccountType.Asset || x.AccountType == AccountType.Liability || x.AccountType == AccountType.Equity)
+            .Where(x => !cashBankIds.Contains(x.Id))
+            .ToListAsync(cancellationToken);
+        var result = new List<(Guid, AccountType, CashFlowClassification?, decimal, decimal)>();
+        foreach (var account in accounts)
+        {
+            var lines = context.JournalEntryLines.AsNoTracking().Where(x => x.ChartOfAccountId == account.Id);
+            if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
+            var openingDebit = await lines.Where(x => x.JournalEntry!.EntryDateUtc < fromUtc).SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+            var openingCredit = await lines.Where(x => x.JournalEntry!.EntryDateUtc < fromUtc).SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+            var closingDebit = await lines.Where(x => x.JournalEntry!.EntryDateUtc <= toUtc).SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+            var closingCredit = await lines.Where(x => x.JournalEntry!.EntryDateUtc <= toUtc).SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+            if (openingDebit == 0 && openingCredit == 0 && closingDebit == 0 && closingCredit == 0) continue;
+            var opening = Balance(account.NormalBalance, openingDebit, openingCredit);
+            var closing = Balance(account.NormalBalance, closingDebit, closingCredit);
+            if (opening == 0 && closing == 0) continue;
+            result.Add((account.Id, account.AccountType, account.CashFlowClassification, opening, closing));
+        }
+        return result;
+    }
+
+    // ---- Control-account reconciliations ----
+
+    public async Task<ControlReconciliationDto> GetArControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var asOfDate = DateOnly.FromDateTime(asOfUtc);
+        var subledgerQuery = context.CustomerLedgerEntries.AsNoTracking().Where(x => x.EntryDate <= asOfDate);
+        if (branchId.HasValue) subledgerQuery = subledgerQuery.Where(x => x.BranchId == branchId);
+        var subledger = await subledgerQuery.GroupBy(x => x.CustomerId)
+            .Select(g => new { CustomerId = g.Key, Balance = g.Sum(x => x.Amount) }).ToDictionaryAsync(x => x.CustomerId, x => x.Balance, cancellationToken);
+
+        var arAccountId = await context.AccountMappings.AsNoTracking()
+            .Where(x => x.MappingKey == AccountMappingKey.AccountsReceivable).Select(x => (Guid?)x.ChartOfAccountId).FirstOrDefaultAsync(cancellationToken);
+        var glQuery = context.JournalEntryLines.AsNoTracking()
+            .Where(x => x.ChartOfAccountId == arAccountId && x.CustomerId != null && x.JournalEntry!.EntryDateUtc <= asOfUtc);
+        if (branchId.HasValue) glQuery = glQuery.Where(x => x.BranchId == branchId);
+        var gl = await glQuery.GroupBy(x => x.CustomerId!.Value)
+            .Select(g => new { CustomerId = g.Key, Balance = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToDictionaryAsync(x => x.CustomerId, x => x.Balance, cancellationToken);
+
+        var allIds = subledger.Keys.Union(gl.Keys).ToList();
+        if (allIds.Count == 0) return new ControlReconciliationDto(asOfUtc, 0, 0, 0, []);
+        var names = await context.Customers.AsNoTracking().Where(c => allIds.Contains(c.Id)).Select(c => new { c.Id, c.Name }).ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
+        var rows = allIds.Select(id =>
+        {
+            var sub = subledger.GetValueOrDefault(id);
+            var glBal = gl.GetValueOrDefault(id);
+            return new ControlReconciliationRowDto(id, names.GetValueOrDefault(id, "Unknown"), sub, glBal, decimal.Round(sub - glBal, 2));
+        }).Where(x => x.Difference != 0).OrderByDescending(x => Math.Abs(x.Difference)).ToList();
+        return new ControlReconciliationDto(asOfUtc, subledger.Values.Sum(), gl.Values.Sum(), decimal.Round(subledger.Values.Sum() - gl.Values.Sum(), 2), rows);
+    }
+
+    public async Task<ControlReconciliationDto> GetApControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var asOfDate = DateOnly.FromDateTime(asOfUtc);
+        var subledgerQuery = context.SupplierLedgerEntries.AsNoTracking().Where(x => x.EntryDate <= asOfDate);
+        if (branchId.HasValue) subledgerQuery = subledgerQuery.Where(x => x.BranchId == branchId);
+        var subledger = await subledgerQuery.GroupBy(x => x.SupplierId)
+            .Select(g => new { SupplierId = g.Key, Balance = g.Sum(x => x.Amount) }).ToDictionaryAsync(x => x.SupplierId, x => x.Balance, cancellationToken);
+
+        var apAccountId = await context.AccountMappings.AsNoTracking()
+            .Where(x => x.MappingKey == AccountMappingKey.AccountsPayable).Select(x => (Guid?)x.ChartOfAccountId).FirstOrDefaultAsync(cancellationToken);
+        var glQuery = context.JournalEntryLines.AsNoTracking()
+            .Where(x => x.ChartOfAccountId == apAccountId && x.SupplierId != null && x.JournalEntry!.EntryDateUtc <= asOfUtc);
+        if (branchId.HasValue) glQuery = glQuery.Where(x => x.BranchId == branchId);
+        var gl = await glQuery.GroupBy(x => x.SupplierId!.Value)
+            .Select(g => new { SupplierId = g.Key, Balance = g.Sum(x => x.Credit) - g.Sum(x => x.Debit) }).ToDictionaryAsync(x => x.SupplierId, x => x.Balance, cancellationToken);
+
+        var allIds = subledger.Keys.Union(gl.Keys).ToList();
+        if (allIds.Count == 0) return new ControlReconciliationDto(asOfUtc, 0, 0, 0, []);
+        var names = await context.Suppliers.AsNoTracking().Where(s => allIds.Contains(s.Id)).Select(s => new { s.Id, s.Name }).ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
+        var rows = allIds.Select(id =>
+        {
+            var sub = subledger.GetValueOrDefault(id);
+            var glBal = gl.GetValueOrDefault(id);
+            return new ControlReconciliationRowDto(id, names.GetValueOrDefault(id, "Unknown"), sub, glBal, decimal.Round(sub - glBal, 2));
+        }).Where(x => x.Difference != 0).OrderByDescending(x => Math.Abs(x.Difference)).ToList();
+        return new ControlReconciliationDto(asOfUtc, subledger.Values.Sum(), gl.Values.Sum(), decimal.Round(subledger.Values.Sum() - gl.Values.Sum(), 2), rows);
+    }
+
+    public async Task<CashBankControlReconciliationDto> GetCashBankControlReconciliationAsync(DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var accountsQuery = context.FinancialAccounts.AsNoTracking().Where(x => x.IsActive);
+        if (branchId.HasValue) accountsQuery = accountsQuery.Where(x => x.BranchId == branchId);
+        var accounts = await accountsQuery.ToListAsync(cancellationToken);
+        var rows = new List<CashBankControlRowDto>();
+        foreach (var account in accounts)
+        {
+            var operational = (await context.FinancialLedgerEntries.AsNoTracking()
+                .Where(x => x.FinancialAccountId == account.Id && x.OccurredAtUtc <= asOfUtc)
+                .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0);
+            rows.Add(new CashBankControlRowDto(account.Id, account.Name, account.AccountType, decimal.Round(operational, 2)));
+        }
+        var cashTotal = rows.Where(x => x.AccountType == FinancialAccountType.Cash).Sum(x => x.OperationalBalance);
+        var bankTotal = rows.Where(x => x.AccountType != FinancialAccountType.Cash).Sum(x => x.OperationalBalance);
+        var glCash = await GetMappedAccountBalanceAsync(AccountMappingKey.Cash, asOfUtc, branchId, cancellationToken);
+        var glBank = await GetMappedAccountBalanceAsync(AccountMappingKey.Bank, asOfUtc, branchId, cancellationToken);
+        return new CashBankControlReconciliationDto(asOfUtc, cashTotal, glCash, decimal.Round(cashTotal - glCash, 2),
+            bankTotal, glBank, decimal.Round(bankTotal - glBank, 2), rows.OrderBy(x => x.FinancialAccountName).ToList());
+    }
+
+    public async Task<decimal> GetMappedAccountBalanceAsync(AccountMappingKey key, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var accountId = await context.AccountMappings.AsNoTracking().Where(x => x.MappingKey == key).Select(x => (Guid?)x.ChartOfAccountId).FirstOrDefaultAsync(cancellationToken);
+        if (accountId is null) return 0;
+        var lines = context.JournalEntryLines.AsNoTracking().Where(x => x.ChartOfAccountId == accountId && x.JournalEntry!.EntryDateUtc <= asOfUtc);
+        if (branchId.HasValue) lines = lines.Where(x => x.BranchId == branchId);
+        var debit = await lines.SumAsync(x => (decimal?)x.Debit, cancellationToken) ?? 0;
+        var credit = await lines.SumAsync(x => (decimal?)x.Credit, cancellationToken) ?? 0;
+        return debit - credit;
+    }
+
+    public async Task<decimal> GetInventoryValuationAsync(Guid? branchId, Guid? godownId, CancellationToken cancellationToken = default)
+    {
+        var batches = context.ProductBatches.AsNoTracking().Where(x => !x.IsDisposed);
+        if (branchId.HasValue) batches = batches.Where(x => x.BranchId == branchId);
+        if (godownId.HasValue) batches = batches.Where(x => x.GodownId == godownId);
+        return await batches.SumAsync(x => (decimal?)(x.QuantityAvailable * x.PurchasePrice), cancellationToken) ?? 0;
     }
 }

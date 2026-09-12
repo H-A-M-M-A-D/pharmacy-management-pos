@@ -100,7 +100,8 @@ class _JournalViewState extends State<JournalView> {
     try {
       final data = await widget.authState.accounting('journal/${item.id}') as Map<String, dynamic>;
       if (!mounted) return;
-      await showDialog<void>(context: context, builder: (_) => _JournalDetailsDialog(details: JournalDetails.fromJson(data)));
+      final reversed = await showDialog<bool>(context: context, builder: (_) => _JournalDetailsDialog(details: JournalDetails.fromJson(data), authState: widget.authState));
+      if (reversed == true) await _load();
     } on ApiException catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message))); }
   }
 
@@ -117,28 +118,64 @@ class _JournalViewState extends State<JournalView> {
   static const _sources = ['Sale','SalesReturn','Purchase','PurchaseReturn','CustomerPayment','SupplierPayment','Expense','OtherIncome','CashTransfer','StockWriteOff','StockAdjustment','OpeningBalance','ManualVoucher','CustomerAdjustment','SupplierAdjustment','FinancialAccountAdjustment','CashierDrawerEntry','CashierShiftVariance'];
 }
 
-class _JournalDetailsDialog extends StatelessWidget {
-  const _JournalDetailsDialog({required this.details});
+class _JournalDetailsDialog extends StatefulWidget {
+  const _JournalDetailsDialog({required this.details, required this.authState});
   final JournalDetails details;
+  final AuthState authState;
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    key: const Key('posted_journal_read_only'),
-    title: Text('${details.number} · ${details.status}'),
-    content: SizedBox(width: 850, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('${shortDate(details.date)}  ·  ${details.sourceType}  ·  ${details.branchName}'),
-      Text('${details.reference ?? 'No reference'}  ·  Posted by ${details.postedBy}'), const SizedBox(height: 8), Text(details.description), const Divider(),
-      SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [
-        DataColumn(label: Text('Account')), DataColumn(label: Text('Description')), DataColumn(label: Text('Party')),
-        DataColumn(label: Text('Debit')), DataColumn(label: Text('Credit')),
-      ], rows: details.lines.map((x) => DataRow(cells: [
-        DataCell(Text('${x.code} · ${x.name}')), DataCell(Text(x.description ?? '-')), DataCell(Text(x.customerName ?? x.supplierName ?? '-')),
-        DataCell(Text(money(x.debit))), DataCell(Text(money(x.credit))),
-      ])).toList())),
-      const Divider(), Align(alignment: Alignment.centerRight, child: Text('Debit ${money(details.totalDebit)}     Credit ${money(details.totalCredit)}', style: Theme.of(context).textTheme.titleMedium)),
-      const SizedBox(height: 8), const Row(children: [Icon(Icons.lock_outline, size: 17), SizedBox(width: 6), Text('Posted journals are permanent and read-only.')]),
-    ])),
-    actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-  );
+  State<_JournalDetailsDialog> createState() => _JournalDetailsDialogState();
+}
+
+class _JournalDetailsDialogState extends State<_JournalDetailsDialog> {
+  var _reversing = false;
+  String? _error;
+  @override
+  Widget build(BuildContext context) {
+    final details = widget.details;
+    return AlertDialog(
+      key: const Key('posted_journal_read_only'),
+      title: Text('${details.number} · ${details.status}'),
+      content: SizedBox(width: 850, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${shortDate(details.date)}  ·  ${details.sourceType}  ·  ${details.branchName}'),
+        Text('${details.reference ?? 'No reference'}  ·  Posted by ${details.postedBy}'), const SizedBox(height: 8), Text(details.description), const Divider(),
+        SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [
+          DataColumn(label: Text('Account')), DataColumn(label: Text('Description')), DataColumn(label: Text('Party')),
+          DataColumn(label: Text('Debit')), DataColumn(label: Text('Credit')),
+        ], rows: details.lines.map((x) => DataRow(cells: [
+          DataCell(Text('${x.code} · ${x.name}')), DataCell(Text(x.description ?? '-')), DataCell(Text(x.customerName ?? x.supplierName ?? '-')),
+          DataCell(Text(money(x.debit))), DataCell(Text(money(x.credit))),
+        ])).toList())),
+        const Divider(), Align(alignment: Alignment.centerRight, child: Text('Debit ${money(details.totalDebit)}     Credit ${money(details.totalCredit)}', style: Theme.of(context).textTheme.titleMedium)),
+        const SizedBox(height: 8), const Row(children: [Icon(Icons.lock_outline, size: 17), SizedBox(width: 6), Expanded(child: Text('Posted journals are permanent and read-only. Corrections are made by reversal.'))]),
+        if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+      ])),
+      actions: [
+        if (widget.authState.can('accounts.journal.reverse'))
+          OutlinedButton.icon(key: const Key('journal_reverse'), onPressed: _reversing ? null : _reverse, icon: const Icon(Icons.undo), label: Text(_reversing ? 'Reversing…' : 'Reverse')),
+        FilledButton(onPressed: () => Navigator.pop(context, false), child: const Text('Close')),
+      ],
+    );
+  }
+
+  Future<void> _reverse() async {
+    final reasonController = TextEditingController();
+    final reason = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Reverse this journal entry?'),
+      content: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('A new reversing entry with debits and credits flipped will be posted. The original entry stays unchanged.'),
+        const SizedBox(height: 12),
+        TextField(key: const Key('journal_reverse_reason'), controller: reasonController, decoration: const InputDecoration(labelText: 'Reason *'), autofocus: true),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, reasonController.text.trim()), child: const Text('Reverse'))],
+    ));
+    if (reason == null || reason.isEmpty || !mounted) return;
+    setState(() { _reversing = true; _error = null; });
+    try {
+      await widget.authState.accounting('journal/${widget.details.id}/reverse', method: 'POST', body: {'reason': reason, 'reversalDateUtc': null});
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) { if (mounted) setState(() => _error = e.message); }
+    finally { if (mounted) setState(() => _reversing = false); }
+  }
 }
 
 class _ManualJournalDialog extends StatefulWidget {

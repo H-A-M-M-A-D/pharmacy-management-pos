@@ -82,6 +82,14 @@ class _AppShellState extends State<AppShell> {
     final canViewAccounting = const [
       'accounts.coa.view',
       'accounts.journal.view',
+      'accounts.periods.view',
+      'accounts.reconciliation.view',
+      'accounts.recurring.view',
+      'accounts.budgets.view',
+      'accounts.credit_notes.view',
+      'accounts.debit_notes.view',
+      'accounts.writeoffs.view',
+      'accounts.advances.view',
       'customers.view',
       'suppliers.view',
     ].any(widget.authState.can);

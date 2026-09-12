@@ -14,6 +14,8 @@ public interface ICashierShiftRepository
 {
     Task<User?> GetActorAsync(Guid actorId, CancellationToken cancellationToken = default);
     Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default);
+    Task<FinancialAccount?> GetFinancialAccountAsync(Guid id, CancellationToken cancellationToken = default);
+    Task AddFinancialLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default);
     Task<CashierShift?> GetOpenShiftForCashierAsync(Guid cashierUserId, CancellationToken cancellationToken = default);
     Task<CashierShift?> GetShiftAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddShiftAsync(CashierShift shift, CancellationToken cancellationToken = default);

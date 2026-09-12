@@ -16,10 +16,16 @@ public sealed record VoucherLineRequest(Guid ChartOfAccountId, decimal Debit, de
 /// - Contra: Amount + ChartOfAccountId (credited/source) + ContraToChartOfAccountId (debited/destination).
 /// - Journal: Lines (>= 2, arbitrary accounts, must balance) — Amount/ChartOfAccountId/party ignored.
 /// </summary>
+/// <summary><see cref="FinancialAccountId"/> is an optional till/bank attribution for Cash/Bank
+/// Receipt/Payment/Contra vouchers — when set, posting also records the movement against that
+/// <see cref="FinancialAccount"/> so it appears in that account's Cash/Bank Book and is eligible for
+/// bank reconciliation. Omit to post to the GL Cash/Bank control account only, exactly as before this
+/// field existed.</summary>
 public sealed record VoucherCreateRequest(
     VoucherType Type, DateTime VoucherDateUtc, Guid BranchId, string? Reference, string Description,
     Guid? CustomerId = null, Guid? SupplierId = null, Guid? ChartOfAccountId = null, decimal? Amount = null,
-    Guid? ContraToChartOfAccountId = null, IReadOnlyList<VoucherLineRequest>? Lines = null);
+    Guid? ContraToChartOfAccountId = null, IReadOnlyList<VoucherLineRequest>? Lines = null,
+    Guid? FinancialAccountId = null);
 
 public sealed record VoucherLineDto(
     Guid Id, Guid ChartOfAccountId, string AccountCode, string AccountName, decimal Debit, decimal Credit,
@@ -31,7 +37,8 @@ public sealed record VoucherDto(
     Guid? ChartOfAccountId, string? ChartOfAccountName, VoucherStatus Status,
     string CreatedByName, DateTime CreatedAt, string? PostedByName, DateTime? PostedAtUtc,
     Guid? JournalEntryId, string? JournalEntryNumber, Guid? ReversalOfVoucherId,
-    decimal TotalDebit, decimal TotalCredit, IReadOnlyList<VoucherLineDto> Lines);
+    decimal TotalDebit, decimal TotalCredit, IReadOnlyList<VoucherLineDto> Lines,
+    Guid? FinancialAccountId = null, string? FinancialAccountName = null);
 
 public sealed record VoucherListItemDto(
     Guid Id, string VoucherNumber, VoucherType Type, DateTime VoucherDateUtc, Guid BranchId, string BranchName,

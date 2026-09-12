@@ -83,5 +83,56 @@ public sealed class AccountingController(IAccountingService accounting) : Contro
     public Task<ApAgingDetailDto> ApAgingDetail([FromQuery] Guid supplierId, [FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
         accounting.GetApAgingDetailAsync(UserId(), supplierId, asOfUtc, branchId, ct);
 
+    [HttpPost("journal/{id:guid}/reverse"), HasPermission(PermissionCatalog.AccountsJournalReverse)]
+    public Task<JournalEntryDto> ReverseJournal(Guid id, ReverseJournalEntryRequest request, CancellationToken ct) =>
+        accounting.ReverseJournalEntryAsync(UserId(), id, request, ct);
+
+    [HttpGet("cost-centers"), HasPermission(PermissionCatalog.AccountsCostCentersView)]
+    public Task<IReadOnlyList<CostCenterDto>> ListCostCenters([FromQuery] bool includeInactive, CancellationToken ct) =>
+        accounting.ListCostCentersAsync(UserId(), includeInactive, ct);
+
+    [HttpPost("cost-centers"), HasPermission(PermissionCatalog.AccountsCostCentersManage)]
+    public Task<CostCenterDto> CreateCostCenter(CostCenterRequest request, CancellationToken ct) =>
+        accounting.CreateCostCenterAsync(UserId(), request, ct);
+
+    [HttpPost("cost-centers/{id:guid}/activate"), HasPermission(PermissionCatalog.AccountsCostCentersManage)]
+    public async Task<IActionResult> ActivateCostCenter(Guid id, CancellationToken ct) { await accounting.SetCostCenterActiveAsync(UserId(), id, true, ct); return NoContent(); }
+
+    [HttpPost("cost-centers/{id:guid}/deactivate"), HasPermission(PermissionCatalog.AccountsCostCentersManage)]
+    public async Task<IActionResult> DeactivateCostCenter(Guid id, CancellationToken ct) { await accounting.SetCostCenterActiveAsync(UserId(), id, false, ct); return NoContent(); }
+
+    [HttpGet("trial-balance/movement"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<TrialBalanceMovementDto> TrialBalanceMovement([FromQuery] DateTime fromUtc, [FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, [FromQuery] bool includeZeroBalances, CancellationToken ct) =>
+        accounting.GetTrialBalanceMovementAsync(UserId(), fromUtc, asOfUtc, branchId, includeZeroBalances, ct);
+
+    [HttpGet("cash-book"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<CashBankBookDto> CashBook([FromQuery] CashBankBookQuery query, CancellationToken ct) => accounting.GetCashBookAsync(UserId(), query, ct);
+
+    [HttpGet("bank-book"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<CashBankBookDto> BankBook([FromQuery] CashBankBookQuery query, CancellationToken ct) => accounting.GetBankBookAsync(UserId(), query, ct);
+
+    [HttpGet("day-book"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<DayBookDto> DayBook([FromQuery] DayBookQuery query, CancellationToken ct) => accounting.GetDayBookAsync(UserId(), query, ct);
+
+    [HttpGet("cash-flow"), HasPermission(PermissionCatalog.AccountsJournalView)]
+    public Task<CashFlowStatementDto> CashFlow([FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetCashFlowStatementAsync(UserId(), fromUtc, toUtc, branchId, ct);
+
+    [HttpGet("reconciliation/ar"), HasPermission(PermissionCatalog.AccountsReconciliationView)]
+    public Task<ControlReconciliationDto> ArReconciliation([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetArControlReconciliationAsync(UserId(), asOfUtc, branchId, ct);
+
+    [HttpGet("reconciliation/ap"), HasPermission(PermissionCatalog.AccountsReconciliationView)]
+    public Task<ControlReconciliationDto> ApReconciliation([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetApControlReconciliationAsync(UserId(), asOfUtc, branchId, ct);
+
+    [HttpGet("reconciliation/cash-bank"), HasPermission(PermissionCatalog.AccountsReconciliationView)]
+    public Task<CashBankControlReconciliationDto> CashBankReconciliation([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, CancellationToken ct) =>
+        accounting.GetCashBankControlReconciliationAsync(UserId(), asOfUtc, branchId, ct);
+
+    [HttpGet("reconciliation/inventory"), HasPermission(PermissionCatalog.AccountsReconciliationView)]
+    public Task<InventoryReconciliationDto> InventoryReconciliation([FromQuery] DateTime asOfUtc, [FromQuery] Guid? branchId, [FromQuery] Guid? godownId, CancellationToken ct) =>
+        accounting.GetInventoryReconciliationAsync(UserId(), asOfUtc, branchId, godownId, ct);
+
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

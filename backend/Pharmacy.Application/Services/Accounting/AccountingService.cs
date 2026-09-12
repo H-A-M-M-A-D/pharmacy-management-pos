@@ -136,6 +136,8 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
         if (request.Lines.Count < 2) throw new RequestValidationException("A journal entry requires at least two lines.");
         if (await repository.GetBranchAsync(request.BranchId, cancellationToken) is not { IsActive: true })
             throw new RequestValidationException("Branch is invalid or inactive.");
+        if (actor.Role?.RolePermissions.Any(x => x.Permission?.Code == PermissionCatalog.AccountsPostToSoftClosed) == true)
+            repository.AllowPostingIntoSoftClosedPeriod();
 
         JournalEntry? entry = null;
         await repository.ExecuteInTransactionAsync(async ct =>
@@ -155,12 +157,15 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
                     throw new RequestValidationException("Customer was not found.");
                 if (line.SupplierId.HasValue && await repository.GetSupplierAsync(line.SupplierId.Value, ct) is null)
                     throw new RequestValidationException("Supplier was not found.");
+                if (line.CostCenterId.HasValue && await repository.GetCostCenterAsync(line.CostCenterId.Value, ct) is not { IsActive: true })
+                    throw new RequestValidationException("Cost center is invalid or inactive.");
                 totalDebit += line.Debit;
                 totalCredit += line.Credit;
                 lines.Add(new JournalEntryLine
                 {
                     ChartOfAccountId = line.ChartOfAccountId, Debit = line.Debit, Credit = line.Credit,
-                    BranchId = request.BranchId, CustomerId = line.CustomerId, SupplierId = line.SupplierId, Description = Clean(line.Description)
+                    BranchId = request.BranchId, CustomerId = line.CustomerId, SupplierId = line.SupplierId, Description = Clean(line.Description),
+                    CostCenterId = line.CostCenterId
                 });
             }
             if (decimal.Round(totalDebit, 2) != decimal.Round(totalCredit, 2))
@@ -225,14 +230,23 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
         var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
         if (fromUtc > toUtc) throw new RequestValidationException("From date cannot be after to date.");
         var rows = await repository.GetAccountActivityAsync(fromUtc, toUtc, Scope(actor, branchId), cancellationToken);
-        var revenue = StatementRows(rows.Where(x => x.AccountType == AccountType.Income));
+        var mappings = await repository.GetAccountMappingLookupAsync(cancellationToken);
+        var otherIncomeAccountId = mappings.GetValueOrDefault(AccountMappingKey.OtherIncomeDefault);
+        var badDebtAccountId = mappings.GetValueOrDefault(AccountMappingKey.BadDebtExpense);
+        var revenue = StatementRows(rows.Where(x => x.AccountType == AccountType.Income && x.ChartOfAccountId != otherIncomeAccountId));
+        var otherIncome = StatementRows(rows.Where(x => x.AccountType == AccountType.Income && x.ChartOfAccountId == otherIncomeAccountId));
         var cost = StatementRows(rows.Where(x => x.AccountType == AccountType.CostOfSales));
-        var expenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense));
+        var expenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense && x.ChartOfAccountId != badDebtAccountId));
+        var otherExpenses = StatementRows(rows.Where(x => x.AccountType == AccountType.Expense && x.ChartOfAccountId == badDebtAccountId));
         var netRevenue = revenue.Sum(x => x.Amount);
         var totalCost = cost.Sum(x => x.Amount);
         var grossProfit = netRevenue - totalCost;
         var totalExpenses = expenses.Sum(x => x.Amount);
-        return new ProfitAndLossDto(fromUtc, toUtc, revenue, netRevenue, cost, totalCost, grossProfit, expenses, totalExpenses, grossProfit - totalExpenses);
+        var totalOtherIncome = otherIncome.Sum(x => x.Amount);
+        var totalOtherExpenses = otherExpenses.Sum(x => x.Amount);
+        var netProfit = grossProfit - totalExpenses + totalOtherIncome - totalOtherExpenses;
+        return new ProfitAndLossDto(fromUtc, toUtc, revenue, netRevenue, cost, totalCost, grossProfit, expenses, totalExpenses, netProfit,
+            otherIncome, totalOtherIncome, otherExpenses, totalOtherExpenses);
     }
 
     public async Task<BalanceSheetDto> GetBalanceSheetAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
@@ -284,6 +298,199 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
             ?? throw new ResourceNotFoundException("Supplier was not found.");
     }
 
+    // ---- Journal reversal ----
+
+    public async Task<JournalEntryDto> ReverseJournalEntryAsync(Guid actorId, Guid journalEntryId, ReverseJournalEntryRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalReverse, cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new RequestValidationException("A reason is required to reverse a journal entry.");
+        var original = await repository.GetJournalEntryAsync(journalEntryId, cancellationToken) ?? throw new ResourceNotFoundException("Journal entry was not found.");
+        EnsureBranchAccess(actor, original.BranchId);
+        if (original.SourceType is not (JournalSourceType.ManualVoucher or JournalSourceType.RecurringJournal))
+            throw new RequestValidationException($"Journal entries posted by {original.SourceType} carry linked operational or subledger records that would go out of sync if reversed directly. Use the dedicated correction workflow for that document type, or reverse the originating voucher instead.");
+        if (original.Lines.Any(l => l.CustomerId.HasValue || l.SupplierId.HasValue))
+            throw new RequestValidationException("This journal entry affects a customer or supplier balance. Post a credit note, debit note, write-off, or balance adjustment instead so the customer/supplier ledger stays in sync.");
+        if (await repository.JournalEntryHasReversalAsync(journalEntryId, cancellationToken))
+            throw new RequestValidationException("This journal entry has already been reversed.");
+
+        var reversalDate = request.ReversalDateUtc ?? UtcNow();
+        JournalEntry? reversal = null;
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            reversal = new JournalEntry
+            {
+                EntryNumber = await repository.NextJournalEntryNumberAsync(reversalDate, ct),
+                EntryDateUtc = reversalDate,
+                SourceType = JournalSourceType.JournalReversal,
+                SourceId = original.Id,
+                Reference = original.EntryNumber,
+                Description = $"Reversal of {original.EntryNumber}: {request.Reason.Trim()}",
+                BranchId = original.BranchId,
+                PostedByUserId = actorId,
+                PostedAtUtc = UtcNow(),
+                Status = JournalEntryStatus.Posted,
+                ReversesJournalEntryId = original.Id,
+                ReversalReason = request.Reason.Trim(),
+                Lines = original.Lines.Select(l => new JournalEntryLine
+                {
+                    ChartOfAccountId = l.ChartOfAccountId, Debit = l.Credit, Credit = l.Debit,
+                    BranchId = l.BranchId, Description = l.Description, CostCenterId = l.CostCenterId
+                }).ToList()
+            };
+            await repository.AddJournalEntryAsync(reversal, ct);
+            await Audit(actorId, "JournalEntryReversed", "JournalEntry", original.Id, new { original.EntryNumber, ReversalEntryNumber = reversal.EntryNumber, request.Reason }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return await MapJournalEntry(reversal!, cancellationToken);
+    }
+
+    // ---- Cost centers ----
+
+    public async Task<IReadOnlyList<CostCenterDto>> ListCostCentersAsync(Guid actorId, bool includeInactive, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCostCentersView, cancellationToken);
+        var list = await repository.ListCostCentersAsync(includeInactive, cancellationToken);
+        return list.Select(x => new CostCenterDto(x.Id, x.Code, x.Name, x.Description, x.IsActive)).ToList();
+    }
+
+    public async Task<CostCenterDto> CreateCostCenterAsync(Guid actorId, CostCenterRequest request, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCostCentersManage, cancellationToken);
+        ValidateCode(request.Code);
+        ValidateName(request.Name);
+        var normalized = Normalize(request.Code);
+        if (await repository.GetCostCenterByNormalizedCodeAsync(normalized, cancellationToken) is not null)
+            throw new ResourceConflictException("A cost center with this code already exists.");
+        var costCenter = new CostCenter { Code = request.Code.Trim(), NormalizedCode = normalized, Name = request.Name.Trim(), Description = Clean(request.Description), IsActive = request.IsActive };
+        await repository.AddCostCenterAsync(costCenter, cancellationToken);
+        await Audit(actorId, "CostCenterCreated", "CostCenter", costCenter.Id, new { costCenter.Code, costCenter.Name }, cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return new CostCenterDto(costCenter.Id, costCenter.Code, costCenter.Name, costCenter.Description, costCenter.IsActive);
+    }
+
+    public async Task SetCostCenterActiveAsync(Guid actorId, Guid id, bool active, CancellationToken cancellationToken = default)
+    {
+        await Require(actorId, PermissionCatalog.AccountsCostCentersManage, cancellationToken);
+        var costCenter = await repository.GetCostCenterAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Cost center was not found.");
+        costCenter.IsActive = active;
+        costCenter.UpdatedAt = UtcNow();
+        await Audit(actorId, active ? "CostCenterActivated" : "CostCenterDeactivated", "CostCenter", id, new { costCenter.Code }, cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+    }
+
+    // ---- Enhanced Trial Balance (opening / period / closing movement) ----
+
+    public async Task<TrialBalanceMovementDto> GetTrialBalanceMovementAsync(Guid actorId, DateTime fromUtc, DateTime asOfUtc, Guid? branchId, bool includeZeroBalances, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        if (fromUtc > asOfUtc) throw new RequestValidationException("From date cannot be after the as-of date.");
+        var scope = Scope(actor, branchId);
+        var opening = await repository.GetTrialBalanceAsync(fromUtc.AddTicks(-1), scope, cancellationToken);
+        var closing = await repository.GetTrialBalanceAsync(asOfUtc, scope, cancellationToken);
+        var accountMap = (await repository.ListAccountsAsync(true, cancellationToken)).ToDictionary(x => x.Id);
+        var openingMap = opening.ToDictionary(x => x.ChartOfAccountId);
+        var closingMap = closing.ToDictionary(x => x.ChartOfAccountId);
+        var ids = openingMap.Keys.Union(closingMap.Keys).ToList();
+        var rows = ids.Select(id =>
+        {
+            var account = accountMap[id];
+            var od = openingMap.GetValueOrDefault(id)?.Debit ?? 0;
+            var oc = openingMap.GetValueOrDefault(id)?.Credit ?? 0;
+            var cd = closingMap.GetValueOrDefault(id)?.Debit ?? 0;
+            var cc = closingMap.GetValueOrDefault(id)?.Credit ?? 0;
+            return new TrialBalanceMovementRowDto(id, account.Code, account.Name, account.ParentAccountId, account.AccountType, account.NormalBalance,
+                od, oc, cd - od, cc - oc, cd, cc);
+        })
+        .Where(x => includeZeroBalances || x.ClosingDebit != 0 || x.ClosingCredit != 0 || x.PeriodDebit != 0 || x.PeriodCredit != 0)
+        .OrderBy(x => x.AccountCode).ToList();
+        var totalClosingDebit = rows.Sum(x => x.ClosingDebit);
+        var totalClosingCredit = rows.Sum(x => x.ClosingCredit);
+        return new TrialBalanceMovementDto(fromUtc, asOfUtc, rows, rows.Sum(x => x.OpeningDebit), rows.Sum(x => x.OpeningCredit),
+            rows.Sum(x => x.PeriodDebit), rows.Sum(x => x.PeriodCredit), totalClosingDebit, totalClosingCredit,
+            decimal.Round(totalClosingDebit, 2) == decimal.Round(totalClosingCredit, 2));
+    }
+
+    // ---- Cash Book / Bank Book / Day Book ----
+
+    public async Task<CashBankBookDto> GetCashBookAsync(Guid actorId, CashBankBookQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        return await repository.GetCashBankBookAsync(AccountMappingKey.Cash, query with { BranchId = Scope(actor, query.BranchId) }, cancellationToken);
+    }
+
+    public async Task<CashBankBookDto> GetBankBookAsync(Guid actorId, CashBankBookQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        return await repository.GetCashBankBookAsync(AccountMappingKey.Bank, query with { BranchId = Scope(actor, query.BranchId) }, cancellationToken);
+    }
+
+    public async Task<DayBookDto> GetDayBookAsync(Guid actorId, DayBookQuery query, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        return await repository.GetDayBookAsync(query with { BranchId = Scope(actor, query.BranchId) }, cancellationToken);
+    }
+
+    // ---- Cash flow statement (indirect method) ----
+
+    public async Task<CashFlowStatementDto> GetCashFlowStatementAsync(Guid actorId, DateTime fromUtc, DateTime toUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsJournalView, cancellationToken);
+        if (fromUtc > toUtc) throw new RequestValidationException("From date cannot be after to date.");
+        var scope = Scope(actor, branchId);
+        var pnl = await GetProfitAndLossAsync(actorId, fromUtc, toUtc, branchId, cancellationToken);
+        var movements = await repository.GetNonCashBalanceMovementsAsync(fromUtc, toUtc, scope, cancellationToken);
+        var accountMap = (await repository.ListAccountsAsync(true, cancellationToken)).ToDictionary(x => x.Id);
+        var operatingAdj = new List<CashFlowLineDto>();
+        var investing = new List<CashFlowLineDto>();
+        var financing = new List<CashFlowLineDto>();
+        foreach (var m in movements)
+        {
+            var delta = decimal.Round(m.ClosingBalance - m.OpeningBalance, 2);
+            if (delta == 0) continue;
+            var account = accountMap[m.ChartOfAccountId];
+            var cashImpact = m.AccountType == AccountType.Asset ? -delta : delta;
+            var classification = m.Classification ?? (m.AccountType == AccountType.Equity ? CashFlowClassification.Financing : CashFlowClassification.Operating);
+            var bucket = classification switch { CashFlowClassification.Investing => investing, CashFlowClassification.Financing => financing, _ => operatingAdj };
+            bucket.Add(new CashFlowLineDto(account.Name, cashImpact));
+        }
+        var netOperating = decimal.Round(pnl.NetProfit + operatingAdj.Sum(x => x.Amount), 2);
+        var netInvesting = investing.Sum(x => x.Amount);
+        var netFinancing = financing.Sum(x => x.Amount);
+        var opening = await repository.GetCashAndBankBalanceAsync(fromUtc.AddTicks(-1), scope, cancellationToken);
+        var closing = await repository.GetCashAndBankBalanceAsync(toUtc, scope, cancellationToken);
+        return new CashFlowStatementDto(fromUtc, toUtc, pnl.NetProfit, operatingAdj, netOperating, investing, netInvesting, financing, netFinancing,
+            decimal.Round(closing - opening, 2), opening, closing);
+    }
+
+    // ---- Control-account reconciliations ----
+
+    public async Task<ControlReconciliationDto> GetArControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsReconciliationView, cancellationToken);
+        return await repository.GetArControlReconciliationAsync(asOfUtc, Scope(actor, branchId), cancellationToken);
+    }
+
+    public async Task<ControlReconciliationDto> GetApControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsReconciliationView, cancellationToken);
+        return await repository.GetApControlReconciliationAsync(asOfUtc, Scope(actor, branchId), cancellationToken);
+    }
+
+    public async Task<CashBankControlReconciliationDto> GetCashBankControlReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsReconciliationView, cancellationToken);
+        return await repository.GetCashBankControlReconciliationAsync(asOfUtc, Scope(actor, branchId), cancellationToken);
+    }
+
+    public async Task<InventoryReconciliationDto> GetInventoryReconciliationAsync(Guid actorId, DateTime asOfUtc, Guid? branchId, Guid? godownId, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.AccountsReconciliationView, cancellationToken);
+        var scope = Scope(actor, branchId);
+        var valuation = await repository.GetInventoryValuationAsync(scope, godownId, cancellationToken);
+        var glBalance = await repository.GetMappedAccountBalanceAsync(AccountMappingKey.Inventory, asOfUtc, scope, cancellationToken);
+        return new InventoryReconciliationDto(asOfUtc, scope, godownId, decimal.Round(valuation, 2), decimal.Round(glBalance, 2), decimal.Round(valuation - glBalance, 2));
+    }
+
     private static IReadOnlyList<FinancialStatementRowDto> StatementRows(IEnumerable<TrialBalanceRowDto> rows) =>
         rows.Select(x => new FinancialStatementRowDto(x.ChartOfAccountId, x.AccountCode, x.AccountName,
             x.AccountType is AccountType.Asset or AccountType.CostOfSales or AccountType.Expense
@@ -309,8 +516,9 @@ public sealed class AccountingService(IAccountingRepository repository, TimeProv
             var account = line.ChartOfAccount ?? await repository.GetAccountAsync(line.ChartOfAccountId, ct);
             var customer = line.CustomerId.HasValue ? line.Customer ?? await repository.GetCustomerAsync(line.CustomerId.Value, ct) : null;
             var supplier = line.SupplierId.HasValue ? line.Supplier ?? await repository.GetSupplierAsync(line.SupplierId.Value, ct) : null;
+            var costCenter = line.CostCenterId.HasValue ? line.CostCenter ?? await repository.GetCostCenterAsync(line.CostCenterId.Value, ct) : null;
             lineDtos.Add(new JournalEntryLineDto(line.Id, line.ChartOfAccountId, account?.Code ?? string.Empty, account?.Name ?? string.Empty,
-                line.Debit, line.Credit, line.BranchId, customer?.Name, supplier?.Name, line.Description));
+                line.Debit, line.Credit, line.BranchId, customer?.Name, supplier?.Name, line.Description, line.CostCenterId, costCenter?.Name));
         }
         return new JournalEntryDto(entry.Id, entry.EntryNumber, entry.EntryDateUtc, entry.SourceType, entry.SourceId, entry.Reference,
             entry.Description, entry.BranchId, branch?.Name ?? string.Empty, postedBy?.FullName ?? string.Empty, entry.PostedAtUtc, entry.Status,

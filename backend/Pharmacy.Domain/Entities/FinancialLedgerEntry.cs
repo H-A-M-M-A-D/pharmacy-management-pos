@@ -17,6 +17,13 @@ public class FinancialLedgerEntry : Entity
     public Guid CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
     public DateTime OccurredAtUtc { get; set; }
+    /// <summary>Set once this entry has been matched into a <see cref="BankReconciliation"/>. This is
+    /// the one pair of fields this otherwise-immutable row may still change after insert — see
+    /// <see cref="Pharmacy.Infrastructure.Data.PharmacyDbContext"/>'s finance-document validator,
+    /// which allows a Modified state only when exactly these two properties changed.</summary>
+    public Guid? BankReconciliationId { get; set; }
+    public BankReconciliation? BankReconciliation { get; set; }
+    public DateTime? ReconciledAtUtc { get; set; }
 }
 
 public enum FinancialLedgerEntryType

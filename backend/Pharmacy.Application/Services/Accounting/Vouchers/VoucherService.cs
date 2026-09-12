@@ -30,6 +30,17 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
         if (!Enum.IsDefined(request.Type)) throw new RequestValidationException("Voucher type is invalid.");
         if (await repository.GetBranchAsync(request.BranchId, cancellationToken) is not { IsActive: true })
             throw new RequestValidationException("Branch is invalid or inactive.");
+        if (request.FinancialAccountId.HasValue)
+        {
+            if (request.Type is not (VoucherType.CashReceipt or VoucherType.CashPayment or VoucherType.BankReceipt or VoucherType.BankPayment))
+                throw new RequestValidationException("A financial account can only be attached to a Cash/Bank Receipt or Payment voucher.");
+            var financialAccount = await repository.GetFinancialAccountAsync(request.FinancialAccountId.Value, cancellationToken);
+            if (financialAccount is not { IsActive: true } || financialAccount.BranchId != request.BranchId)
+                throw new RequestValidationException("Financial account is invalid, inactive, or belongs to another branch.");
+            var expectCash = request.Type is VoucherType.CashReceipt or VoucherType.CashPayment;
+            if (expectCash != (financialAccount.AccountType == FinancialAccountType.Cash))
+                throw new RequestValidationException(expectCash ? "Choose a Cash-type financial account for this voucher type." : "Choose a non-Cash financial account for this voucher type.");
+        }
 
         Voucher? voucher = null;
         await repository.ExecuteInTransactionAsync(async ct =>
@@ -64,7 +75,8 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
                 ContraToChartOfAccountId = request.ContraToChartOfAccountId,
                 Amount = request.Amount,
                 Status = VoucherStatus.Draft,
-                CreatedByUserId = actorId
+                CreatedByUserId = actorId,
+                FinancialAccountId = request.FinancialAccountId
             };
             if (request.Type == VoucherType.Journal)
             {
@@ -87,6 +99,7 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
     public async Task<VoucherDto> PostAsync(Guid actorId, Guid voucherId, CancellationToken cancellationToken = default)
     {
         var actor = await Require(actorId, PermissionCatalog.AccountsVoucherPost, cancellationToken);
+        if (HasPermission(actor, PermissionCatalog.AccountsPostToSoftClosed)) repository.AllowPostingIntoSoftClosedPeriod();
         await repository.ExecuteInTransactionAsync(async ct =>
         {
             var voucher = await repository.GetVoucherAsync(voucherId, ct) ?? throw new ResourceNotFoundException("Voucher was not found.");
@@ -130,6 +143,7 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
     public async Task<VoucherDto> ReverseAsync(Guid actorId, Guid voucherId, CancellationToken cancellationToken = default)
     {
         var actor = await Require(actorId, PermissionCatalog.AccountsVoucherReverse, cancellationToken);
+        if (HasPermission(actor, PermissionCatalog.AccountsPostToSoftClosed)) repository.AllowPostingIntoSoftClosedPeriod();
         Guid reversalId = Guid.Empty;
         await repository.ExecuteInTransactionAsync(async ct =>
         {
@@ -139,6 +153,8 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
             if (original.CustomerId.HasValue || original.SupplierId.HasValue)
                 throw new RequestValidationException("Vouchers linked to a customer or supplier cannot be auto-reversed, because the linked payment/ledger/allocation would go out of sync with the journal entry. Post a manual adjustment instead.");
             if (original.Lines.Count == 0) throw new InvalidOperationException("Posted voucher has no lines to reverse.");
+            if (await repository.VoucherHasReversalAsync(original.Id, ct))
+                throw new RequestValidationException("This voucher has already been reversed.");
 
             var reversal = new Voucher
             {
@@ -153,7 +169,8 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
                 Amount = original.Amount,
                 Status = VoucherStatus.Draft,
                 CreatedByUserId = actorId,
-                ReversalOfVoucherId = original.Id
+                ReversalOfVoucherId = original.Id,
+                FinancialAccountId = original.FinancialAccountId
             };
             foreach (var line in original.Lines)
             {
@@ -165,7 +182,20 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
             }
             await repository.AddVoucherAsync(reversal, ct);
 
-            var entry = await BuildAndAddJournalEntryAsync(reversal, actor.Id, ct);
+            if (original.FinancialAccountId.HasValue)
+            {
+                var isReceipt = original.Type is VoucherType.CashReceipt or VoucherType.BankReceipt;
+                await repository.AddFinancialLedgerEntryAsync(new FinancialLedgerEntry
+                {
+                    FinancialAccountId = original.FinancialAccountId.Value, BranchId = reversal.BranchId,
+                    EntryType = isReceipt ? FinancialLedgerEntryType.AdjustmentDebit : FinancialLedgerEntryType.AdjustmentCredit,
+                    Amount = isReceipt ? -original.Amount!.Value : original.Amount!.Value,
+                    ReferenceType = "Voucher", ReferenceId = reversal.Id, ReferenceNumber = reversal.VoucherNumber,
+                    Description = reversal.Description, CreatedByUserId = actor.Id, OccurredAtUtc = reversal.VoucherDateUtc
+                }, ct);
+            }
+
+            var entry = await BuildAndAddJournalEntryAsync(reversal, actor.Id, ct, original.JournalEntryId, $"Reversal of voucher {original.VoucherNumber}");
             reversal.JournalEntryId = entry.Id;
             reversal.Status = VoucherStatus.Posted;
             reversal.PostedByUserId = actorId;
@@ -215,6 +245,16 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
 
         voucher.Lines.Add(new VoucherLine { ChartOfAccountId = cashOrBankAccountId, Debit = amount, Credit = 0 });
         voucher.Lines.Add(new VoucherLine { ChartOfAccountId = otherAccountId, Debit = 0, Credit = amount, CustomerId = customerId });
+        if (voucher.FinancialAccountId.HasValue)
+        {
+            await repository.AddFinancialLedgerEntryAsync(new FinancialLedgerEntry
+            {
+                FinancialAccountId = voucher.FinancialAccountId.Value, BranchId = voucher.BranchId,
+                EntryType = customerId.HasValue ? FinancialLedgerEntryType.CustomerPayment : FinancialLedgerEntryType.AdjustmentCredit, Amount = amount,
+                ReferenceType = "Voucher", ReferenceId = voucher.Id, ReferenceNumber = voucher.VoucherNumber,
+                Description = voucher.Description, CreatedByUserId = actor.Id, OccurredAtUtc = voucher.VoucherDateUtc
+            }, ct);
+        }
         return await BuildAndAddJournalEntryAsync(voucher, actor.Id, ct);
     }
 
@@ -239,6 +279,16 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
 
         voucher.Lines.Add(new VoucherLine { ChartOfAccountId = otherAccountId, Debit = amount, Credit = 0, SupplierId = supplierId });
         voucher.Lines.Add(new VoucherLine { ChartOfAccountId = cashOrBankAccountId, Debit = 0, Credit = amount });
+        if (voucher.FinancialAccountId.HasValue)
+        {
+            await repository.AddFinancialLedgerEntryAsync(new FinancialLedgerEntry
+            {
+                FinancialAccountId = voucher.FinancialAccountId.Value, BranchId = voucher.BranchId,
+                EntryType = supplierId.HasValue ? FinancialLedgerEntryType.SupplierPayment : FinancialLedgerEntryType.AdjustmentDebit, Amount = -amount,
+                ReferenceType = "Voucher", ReferenceId = voucher.Id, ReferenceNumber = voucher.VoucherNumber,
+                Description = voucher.Description, CreatedByUserId = actor.Id, OccurredAtUtc = voucher.VoucherDateUtc
+            }, ct);
+        }
         return await BuildAndAddJournalEntryAsync(voucher, actor.Id, ct);
     }
 
@@ -258,7 +308,8 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
         return await BuildAndAddJournalEntryAsync(voucher, voucher.CreatedByUserId, ct);
     }
 
-    private async Task<JournalEntry> BuildAndAddJournalEntryAsync(Voucher voucher, Guid postedByUserId, CancellationToken ct)
+    private async Task<JournalEntry> BuildAndAddJournalEntryAsync(Voucher voucher, Guid postedByUserId, CancellationToken ct,
+        Guid? reversesJournalEntryId = null, string? reversalReason = null)
     {
         var entry = new JournalEntry
         {
@@ -272,6 +323,8 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
             PostedByUserId = postedByUserId,
             PostedAtUtc = UtcNow(),
             Status = JournalEntryStatus.Posted,
+            ReversesJournalEntryId = reversesJournalEntryId,
+            ReversalReason = reversalReason,
             Lines = voucher.Lines.Select(l => new JournalEntryLine
             {
                 ChartOfAccountId = l.ChartOfAccountId, Debit = l.Debit, Credit = l.Credit,
@@ -420,7 +473,7 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
             voucher.ChartOfAccountId, voucher.ChartOfAccount?.Name, voucher.Status,
             voucher.CreatedByUser?.FullName ?? string.Empty, voucher.CreatedAt, voucher.PostedByUser?.FullName, voucher.PostedAtUtc,
             voucher.JournalEntryId, voucher.JournalEntry?.EntryNumber, voucher.ReversalOfVoucherId,
-            lines.Sum(x => x.Debit), lines.Sum(x => x.Credit), lines));
+            lines.Sum(x => x.Debit), lines.Sum(x => x.Credit), lines, voucher.FinancialAccountId, voucher.FinancialAccount?.Name));
     }
 
     private async Task<User> Require(Guid actorId, string permission, CancellationToken ct)
@@ -430,6 +483,9 @@ public sealed class VoucherService(IVoucherRepository repository, TimeProvider t
             throw new ForbiddenOperationException("The current user is not permitted to perform this operation.");
         return actor;
     }
+
+    private static bool HasPermission(User actor, string permission) =>
+        actor.Role?.RolePermissions.Any(x => x.Permission?.Code == permission) == true;
 
     private static bool CanSelectBranch(User actor) => actor.Role?.Name is RoleCatalog.Owner or RoleCatalog.Manager;
 

@@ -482,8 +482,12 @@ class AuthState extends ChangeNotifier {
   Future<List<ExpenseInfo>> listExpenses() => _api.listExpenses(_requiredToken);
   Future<ExpenseInfo> postExpense(Map<String, dynamic> values) =>
       _api.postExpense(_requiredToken, values);
+  Future<void> reverseExpense(String id, String reason) =>
+      _api.reverseExpense(_requiredToken, id, reason);
   Future<void> postOtherIncome(Map<String, dynamic> values) =>
       _api.postOtherIncome(_requiredToken, values);
+  Future<void> reverseOtherIncome(String id, String reason) =>
+      _api.reverseOtherIncome(_requiredToken, id, reason);
   Future<void> postFinancialTransfer(Map<String, dynamic> values) =>
       _api.postFinancialTransfer(_requiredToken, values);
   Future<List<FinancialLedgerItem>> financialLedger(String accountId) =>

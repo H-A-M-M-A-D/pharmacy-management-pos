@@ -2,7 +2,10 @@ using Pharmacy.Domain.Entities;
 
 namespace Pharmacy.Application.DTOs.CashierShifts;
 
-public sealed record OpenCashierShiftRequest(Guid BranchId, decimal OpeningCash, string? TerminalName, string? OpeningNotes);
+/// <summary><see cref="FinancialAccountId"/> is an optional till attribution — when set, drawer
+/// entries and the shift-close variance also post to that <see cref="FinancialAccount"/> so the
+/// shift's cash shows up in its Cash Book. Omit to behave exactly as before this field existed.</summary>
+public sealed record OpenCashierShiftRequest(Guid BranchId, decimal OpeningCash, string? TerminalName, string? OpeningNotes, Guid? FinancialAccountId = null);
 public sealed record AddDrawerEntryRequest(CashierShiftDrawerEntryType EntryType, decimal Amount, string Reason);
 public sealed record CloseCashierShiftRequest(decimal ActualCountedCash, string? ClosingNotes);
 public sealed record ReconcileCashierShiftRequest(string? ReconciliationNotes);
@@ -21,7 +24,8 @@ public sealed record CashierShiftDto(
     string? ReconciledBy, DateTime? ReconciledAtUtc, string? ReconciliationNotes,
     decimal TotalSales, decimal TotalRefunds, decimal CashSales, decimal CashRefunds, decimal CustomerCashReceived,
     decimal CashPaidOut, decimal ManualCashIn, decimal ManualCashOut,
-    IReadOnlyList<CashierShiftPaymentSummaryDto> PaymentBreakdown, IReadOnlyList<CashierShiftDrawerEntryDto> DrawerEntries);
+    IReadOnlyList<CashierShiftPaymentSummaryDto> PaymentBreakdown, IReadOnlyList<CashierShiftDrawerEntryDto> DrawerEntries,
+    Guid? FinancialAccountId = null, string? FinancialAccountName = null);
 
 public sealed record CashierShiftListItemDto(
     Guid Id, Guid BranchId, string BranchName, Guid CashierUserId, string CashierName, string? TerminalName,

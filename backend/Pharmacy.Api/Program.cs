@@ -9,6 +9,11 @@ using Pharmacy.Api.Middleware;
 using Pharmacy.Application.Security;
 using Pharmacy.Application.Services.Accounting;
 using Pharmacy.Application.Services.Accounting.Vouchers;
+using Pharmacy.Application.Services.Accounting.Periods;
+using Pharmacy.Application.Services.Accounting.RecurringJournals;
+using Pharmacy.Application.Services.Accounting.BankReconciliations;
+using Pharmacy.Application.Services.Accounting.Budgets;
+using Pharmacy.Application.Services.Accounting.PartyAdjustments;
 using Pharmacy.Application.Services.Auth;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Application.Services.Catalog;
@@ -96,6 +101,16 @@ builder.Services.AddScoped<ISalesQuotationRepository, SalesQuotationRepository>(
 builder.Services.AddScoped<ISalesQuotationService, SalesQuotationService>();
 builder.Services.AddScoped<ISalesOrderRepository, SalesOrderRepository>();
 builder.Services.AddScoped<ISalesOrderService, SalesOrderService>();
+builder.Services.AddScoped<IAccountingPeriodRepository, AccountingPeriodRepository>();
+builder.Services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
+builder.Services.AddScoped<IRecurringJournalRepository, RecurringJournalRepository>();
+builder.Services.AddScoped<IRecurringJournalService, RecurringJournalService>();
+builder.Services.AddScoped<IBankReconciliationRepository, BankReconciliationRepository>();
+builder.Services.AddScoped<IBankReconciliationService, BankReconciliationService>();
+builder.Services.AddScoped<IBudgetRepository, BudgetRepository>();
+builder.Services.AddScoped<IBudgetService, BudgetService>();
+builder.Services.AddScoped<IPartyAdjustmentRepository, PartyAdjustmentRepository>();
+builder.Services.AddScoped<IPartyAdjustmentService, PartyAdjustmentService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key not configured. Set Jwt__Key or a user secret.");

@@ -22,19 +22,25 @@ public sealed record ExpenseCategoryDto(Guid Id, string Name, string? Descriptio
 
 public sealed record PostExpenseRequest(Guid BranchId, Guid ExpenseCategoryId, Guid FinancialAccountId,
     DateTime ExpenseDateUtc, decimal Amount, string Description, string? Payee,
-    string? ReferenceNumber, string? Notes);
+    string? ReferenceNumber, string? Notes, Guid? CostCenterId = null);
 public sealed record ExpenseDto(Guid Id, string ExpenseNumber, Guid BranchId, string BranchName,
     Guid ExpenseCategoryId, string CategoryName, Guid FinancialAccountId, string AccountName,
     DateTime ExpenseDateUtc, decimal Amount, string Description, string? Payee,
-    string? ReferenceNumber, string? Notes, string CreatedByName, DateTime PostedAtUtc);
+    string? ReferenceNumber, string? Notes, string CreatedByName, DateTime PostedAtUtc,
+    DateTime? ReversedAtUtc = null, string? ReversedBy = null, string? ReversalReason = null,
+    Guid? CostCenterId = null, string? CostCenterName = null);
 public sealed record ExpenseQuery(Guid? BranchId = null, Guid? CategoryId = null,
     Guid? FinancialAccountId = null, DateTime? DateFrom = null, DateTime? DateTo = null,
     int Page = 1, int PageSize = 50);
+public sealed record ReverseExpenseRequest(string Reason);
 
 public sealed record PostOtherIncomeRequest(Guid BranchId, Guid FinancialAccountId,
-    DateTime OccurredAtUtc, decimal Amount, string Description, string? ReferenceNumber, string? Notes);
+    DateTime OccurredAtUtc, decimal Amount, string Description, string? ReferenceNumber, string? Notes, Guid? CostCenterId = null);
 public sealed record OtherIncomeDto(Guid Id, string IncomeNumber, Guid BranchId,
-    Guid FinancialAccountId, decimal Amount, string Description, DateTime OccurredAtUtc);
+    Guid FinancialAccountId, decimal Amount, string Description, DateTime OccurredAtUtc,
+    DateTime? ReversedAtUtc = null, string? ReversedBy = null, string? ReversalReason = null,
+    Guid? CostCenterId = null, string? CostCenterName = null);
+public sealed record ReverseOtherIncomeRequest(string Reason);
 
 public sealed record PostTransferRequest(Guid BranchId, Guid SourceAccountId,
     Guid DestinationAccountId, DateTime OccurredAtUtc, decimal Amount,

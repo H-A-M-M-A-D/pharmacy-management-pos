@@ -13,7 +13,15 @@ public class OtherIncome : Entity
     public required string Description { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? Notes { get; set; }
+    public Guid? CostCenterId { get; set; }
+    public CostCenter? CostCenter { get; set; }
     public DateTime OccurredAtUtc { get; set; }
     public Guid CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
+    /// <summary>Set once this income has been reversed. See <see cref="Expense.ReversedAtUtc"/> for the
+    /// equivalent on the expense side — the same "only these fields may still change" carve-out applies.</summary>
+    public DateTime? ReversedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public User? ReversedByUser { get; set; }
+    public string? ReversalReason { get; set; }
 }

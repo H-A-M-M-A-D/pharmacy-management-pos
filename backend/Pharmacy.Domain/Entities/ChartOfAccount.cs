@@ -18,7 +18,21 @@ public class ChartOfAccount : Entity
     public bool IsPostingAccount { get; set; } = true;
     public bool IsActive { get; set; } = true;
     public string? Description { get; set; }
+    /// <summary>Optional cash-flow-statement bucket for this account. Null means "auto-classify":
+    /// Asset/Liability movements default to Operating, Equity movements default to Financing. Tag an
+    /// account explicitly (e.g. an Equipment asset as Investing, a Loan Payable/Owner's Capital as
+    /// Financing) only when its balance changes shouldn't be treated as ordinary working capital —
+    /// this is the "minimal classification metadata" the indirect-method Cash Flow Statement reads
+    /// instead of ever hard-coding an account id.</summary>
+    public CashFlowClassification? CashFlowClassification { get; set; }
     public ICollection<ChartOfAccount> ChildAccounts { get; set; } = [];
+}
+
+public enum CashFlowClassification
+{
+    Operating = 1,
+    Investing = 2,
+    Financing = 3
 }
 
 /// <summary>
@@ -68,5 +82,9 @@ public enum AccountMappingKey
     AccountsPayableAdjustmentSuspense = 15,
     CashBankAdjustmentSuspense = 16,
     DrawerClearing = 17,
-    CashOverShort = 18
+    CashOverShort = 18,
+    BadDebtExpense = 19,
+    PayablesWriteOffIncome = 20,
+    CustomerAdvances = 21,
+    SupplierAdvances = 22
 }

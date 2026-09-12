@@ -28,5 +28,8 @@ public enum CustomerPaymentMethod
     Easypaisa = 4,
     JazzCash = 5,
     Cheque = 6,
-    Other = 7
+    Other = 7,
+    WriteOff = 8,
+    AppliedAdvance = 9,
+    CreditNote = 10
 }

@@ -19,6 +19,7 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
             ? context.FinancialAccounts.FromSqlInterpolated($"SELECT * FROM \"FinancialAccounts\" WHERE \"Id\" = {accountId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken)
             : context.FinancialAccounts.FirstOrDefaultAsync(x => x.Id == accountId, cancellationToken);
     public Task<ExpenseCategory?> GetCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) => context.ExpenseCategories.FirstOrDefaultAsync(x => x.Id == categoryId, cancellationToken);
+    public Task<CostCenter?> GetCostCenterAsync(Guid id, CancellationToken cancellationToken = default) => context.CostCenters.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<bool> AccountNameExistsAsync(Guid branchId, string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) => context.FinancialAccounts.AnyAsync(x => x.BranchId == branchId && x.NormalizedName == normalizedName && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
     public Task<bool> CategoryNameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default) => context.ExpenseCategories.AnyAsync(x => x.NormalizedName == normalizedName && (!excludingId.HasValue || x.Id != excludingId), cancellationToken);
     public async Task<decimal> GetBalanceAsync(Guid accountId, DateTime? beforeUtc = null, CancellationToken cancellationToken = default)
@@ -44,6 +45,8 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
     public async Task AddAccountAsync(FinancialAccount account, CancellationToken cancellationToken = default) => await context.FinancialAccounts.AddAsync(account, cancellationToken);
     public async Task AddCategoryAsync(ExpenseCategory category, CancellationToken cancellationToken = default) => await context.ExpenseCategories.AddAsync(category, cancellationToken);
     public async Task AddExpenseAsync(Expense expense, CancellationToken cancellationToken = default) => await context.Expenses.AddAsync(expense, cancellationToken);
+    public Task<Expense?> GetExpenseEntityAsync(Guid id, CancellationToken cancellationToken = default) => context.Expenses.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public Task<OtherIncome?> GetOtherIncomeEntityAsync(Guid id, CancellationToken cancellationToken = default) => context.OtherIncomes.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public async Task AddOtherIncomeAsync(OtherIncome income, CancellationToken cancellationToken = default) => await context.OtherIncomes.AddAsync(income, cancellationToken);
     public async Task AddTransferAsync(FinancialTransfer transfer, CancellationToken cancellationToken = default) => await context.FinancialTransfers.AddAsync(transfer, cancellationToken);
     public async Task AddLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default) => await context.FinancialLedgerEntries.AddAsync(entry, cancellationToken);
@@ -65,7 +68,7 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
     }
     public async Task<IReadOnlyList<ExpenseDto>> ListExpensesAsync(ExpenseQuery request, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
-        var query = context.Expenses.AsNoTracking().Include(x => x.Branch).Include(x => x.ExpenseCategory).Include(x => x.FinancialAccount).Include(x => x.CreatedByUser).AsQueryable();
+        var query = context.Expenses.AsNoTracking().Include(x => x.Branch).Include(x => x.ExpenseCategory).Include(x => x.FinancialAccount).Include(x => x.CreatedByUser).Include(x => x.ReversedByUser).Include(x => x.CostCenter).AsQueryable();
         if (!canSelectBranch && actorBranchId.HasValue) query = query.Where(x => x.BranchId == actorBranchId);
         if (request.BranchId.HasValue) query = query.Where(x => x.BranchId == request.BranchId);
         if (request.CategoryId.HasValue) query = query.Where(x => x.ExpenseCategoryId == request.CategoryId);
@@ -75,7 +78,8 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
         return await query.OrderByDescending(x => x.ExpenseDateUtc).ThenByDescending(x => x.ExpenseNumber)
             .Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)
             .Select(x => new ExpenseDto(x.Id, x.ExpenseNumber, x.BranchId, x.Branch!.Name, x.ExpenseCategoryId, x.ExpenseCategory!.Name,
-                x.FinancialAccountId, x.FinancialAccount!.Name, x.ExpenseDateUtc, x.Amount, x.Description, x.Payee, x.ReferenceNumber, x.Notes, x.CreatedByUser!.FullName, x.PostedAtUtc))
+                x.FinancialAccountId, x.FinancialAccount!.Name, x.ExpenseDateUtc, x.Amount, x.Description, x.Payee, x.ReferenceNumber, x.Notes, x.CreatedByUser!.FullName, x.PostedAtUtc,
+                x.ReversedAtUtc, x.ReversedByUser!.FullName, x.ReversalReason, x.CostCenterId, x.CostCenter!.Name))
             .ToListAsync(cancellationToken);
     }
     public async Task<IReadOnlyList<FinancialLedgerEntryDto>> ListLedgerAsync(Guid accountId, FinancialLedgerQuery request, CancellationToken cancellationToken = default)
@@ -109,14 +113,15 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
 
     // Under IsolationLevel.Serializable, a genuine concurrent-update conflict surfaces from
     // Postgres as SqlState 40001/40P01, but EF Core's default (non-retrying) execution strategy
-    // recognizes that as transient and rewraps it one level deeper in InvalidOperationException
-    // before it reaches here - so the PostgresException is not always DbUpdateException's direct
-    // InnerException. Walk the whole chain instead of checking one fixed level.
+    // may rewrap it deeper in InvalidOperationException before it reaches the repository boundary.
+    // Walk the whole chain instead of checking one fixed depth.
     private static bool IsSerializationConflict(Exception exception)
     {
         for (var current = exception; current is not null; current = current.InnerException)
         {
             if (current is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+                return true;
+            if (current is InvalidOperationException && current.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -125,6 +130,7 @@ public sealed class FinanceRepository(PharmacyDbContext context) : IFinanceRepos
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException ex) when (IsSerializationConflict(ex)) { throw new ResourceConflictException("This financial transaction could not be completed because the same account was changed by another operation at the same time. Please retry."); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation }) { throw new ResourceConflictException("A finance record with this unique value already exists."); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.CheckViolation }) { throw new RequestValidationException("A financial database constraint was violated."); }
     }

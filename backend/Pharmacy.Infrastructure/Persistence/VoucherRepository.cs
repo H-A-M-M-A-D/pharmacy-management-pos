@@ -58,10 +58,16 @@ public sealed class VoucherRepository(PharmacyDbContext context) : IVoucherRepos
             .Include(v => v.CreatedByUser)
             .Include(v => v.PostedByUser)
             .Include(v => v.JournalEntry)
+            .Include(v => v.FinancialAccount)
             .Include(v => v.Lines).ThenInclude(l => l.ChartOfAccount)
             .Include(v => v.Lines).ThenInclude(l => l.Customer)
             .Include(v => v.Lines).ThenInclude(l => l.Supplier)
             .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+
+    public Task<FinancialAccount?> GetFinancialAccountAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.FinancialAccounts.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public async Task AddFinancialLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default) => await context.FinancialLedgerEntries.AddAsync(entry, cancellationToken);
 
     public async Task<PagedResult<VoucherListItemDto>> ListVouchersAsync(VoucherListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default)
     {
@@ -91,13 +97,34 @@ public sealed class VoucherRepository(PharmacyDbContext context) : IVoucherRepos
         return new(items, query.Page, query.PageSize, total);
     }
 
-    public async Task AddJournalEntryAsync(JournalEntry entry, CancellationToken cancellationToken = default) => await context.JournalEntries.AddAsync(entry, cancellationToken);
+    public async Task AddJournalEntryAsync(JournalEntry entry, CancellationToken cancellationToken = default)
+    {
+        // Typed posting appends pre-keyed lines to an already persisted draft. Explicitly
+        // mark new lines as inserts before EF interprets their generated keys as updates.
+        var voucher = context.ChangeTracker.Entries<Voucher>().Select(x => x.Entity)
+            .FirstOrDefault(x => x.Id == entry.SourceId);
+        if (voucher is not null)
+        {
+            var persistedIds = await context.VoucherLines.AsNoTracking().Where(x => x.VoucherId == voucher.Id)
+                .Select(x => x.Id).ToListAsync(cancellationToken);
+            foreach (var line in voucher.Lines)
+                if (!persistedIds.Contains(line.Id)) context.Entry(line).State = EntityState.Added;
+        }
+        await context.JournalEntries.AddAsync(entry, cancellationToken);
+    }
 
     public Task<bool> JournalEntryExistsForSourceAsync(JournalSourceType sourceType, Guid sourceId, CancellationToken cancellationToken = default)
     {
         if (context.JournalEntries.Local.Any(x => x.SourceType == sourceType && x.SourceId == sourceId))
             return Task.FromResult(true);
         return context.JournalEntries.AnyAsync(x => x.SourceType == sourceType && x.SourceId == sourceId, cancellationToken);
+    }
+
+    public Task<bool> VoucherHasReversalAsync(Guid voucherId, CancellationToken cancellationToken = default)
+    {
+        if (context.Vouchers.Local.Any(x => x.ReversalOfVoucherId == voucherId))
+            return Task.FromResult(true);
+        return context.Vouchers.AnyAsync(x => x.ReversalOfVoucherId == voucherId, cancellationToken);
     }
 
     public async Task<string> NextCustomerPaymentReceiptNumberAsync(DateTime paymentDateUtc, CancellationToken cancellationToken = default)
@@ -138,4 +165,6 @@ public sealed class VoucherRepository(PharmacyDbContext context) : IVoucherRepos
             throw new RequestValidationException("Voucher financial constraints were violated.");
         }
     }
+
+    public void AllowPostingIntoSoftClosedPeriod() => context.AllowPostingIntoSoftClosedPeriod = true;
 }

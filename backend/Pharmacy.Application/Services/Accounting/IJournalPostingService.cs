@@ -7,7 +7,10 @@ namespace Pharmacy.Application.Services.Accounting;
 /// <see cref="ChartOfAccount"/> id, so callers never hard-code account identifiers. Exactly one
 /// of <see cref="Debit"/>/<see cref="Credit"/> should be non-zero.
 /// </summary>
-public sealed record JournalLineInput(AccountMappingKey Account, decimal Debit, decimal Credit, Guid? CustomerId = null, Guid? SupplierId = null, string? Description = null);
+/// <summary><see cref="CostCenterId"/> is left null by every automatic Sales/Purchase/Inventory/etc.
+/// posting call site — it exists only so hand-entered postings that go through this shared engine
+/// (currently Expense/Other Income) can optionally tag their line with a cost center.</summary>
+public sealed record JournalLineInput(AccountMappingKey Account, decimal Debit, decimal Credit, Guid? CustomerId = null, Guid? SupplierId = null, string? Description = null, Guid? CostCenterId = null);
 
 public sealed record JournalPostingRequest(
     JournalSourceType SourceType, Guid SourceId, Guid BranchId, DateTime OccurredAtUtc,

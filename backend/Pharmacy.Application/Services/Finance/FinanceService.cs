@@ -170,12 +170,14 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
             var account = await LockedActiveAccount(request.FinancialAccountId, request.BranchId, ct);
             var category = await repository.GetCategoryAsync(request.ExpenseCategoryId, ct);
             if (category is not { IsActive: true }) throw new RequestValidationException("Expense category is invalid or inactive.");
+            if (request.CostCenterId.HasValue && await repository.GetCostCenterAsync(request.CostCenterId.Value, ct) is not { IsActive: true })
+                throw new RequestValidationException("Cost center is invalid or inactive.");
             await EnsureFunds(account.Id, request.Amount, ct);
             var now = UtcNow();
             expense = new Expense { ExpenseNumber = await repository.NextExpenseNumberAsync(request.ExpenseDateUtc, ct), BranchId = request.BranchId,
                 ExpenseCategoryId = category.Id, FinancialAccountId = account.Id, ExpenseDateUtc = AsUtc(request.ExpenseDateUtc), Amount = Money(request.Amount),
                 Description = request.Description.Trim(), Payee = Clean(request.Payee), ReferenceNumber = Clean(request.ReferenceNumber), Notes = Clean(request.Notes),
-                CreatedByUserId = actorId, PostedAtUtc = now };
+                CostCenterId = request.CostCenterId, CreatedByUserId = actorId, PostedAtUtc = now };
             await repository.AddExpenseAsync(expense, ct);
             await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.Expense, -expense.Amount, "Expense", expense.Id, expense.Description, actorId, expense.ExpenseDateUtc, expense.ExpenseNumber), ct);
             await PostExpenseJournalAsync(actorId, expense, account, ct);
@@ -183,6 +185,32 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
         return (await repository.ListExpensesAsync(new ExpenseQuery(PageSize: 100), actor.BranchId, CanSelectBranch(actor), cancellationToken)).Single(x => x.Id == expense!.Id);
+    }
+
+    public async Task<ExpenseDto> ReverseExpenseAsync(Guid actorId, Guid id, ReverseExpenseRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.ExpensesPost, cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new RequestValidationException("A reason is required to reverse an expense.");
+        var expense = await repository.GetExpenseEntityAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Expense was not found.");
+        EnsureBranchAccess(actor, expense.BranchId);
+        if (expense.ReversedAtUtc.HasValue) throw new RequestValidationException("This expense has already been reversed.");
+
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var account = await LockedActiveAccount(expense.FinancialAccountId, expense.BranchId, ct);
+            var now = UtcNow();
+            await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.AdjustmentCredit, expense.Amount, "ExpenseReversal", expense.Id,
+                $"Reversal of expense {expense.ExpenseNumber}: {request.Reason.Trim()}", actorId, now), ct);
+            await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.ExpenseReversal, expense.Id, expense.BranchId, now,
+                expense.ExpenseNumber, $"Reversal of expense {expense.ExpenseNumber}: {request.Reason.Trim()}", actorId,
+                [new(PaymentAccount(account.AccountType), expense.Amount, 0), new(AccountMappingKey.GeneralExpenseDefault, 0, expense.Amount, CostCenterId: expense.CostCenterId)]), ct);
+            expense.ReversedAtUtc = now;
+            expense.ReversedByUserId = actorId;
+            expense.ReversalReason = request.Reason.Trim();
+            await Audit(actorId, "ExpenseReversed", "Expense", expense.Id, new { expense.ExpenseNumber, request.Reason }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return (await repository.ListExpensesAsync(new ExpenseQuery(PageSize: 100), actor.BranchId, CanSelectBranch(actor), cancellationToken)).Single(x => x.Id == expense.Id);
     }
 
     public async Task<OtherIncomeDto> PostOtherIncomeAsync(Guid actorId, PostOtherIncomeRequest request, CancellationToken cancellationToken = default)
@@ -193,16 +221,47 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
         await repository.ExecuteInTransactionAsync(async ct =>
         {
             var account = await LockedActiveAccount(request.FinancialAccountId, request.BranchId, ct);
+            if (request.CostCenterId.HasValue && await repository.GetCostCenterAsync(request.CostCenterId.Value, ct) is not { IsActive: true })
+                throw new RequestValidationException("Cost center is invalid or inactive.");
             income = new OtherIncome { IncomeNumber = await repository.NextIncomeNumberAsync(request.OccurredAtUtc, ct), BranchId = request.BranchId,
                 FinancialAccountId = account.Id, Amount = Money(request.Amount), Description = request.Description.Trim(), ReferenceNumber = Clean(request.ReferenceNumber),
-                Notes = Clean(request.Notes), OccurredAtUtc = AsUtc(request.OccurredAtUtc), CreatedByUserId = actorId };
+                Notes = Clean(request.Notes), CostCenterId = request.CostCenterId, OccurredAtUtc = AsUtc(request.OccurredAtUtc), CreatedByUserId = actorId };
             await repository.AddOtherIncomeAsync(income, ct);
             await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.OtherIncome, income.Amount, "OtherIncome", income.Id, income.Description, actorId, income.OccurredAtUtc, income.IncomeNumber), ct);
             await PostOtherIncomeJournalAsync(actorId, income, account, ct);
             await Audit(actorId, "OtherIncomePosted", "OtherIncome", income.Id, new { income.IncomeNumber, income.BranchId, income.FinancialAccountId, income.Amount }, ct);
             await repository.SaveChangesAsync(ct);
         }, IsolationLevel.Serializable, cancellationToken);
-        return new(income!.Id, income.IncomeNumber, income.BranchId, income.FinancialAccountId, income.Amount, income.Description, income.OccurredAtUtc);
+        return new(income!.Id, income.IncomeNumber, income.BranchId, income.FinancialAccountId, income.Amount, income.Description, income.OccurredAtUtc,
+            CostCenterId: income.CostCenterId);
+    }
+
+    public async Task<OtherIncomeDto> ReverseOtherIncomeAsync(Guid actorId, Guid id, ReverseOtherIncomeRequest request, CancellationToken cancellationToken = default)
+    {
+        var actor = await Require(actorId, PermissionCatalog.FinanceIncomeCreate, cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new RequestValidationException("A reason is required to reverse other income.");
+        var income = await repository.GetOtherIncomeEntityAsync(id, cancellationToken) ?? throw new ResourceNotFoundException("Other income was not found.");
+        EnsureBranchAccess(actor, income.BranchId);
+        if (income.ReversedAtUtc.HasValue) throw new RequestValidationException("This income has already been reversed.");
+
+        await repository.ExecuteInTransactionAsync(async ct =>
+        {
+            var account = await LockedActiveAccount(income.FinancialAccountId, income.BranchId, ct);
+            await EnsureFunds(account.Id, income.Amount, ct);
+            var now = UtcNow();
+            await repository.AddLedgerEntryAsync(Entry(account, FinancialLedgerEntryType.AdjustmentDebit, -income.Amount, "OtherIncomeReversal", income.Id,
+                $"Reversal of income {income.IncomeNumber}: {request.Reason.Trim()}", actorId, now), ct);
+            await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OtherIncomeReversal, income.Id, income.BranchId, now,
+                income.IncomeNumber, $"Reversal of income {income.IncomeNumber}: {request.Reason.Trim()}", actorId,
+                [new(AccountMappingKey.OtherIncomeDefault, income.Amount, 0, CostCenterId: income.CostCenterId), new(PaymentAccount(account.AccountType), 0, income.Amount)]), ct);
+            income.ReversedAtUtc = now;
+            income.ReversedByUserId = actorId;
+            income.ReversalReason = request.Reason.Trim();
+            await Audit(actorId, "OtherIncomeReversed", "OtherIncome", income.Id, new { income.IncomeNumber, request.Reason }, ct);
+            await repository.SaveChangesAsync(ct);
+        }, IsolationLevel.Serializable, cancellationToken);
+        return new(income.Id, income.IncomeNumber, income.BranchId, income.FinancialAccountId, income.Amount, income.Description, income.OccurredAtUtc,
+            income.ReversedAtUtc, actor.FullName, income.ReversalReason, income.CostCenterId);
     }
 
     public async Task<FinancialTransferDto> PostTransferAsync(Guid actorId, PostTransferRequest request, CancellationToken cancellationToken = default)
@@ -282,7 +341,7 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
     {
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.Expense, expense.Id, expense.BranchId, expense.ExpenseDateUtc,
             expense.ExpenseNumber, $"Expense {expense.ExpenseNumber}", actorId,
-            [new(AccountMappingKey.GeneralExpenseDefault, expense.Amount, 0), new(PaymentAccount(account.AccountType), 0, expense.Amount)]), ct);
+            [new(AccountMappingKey.GeneralExpenseDefault, expense.Amount, 0, CostCenterId: expense.CostCenterId), new(PaymentAccount(account.AccountType), 0, expense.Amount)]), ct);
     }
 
     private async Task PostFinancialAccountOpeningBalanceJournalAsync(Guid actorId, FinancialAccount account, CancellationToken ct)
@@ -300,7 +359,7 @@ public sealed class FinanceService(IFinanceRepository repository, IJournalPostin
     {
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.OtherIncome, income.Id, income.BranchId, income.OccurredAtUtc,
             income.IncomeNumber, $"Other income {income.IncomeNumber}", actorId,
-            [new(PaymentAccount(account.AccountType), income.Amount, 0), new(AccountMappingKey.OtherIncomeDefault, 0, income.Amount)]), ct);
+            [new(PaymentAccount(account.AccountType), income.Amount, 0), new(AccountMappingKey.OtherIncomeDefault, 0, income.Amount, CostCenterId: income.CostCenterId)]), ct);
     }
 
     private async Task PostTransferJournalAsync(Guid actorId, FinancialTransfer transfer, FinancialAccount source, FinancialAccount destination, CancellationToken ct)

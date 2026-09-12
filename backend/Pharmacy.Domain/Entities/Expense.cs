@@ -17,7 +17,16 @@ public class Expense : Entity
     public string? Payee { get; set; }
     public string? ReferenceNumber { get; set; }
     public string? Notes { get; set; }
+    public Guid? CostCenterId { get; set; }
+    public CostCenter? CostCenter { get; set; }
     public Guid CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
     public DateTime PostedAtUtc { get; set; }
+    /// <summary>Set once this expense has been reversed (a compensating <see cref="FinancialLedgerEntry"/>
+    /// and journal entry posted). These are the only fields this otherwise-immutable row may still
+    /// change after insert.</summary>
+    public DateTime? ReversedAtUtc { get; set; }
+    public Guid? ReversedByUserId { get; set; }
+    public User? ReversedByUser { get; set; }
+    public string? ReversalReason { get; set; }
 }

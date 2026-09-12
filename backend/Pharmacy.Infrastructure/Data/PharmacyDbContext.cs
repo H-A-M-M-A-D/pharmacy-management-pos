@@ -79,6 +79,28 @@ public class PharmacyDbContext : DbContext
     public DbSet<SalesQuotationItem> SalesQuotationItems { get; set; } = null!;
     public DbSet<SalesOrder> SalesOrders { get; set; } = null!;
     public DbSet<SalesOrderItem> SalesOrderItems { get; set; } = null!;
+    public DbSet<AccountingPeriod> AccountingPeriods { get; set; } = null!;
+    public DbSet<FiscalYearClose> FiscalYearCloses { get; set; } = null!;
+    public DbSet<RecurringJournalTemplate> RecurringJournalTemplates { get; set; } = null!;
+    public DbSet<RecurringJournalTemplateLine> RecurringJournalTemplateLines { get; set; } = null!;
+    public DbSet<RecurringJournalOccurrence> RecurringJournalOccurrences { get; set; } = null!;
+    public DbSet<BankReconciliation> BankReconciliations { get; set; } = null!;
+    public DbSet<AccountBudget> AccountBudgets { get; set; } = null!;
+    public DbSet<CostCenter> CostCenters { get; set; } = null!;
+    public DbSet<CreditNote> CreditNotes { get; set; } = null!;
+    public DbSet<DebitNote> DebitNotes { get; set; } = null!;
+    public DbSet<CustomerWriteOff> CustomerWriteOffs { get; set; } = null!;
+    public DbSet<SupplierWriteOff> SupplierWriteOffs { get; set; } = null!;
+    public DbSet<CustomerAdvance> CustomerAdvances { get; set; } = null!;
+    public DbSet<CustomerAdvanceApplication> CustomerAdvanceApplications { get; set; } = null!;
+    public DbSet<SupplierAdvance> SupplierAdvances { get; set; } = null!;
+    public DbSet<SupplierAdvanceApplication> SupplierAdvanceApplications { get; set; } = null!;
+
+    /// <summary>Per-call escape hatch letting a service that has already verified the posting actor
+    /// holds <c>accounts.post_to_soft_closed</c> post into a <see cref="AccountingPeriodStatus.SoftClosed"/>
+    /// period. Never set for automatic/system postings — see <see cref="ValidateAccountingPeriodLocks"/>.
+    /// Defaults false on every DbContext instance (scoped per request), so nothing needs to reset it.</summary>
+    public bool AllowPostingIntoSoftClosedPeriod { get; set; }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -92,6 +114,8 @@ public class PharmacyDbContext : DbContext
         ValidateStockCountDocuments();
         ValidateCashierShiftDocuments();
         ValidateAccountingDocuments();
+        ValidateAccountingPeriodLocks();
+        ValidatePhase4Documents();
         ProtectAuditLog();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -108,8 +132,74 @@ public class PharmacyDbContext : DbContext
         ValidateStockCountDocuments();
         ValidateCashierShiftDocuments();
         ValidateAccountingDocuments();
+        ValidateAccountingPeriodLocks();
+        ValidatePhase4Documents();
         ProtectAuditLog();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>Central, single-choke-point enforcement of accounting-period locking. Every posting
+    /// path in the system — automatic (Sales/Purchases/Expenses/... via JournalPostingService),
+    /// manual journals, and vouchers — ultimately calls <c>DbSet&lt;JournalEntry&gt;.Add</c>, so gating
+    /// it here means no individual service needs its own period check. A date with no covering
+    /// <see cref="AccountingPeriod"/> at all is always postable (periods are opt-in), a
+    /// <see cref="AccountingPeriodStatus.Closed"/> period always blocks, and a
+    /// <see cref="AccountingPeriodStatus.SoftClosed"/> period blocks unless
+    /// <see cref="AllowPostingIntoSoftClosedPeriod"/> was explicitly set by a caller that already
+    /// checked the actor holds the override permission.</summary>
+    private void ValidateAccountingPeriodLocks()
+    {
+        ChangeTracker.DetectChanges();
+        var addedEntries = ChangeTracker.Entries<JournalEntry>().Where(e => e.State == EntityState.Added).Select(e => e.Entity).ToList();
+        if (addedEntries.Count == 0) return;
+        var dates = addedEntries.Select(e => DateOnly.FromDateTime(e.EntryDateUtc)).ToList();
+        var minDate = dates.Min();
+        var maxDate = dates.Max();
+        var lockedPeriods = AccountingPeriods
+            .Where(p => p.Status != AccountingPeriodStatus.Open && p.StartDate <= maxDate && p.EndDate >= minDate)
+            .ToList();
+        if (lockedPeriods.Count == 0) return;
+        foreach (var entry in addedEntries)
+        {
+            var date = DateOnly.FromDateTime(entry.EntryDateUtc);
+            var period = lockedPeriods.FirstOrDefault(p => date >= p.StartDate && date <= p.EndDate);
+            if (period is null) continue;
+            if (period.Status == AccountingPeriodStatus.Closed)
+            {
+                Entry(entry).State = EntityState.Detached;
+                throw new InvalidOperationException($"Cannot post into closed accounting period '{period.Name}' ({period.StartDate:yyyy-MM-dd} to {period.EndDate:yyyy-MM-dd}).");
+            }
+            if (period.Status == AccountingPeriodStatus.SoftClosed && !AllowPostingIntoSoftClosedPeriod)
+            {
+                Entry(entry).State = EntityState.Detached;
+                throw new InvalidOperationException($"Cannot post into soft-closed accounting period '{period.Name}' without override permission.");
+            }
+        }
+    }
+
+    private void ValidatePhase4Documents()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<RecurringJournalOccurrence>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Recurring journal occurrence history is permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<CreditNote>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted credit notes are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<DebitNote>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted debit notes are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<CustomerWriteOff>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted customer write-offs are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<SupplierWriteOff>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted supplier write-offs are permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<CustomerAdvance>())
+            if (entry.State == EntityState.Deleted || (entry.State == EntityState.Modified && entry.Properties.Any(p => p.IsModified && p.Metadata.Name != nameof(CustomerAdvance.AmountApplied))))
+                throw new InvalidOperationException("Posted customer advances are permanent; only the applied-amount running total may change.");
+        foreach (var entry in ChangeTracker.Entries<CustomerAdvanceApplication>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Customer advance application history is permanent and cannot be updated or deleted.");
+        foreach (var entry in ChangeTracker.Entries<SupplierAdvance>())
+            if (entry.State == EntityState.Deleted || (entry.State == EntityState.Modified && entry.Properties.Any(p => p.IsModified && p.Metadata.Name != nameof(SupplierAdvance.AmountApplied))))
+                throw new InvalidOperationException("Posted supplier advances are permanent; only the applied-amount running total may change.");
+        foreach (var entry in ChangeTracker.Entries<SupplierAdvanceApplication>())
+            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Supplier advance application history is permanent and cannot be updated or deleted.");
     }
 
     private void ValidateAccountingDocuments()
@@ -250,15 +340,28 @@ public class PharmacyDbContext : DbContext
         ChangeTracker.DetectChanges();
         foreach (var entry in ChangeTracker.Entries<FinancialLedgerEntry>())
         {
-            if (entry.State is EntityState.Modified or EntityState.Deleted)
-                throw new InvalidOperationException("Financial ledger history is permanent and cannot be updated or deleted.");
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Financial ledger history is permanent and cannot be deleted.");
+            if (entry.State == EntityState.Modified && entry.Properties.Any(p => p.IsModified &&
+                    p.Metadata.Name is not (nameof(FinancialLedgerEntry.BankReconciliationId) or nameof(FinancialLedgerEntry.ReconciledAtUtc))))
+                throw new InvalidOperationException("Financial ledger history is permanent and cannot be updated, aside from bank-reconciliation matching.");
             if (entry.State == EntityState.Added && entry.Entity.Amount == 0)
                 throw new InvalidOperationException("Financial ledger amount cannot be zero.");
         }
         foreach (var entry in ChangeTracker.Entries<Expense>())
-            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted expenses are permanent and cannot be updated or deleted.");
+        {
+            if (entry.State == EntityState.Deleted) throw new InvalidOperationException("Posted expenses are permanent and cannot be deleted.");
+            if (entry.State == EntityState.Modified && entry.Properties.Any(p => p.IsModified && p.Metadata.Name is not
+                    (nameof(Expense.ReversedAtUtc) or nameof(Expense.ReversedByUserId) or nameof(Expense.ReversalReason))))
+                throw new InvalidOperationException("Posted expenses are permanent and cannot be updated, aside from being marked reversed.");
+        }
         foreach (var entry in ChangeTracker.Entries<OtherIncome>())
-            if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted other income is permanent and cannot be updated or deleted.");
+        {
+            if (entry.State == EntityState.Deleted) throw new InvalidOperationException("Posted other income is permanent and cannot be deleted.");
+            if (entry.State == EntityState.Modified && entry.Properties.Any(p => p.IsModified && p.Metadata.Name is not
+                    (nameof(OtherIncome.ReversedAtUtc) or nameof(OtherIncome.ReversedByUserId) or nameof(OtherIncome.ReversalReason))))
+                throw new InvalidOperationException("Posted other income is permanent and cannot be updated, aside from being marked reversed.");
+        }
         foreach (var entry in ChangeTracker.Entries<FinancialTransfer>())
             if (entry.State is EntityState.Modified or EntityState.Deleted) throw new InvalidOperationException("Posted transfers are permanent and cannot be updated or deleted.");
         foreach (var entry in ChangeTracker.Entries<FinancialAccount>())
@@ -454,6 +557,12 @@ public class PharmacyDbContext : DbContext
         modelBuilder.HasSequence<long>("StockTransferNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("QuotationNumberSequence").StartsAt(1);
         modelBuilder.HasSequence<long>("SalesOrderNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("CreditNoteNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("DebitNoteNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("CustomerWriteOffNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("SupplierWriteOffNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("CustomerAdvanceNumberSequence").StartsAt(1);
+        modelBuilder.HasSequence<long>("SupplierAdvanceNumberSequence").StartsAt(1);
 
         // Apply entity configurations
         ConfigureBranch(modelBuilder);
@@ -519,6 +628,22 @@ public class PharmacyDbContext : DbContext
         ConfigureSalesQuotationItem(modelBuilder);
         ConfigureSalesOrder(modelBuilder);
         ConfigureSalesOrderItem(modelBuilder);
+        ConfigureAccountingPeriod(modelBuilder);
+        ConfigureFiscalYearClose(modelBuilder);
+        ConfigureRecurringJournalTemplate(modelBuilder);
+        ConfigureRecurringJournalTemplateLine(modelBuilder);
+        ConfigureRecurringJournalOccurrence(modelBuilder);
+        ConfigureBankReconciliation(modelBuilder);
+        ConfigureAccountBudget(modelBuilder);
+        ConfigureCostCenter(modelBuilder);
+        ConfigureCreditNote(modelBuilder);
+        ConfigureDebitNote(modelBuilder);
+        ConfigureCustomerWriteOff(modelBuilder);
+        ConfigureSupplierWriteOff(modelBuilder);
+        ConfigureCustomerAdvance(modelBuilder);
+        ConfigureCustomerAdvanceApplication(modelBuilder);
+        ConfigureSupplierAdvance(modelBuilder);
+        ConfigureSupplierAdvanceApplication(modelBuilder);
     }
 
     private void ConfigureBranch(ModelBuilder modelBuilder)
@@ -966,6 +1091,7 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.BranchId, e.OpenedAtUtc });
         entity.HasIndex(e => new { e.BranchId, e.ClosedAtUtc });
         entity.HasIndex(e => e.Status);
+        entity.HasIndex(e => e.FinancialAccountId);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_CashierShifts_Status", "\"Status\" IN (1, 2, 3)");
@@ -978,6 +1104,7 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CashierUser).WithMany().HasForeignKey(e => e.CashierUserId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ReconciledByUser).WithMany().HasForeignKey(e => e.ReconciledByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureCashierShiftDrawerEntry(ModelBuilder modelBuilder)
@@ -1018,6 +1145,7 @@ public class PharmacyDbContext : DbContext
         {
             table.HasCheckConstraint("CK_ChartOfAccounts_AccountType", "\"AccountType\" IN (1, 2, 3, 4, 5, 6)");
             table.HasCheckConstraint("CK_ChartOfAccounts_NormalBalance", "\"NormalBalance\" IN (1, 2)");
+            table.HasCheckConstraint("CK_ChartOfAccounts_CashFlowClassification", "\"CashFlowClassification\" IS NULL OR \"CashFlowClassification\" BETWEEN 1 AND 3");
         });
         entity.HasOne(e => e.ParentAccount).WithMany(e => e.ChildAccounts).HasForeignKey(e => e.ParentAccountId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -1027,7 +1155,7 @@ public class PharmacyDbContext : DbContext
         var entity = modelBuilder.Entity<AccountMapping>();
         entity.HasKey(e => e.Id);
         entity.HasIndex(e => e.MappingKey).IsUnique();
-        entity.ToTable(table => table.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 18"));
+        entity.ToTable(table => table.HasCheckConstraint("CK_AccountMappings_MappingKey", "\"MappingKey\" BETWEEN 1 AND 22"));
         entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
     }
 
@@ -1038,15 +1166,18 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.EntryNumber).IsRequired().HasMaxLength(50);
         entity.Property(e => e.Reference).HasMaxLength(100);
         entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.ReversalReason).HasMaxLength(500);
         entity.HasIndex(e => e.EntryNumber).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.EntryDateUtc });
         entity.HasIndex(e => new { e.SourceType, e.SourceId })
             .IsUnique()
             .HasFilter("\"SourceId\" IS NOT NULL");
         entity.HasIndex(e => e.EntryDateUtc);
+        entity.HasIndex(e => e.ReversesJournalEntryId).IsUnique().HasFilter("\"ReversesJournalEntryId\" IS NOT NULL");
         entity.ToTable(table => table.HasCheckConstraint("CK_JournalEntries_Status", "\"Status\" = 1"));
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.PostedByUser).WithMany().HasForeignKey(e => e.PostedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReversesJournalEntry).WithMany().HasForeignKey(e => e.ReversesJournalEntryId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureJournalEntryLine(ModelBuilder modelBuilder)
@@ -1060,6 +1191,7 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.ChartOfAccountId, e.BranchId });
         entity.HasIndex(e => e.CustomerId);
         entity.HasIndex(e => e.SupplierId);
+        entity.HasIndex(e => e.CostCenterId);
         entity.ToTable(table => table.HasCheckConstraint("CK_JournalEntryLines_Amounts",
             "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)"));
         entity.HasOne(e => e.JournalEntry).WithMany(j => j.Lines).HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Cascade);
@@ -1067,6 +1199,7 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CostCenter).WithMany().HasForeignKey(e => e.CostCenterId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private void ConfigureCustomerPaymentAllocation(ModelBuilder modelBuilder)
@@ -1115,6 +1248,8 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => e.CustomerId);
         entity.HasIndex(e => e.SupplierId);
         entity.HasIndex(e => e.JournalEntryId);
+        entity.HasIndex(e => e.FinancialAccountId);
+        entity.HasIndex(e => e.ReversalOfVoucherId).IsUnique().HasFilter("\"ReversalOfVoucherId\" IS NOT NULL");
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Vouchers_Type", "\"Type\" BETWEEN 1 AND 6");
@@ -1122,6 +1257,7 @@ public class PharmacyDbContext : DbContext
             table.HasCheckConstraint("CK_Vouchers_Posted_HasJournalEntry", "(\"Status\" <> 2) OR (\"JournalEntryId\" IS NOT NULL AND \"PostedByUserId\" IS NOT NULL AND \"PostedAtUtc\" IS NOT NULL)");
         });
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
@@ -1495,7 +1631,7 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.PaymentMethod, e.PaymentDateUtc });
         entity.ToTable(table =>
         {
-            table.HasCheckConstraint("CK_CustomerPayments_Method", "\"PaymentMethod\" IN (1, 2, 3, 4, 5, 6, 7)");
+            table.HasCheckConstraint("CK_CustomerPayments_Method", "\"PaymentMethod\" IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)");
             table.HasCheckConstraint("CK_CustomerPayments_Amount_Positive", "\"Amount\" > 0");
         });
 
@@ -1921,9 +2057,11 @@ public class PharmacyDbContext : DbContext
         entity.HasIndex(e => new { e.EntryType, e.OccurredAtUtc });
         entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId });
         entity.HasIndex(e => new { e.FinancialAccountId, e.EntryType, e.ReferenceType, e.ReferenceId }).IsUnique();
+        entity.HasIndex(e => e.BankReconciliationId);
         entity.HasOne(e => e.FinancialAccount).WithMany(a => a.LedgerEntries).HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.BankReconciliation).WithMany(r => r.MatchedEntries).HasForeignKey(e => e.BankReconciliationId).OnDelete(DeleteBehavior.Restrict);
         entity.ToTable(table =>
         {
             table.HasCheckConstraint("CK_FinancialLedgerEntries_Amount_NonZero", "\"Amount\" <> 0");
@@ -1955,6 +2093,7 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.Payee).HasMaxLength(200);
         entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
         entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.ReversalReason).HasMaxLength(500);
         entity.HasIndex(e => e.ExpenseNumber).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.ExpenseDateUtc });
         entity.HasIndex(e => new { e.ExpenseCategoryId, e.ExpenseDateUtc });
@@ -1963,6 +2102,8 @@ public class PharmacyDbContext : DbContext
         entity.HasOne(e => e.ExpenseCategory).WithMany().HasForeignKey(e => e.ExpenseCategoryId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReversedByUser).WithMany().HasForeignKey(e => e.ReversedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CostCenter).WithMany().HasForeignKey(e => e.CostCenterId).OnDelete(DeleteBehavior.Restrict);
         entity.ToTable(table => table.HasCheckConstraint("CK_Expenses_Amount_Positive", "\"Amount\" > 0"));
     }
 
@@ -1975,12 +2116,15 @@ public class PharmacyDbContext : DbContext
         entity.Property(e => e.Description).IsRequired().HasMaxLength(500);
         entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
         entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.ReversalReason).HasMaxLength(500);
         entity.HasIndex(e => e.IncomeNumber).IsUnique();
         entity.HasIndex(e => new { e.BranchId, e.OccurredAtUtc });
         entity.HasIndex(e => new { e.FinancialAccountId, e.OccurredAtUtc });
         entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReversedByUser).WithMany().HasForeignKey(e => e.ReversedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CostCenter).WithMany().HasForeignKey(e => e.CostCenterId).OnDelete(DeleteBehavior.Restrict);
         entity.ToTable(table => table.HasCheckConstraint("CK_OtherIncomes_Amount_Positive", "\"Amount\" > 0"));
     }
 
@@ -2071,5 +2215,271 @@ public class PharmacyDbContext : DbContext
         }
         else if (node is JsonArray array)
             foreach (var child in array) Scrub(child);
+    }
+
+    private void ConfigureAccountingPeriod(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<AccountingPeriod>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => new { e.FiscalYear, e.PeriodNumber }).IsUnique();
+        entity.HasIndex(e => new { e.StartDate, e.EndDate });
+        entity.HasIndex(e => e.Status);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_AccountingPeriods_Status", "\"Status\" BETWEEN 1 AND 3");
+            table.HasCheckConstraint("CK_AccountingPeriods_DateOrder", "\"EndDate\" >= \"StartDate\"");
+        });
+        entity.HasOne(e => e.ClosedByUser).WithMany().HasForeignKey(e => e.ClosedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReopenedByUser).WithMany().HasForeignKey(e => e.ReopenedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureFiscalYearClose(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<FiscalYearClose>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.TotalRevenue).HasPrecision(18, 2);
+        entity.Property(e => e.TotalCostOfGoodsSold).HasPrecision(18, 2);
+        entity.Property(e => e.TotalOperatingExpenses).HasPrecision(18, 2);
+        entity.Property(e => e.NetProfit).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.ReopenReason).HasMaxLength(500);
+        entity.HasIndex(e => e.FiscalYear).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_FiscalYearCloses_Status", "\"Status\" BETWEEN 1 AND 2"));
+        entity.HasOne(e => e.ClosedByUser).WithMany().HasForeignKey(e => e.ClosedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReopenedByUser).WithMany().HasForeignKey(e => e.ReopenedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureRecurringJournalTemplate(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<RecurringJournalTemplate>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => new { e.BranchId, e.IsActive });
+        entity.HasIndex(e => e.NextRunDate);
+        entity.ToTable(table => table.HasCheckConstraint("CK_RecurringJournalTemplates_Frequency", "\"Frequency\" BETWEEN 1 AND 4"));
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureRecurringJournalTemplateLine(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<RecurringJournalTemplateLine>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Debit).HasPrecision(18, 2);
+        entity.Property(e => e.Credit).HasPrecision(18, 2);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.RecurringJournalTemplateId);
+        entity.ToTable(table => table.HasCheckConstraint("CK_RecurringJournalTemplateLines_Amounts",
+            "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0) AND (\"Debit\" > 0 OR \"Credit\" > 0)"));
+        entity.HasOne(e => e.RecurringJournalTemplate).WithMany(t => t.Lines).HasForeignKey(e => e.RecurringJournalTemplateId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureRecurringJournalOccurrence(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<RecurringJournalOccurrence>();
+        entity.HasKey(e => e.Id);
+        entity.HasIndex(e => new { e.RecurringJournalTemplateId, e.ScheduledDate }).IsUnique();
+        entity.HasIndex(e => e.JournalEntryId).IsUnique();
+        entity.HasOne(e => e.RecurringJournalTemplate).WithMany(t => t.Occurrences).HasForeignKey(e => e.RecurringJournalTemplateId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.JournalEntry).WithMany().HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.GeneratedByUser).WithMany().HasForeignKey(e => e.GeneratedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureBankReconciliation(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<BankReconciliation>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.StatementOpeningBalance).HasPrecision(18, 2);
+        entity.Property(e => e.StatementClosingBalance).HasPrecision(18, 2);
+        entity.Property(e => e.BookBalanceAtFinalization).HasPrecision(18, 2);
+        entity.Property(e => e.DifferenceAtFinalization).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.Property(e => e.ReopenReason).HasMaxLength(500);
+        entity.HasIndex(e => new { e.FinancialAccountId, e.Status });
+        entity.HasIndex(e => new { e.FinancialAccountId, e.StatementEndDate });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_BankReconciliations_Status", "\"Status\" BETWEEN 1 AND 2");
+            table.HasCheckConstraint("CK_BankReconciliations_DateOrder", "\"StatementEndDate\" >= \"StatementStartDate\"");
+        });
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinalizedByUser).WithMany().HasForeignKey(e => e.FinalizedByUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.ReopenedByUser).WithMany().HasForeignKey(e => e.ReopenedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureAccountBudget(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<AccountBudget>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.BudgetAmount).HasPrecision(18, 2);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => new { e.FiscalYear, e.PeriodNumber, e.ChartOfAccountId, e.BranchId }).IsUnique().AreNullsDistinct(false);
+        entity.ToTable(table => table.HasCheckConstraint("CK_AccountBudgets_PeriodNumber_Range", "\"PeriodNumber\" IS NULL OR \"PeriodNumber\" BETWEEN 1 AND 12"));
+        entity.HasOne(e => e.ChartOfAccount).WithMany().HasForeignKey(e => e.ChartOfAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCostCenter(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CostCenter>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Code).IsRequired().HasMaxLength(20);
+        entity.Property(e => e.NormalizedCode).IsRequired().HasMaxLength(20);
+        entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+        entity.Property(e => e.Description).HasMaxLength(500);
+        entity.HasIndex(e => e.NormalizedCode).IsUnique();
+        entity.HasIndex(e => e.IsActive);
+    }
+
+    private void ConfigureCreditNote(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CreditNote>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.CreditNoteNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.CreditNoteNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.IssueDateUtc });
+        entity.ToTable(table => table.HasCheckConstraint("CK_CreditNotes_Amount_Positive", "\"Amount\" > 0"));
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.AppliedToSale).WithMany().HasForeignKey(e => e.AppliedToSaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureDebitNote(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<DebitNote>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.DebitNoteNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.DebitNoteNumber).IsUnique();
+        entity.HasIndex(e => new { e.SupplierId, e.IssueDateUtc });
+        entity.ToTable(table => table.HasCheckConstraint("CK_DebitNotes_Amount_Positive", "\"Amount\" > 0"));
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.AppliedToGoodsReceipt).WithMany().HasForeignKey(e => e.AppliedToGoodsReceiptId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCustomerWriteOff(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerWriteOff>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.WriteOffNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.WriteOffNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.WriteOffDateUtc });
+        entity.HasIndex(e => e.CustomerPaymentId).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_CustomerWriteOffs_Amount_Positive", "\"Amount\" > 0"));
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.AppliedToSale).WithMany().HasForeignKey(e => e.AppliedToSaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CustomerPayment).WithMany().HasForeignKey(e => e.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSupplierWriteOff(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SupplierWriteOff>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.WriteOffNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.Reason).IsRequired().HasMaxLength(500);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.WriteOffNumber).IsUnique();
+        entity.HasIndex(e => new { e.SupplierId, e.WriteOffDateUtc });
+        entity.HasIndex(e => e.SupplierLedgerEntryId).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_SupplierWriteOffs_Amount_Positive", "\"Amount\" > 0"));
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.AppliedToGoodsReceipt).WithMany().HasForeignKey(e => e.AppliedToGoodsReceiptId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SupplierLedgerEntry).WithMany().HasForeignKey(e => e.SupplierLedgerEntryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCustomerAdvance(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerAdvance>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AdvanceNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.AmountApplied).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.AdvanceNumber).IsUnique();
+        entity.HasIndex(e => new { e.CustomerId, e.ReceivedDateUtc });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_CustomerAdvances_Amount_Positive", "\"Amount\" > 0");
+            table.HasCheckConstraint("CK_CustomerAdvances_AmountApplied_Range", "\"AmountApplied\" >= 0 AND \"AmountApplied\" <= \"Amount\"");
+        });
+        entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureCustomerAdvanceApplication(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<CustomerAdvanceApplication>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AppliedAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.CustomerAdvanceId);
+        entity.HasIndex(e => e.SaleId);
+        entity.HasIndex(e => e.CustomerPaymentId).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_CustomerAdvanceApplications_Amount_Positive", "\"AppliedAmount\" > 0"));
+        entity.HasOne(e => e.CustomerAdvance).WithMany(a => a.Applications).HasForeignKey(e => e.CustomerAdvanceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Sale).WithMany().HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CustomerPayment).WithMany().HasForeignKey(e => e.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSupplierAdvance(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SupplierAdvance>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AdvanceNumber).IsRequired().HasMaxLength(50);
+        entity.Property(e => e.Amount).HasPrecision(18, 2);
+        entity.Property(e => e.AmountApplied).HasPrecision(18, 2);
+        entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
+        entity.Property(e => e.Notes).HasMaxLength(500);
+        entity.HasIndex(e => e.AdvanceNumber).IsUnique();
+        entity.HasIndex(e => new { e.SupplierId, e.PaidDateUtc });
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_SupplierAdvances_Amount_Positive", "\"Amount\" > 0");
+            table.HasCheckConstraint("CK_SupplierAdvances_AmountApplied_Range", "\"AmountApplied\" >= 0 AND \"AmountApplied\" <= \"Amount\"");
+        });
+        entity.HasOne(e => e.Supplier).WithMany().HasForeignKey(e => e.SupplierId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.FinancialAccount).WithMany().HasForeignKey(e => e.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private void ConfigureSupplierAdvanceApplication(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SupplierAdvanceApplication>();
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.AppliedAmount).HasPrecision(18, 2);
+        entity.HasIndex(e => e.SupplierAdvanceId);
+        entity.HasIndex(e => e.GoodsReceiptId);
+        entity.HasIndex(e => e.SupplierLedgerEntryId).IsUnique();
+        entity.ToTable(table => table.HasCheckConstraint("CK_SupplierAdvanceApplications_Amount_Positive", "\"AppliedAmount\" > 0"));
+        entity.HasOne(e => e.SupplierAdvance).WithMany(a => a.Applications).HasForeignKey(e => e.SupplierAdvanceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.GoodsReceipt).WithMany().HasForeignKey(e => e.GoodsReceiptId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.SupplierLedgerEntry).WithMany().HasForeignKey(e => e.SupplierLedgerEntryId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

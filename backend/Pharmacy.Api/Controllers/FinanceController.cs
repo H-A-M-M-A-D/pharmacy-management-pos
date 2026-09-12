@@ -45,8 +45,12 @@ public sealed class FinanceController(IFinanceService finance) : ControllerBase
     public Task<IReadOnlyList<ExpenseDto>> Expenses([FromQuery] ExpenseQuery query, CancellationToken ct) => finance.ListExpensesAsync(UserId(), query, ct);
     [HttpPost("expenses"), HasPermission(PermissionCatalog.ExpensesCreate)]
     public async Task<ActionResult<ExpenseDto>> PostExpense(PostExpenseRequest request, CancellationToken ct) => Created("/api/expenses", await finance.PostExpenseAsync(UserId(), request, ct));
+    [HttpPost("expenses/{id:guid}/reverse"), HasPermission(PermissionCatalog.ExpensesPost)]
+    public Task<ExpenseDto> ReverseExpense(Guid id, ReverseExpenseRequest request, CancellationToken ct) => finance.ReverseExpenseAsync(UserId(), id, request, ct);
     [HttpPost("finance/other-income"), HasPermission(PermissionCatalog.FinanceIncomeCreate)]
     public async Task<ActionResult<OtherIncomeDto>> OtherIncome(PostOtherIncomeRequest request, CancellationToken ct) => Created("/api/finance/other-income", await finance.PostOtherIncomeAsync(UserId(), request, ct));
+    [HttpPost("finance/other-income/{id:guid}/reverse"), HasPermission(PermissionCatalog.FinanceIncomeCreate)]
+    public Task<OtherIncomeDto> ReverseOtherIncome(Guid id, ReverseOtherIncomeRequest request, CancellationToken ct) => finance.ReverseOtherIncomeAsync(UserId(), id, request, ct);
     [HttpPost("finance/transfers"), HasPermission(PermissionCatalog.FinanceTransfer)]
     public async Task<ActionResult<FinancialTransferDto>> Transfer(PostTransferRequest request, CancellationToken ct) => Created("/api/finance/transfers", await finance.PostTransferAsync(UserId(), request, ct));
     [HttpPost("finance/adjustments"), HasPermission(PermissionCatalog.FinanceAdjust)]

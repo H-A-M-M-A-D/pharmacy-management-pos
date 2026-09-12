@@ -16,7 +16,9 @@ public interface IFinanceService
     Task SetCategoryActiveAsync(Guid actorId, Guid id, bool active, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ExpenseDto>> ListExpensesAsync(Guid actorId, ExpenseQuery query, CancellationToken cancellationToken = default);
     Task<ExpenseDto> PostExpenseAsync(Guid actorId, PostExpenseRequest request, CancellationToken cancellationToken = default);
+    Task<ExpenseDto> ReverseExpenseAsync(Guid actorId, Guid id, ReverseExpenseRequest request, CancellationToken cancellationToken = default);
     Task<OtherIncomeDto> PostOtherIncomeAsync(Guid actorId, PostOtherIncomeRequest request, CancellationToken cancellationToken = default);
+    Task<OtherIncomeDto> ReverseOtherIncomeAsync(Guid actorId, Guid id, ReverseOtherIncomeRequest request, CancellationToken cancellationToken = default);
     Task<FinancialTransferDto> PostTransferAsync(Guid actorId, PostTransferRequest request, CancellationToken cancellationToken = default);
     Task PostAdjustmentAsync(Guid actorId, PostFinancialAdjustmentRequest request, CancellationToken cancellationToken = default);
     Task<DailyCashPositionDto> DailyPositionAsync(Guid actorId, Guid branchId, DateOnly date, Guid? accountId, CancellationToken cancellationToken = default);

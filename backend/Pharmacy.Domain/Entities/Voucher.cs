@@ -27,6 +27,13 @@ public class Voucher : Entity
     public Guid? ContraToChartOfAccountId { get; set; }
     public ChartOfAccount? ContraToChartOfAccount { get; set; }
     public decimal? Amount { get; set; }
+    /// <summary>Optional till/bank attribution for Cash/Bank Receipt/Payment/Contra vouchers. When set,
+    /// posting also writes a <see cref="FinancialLedgerEntry"/> against this account so the voucher's
+    /// cash movement shows up in that account's Cash/Bank Book and is eligible for bank reconciliation.
+    /// Left null, a voucher still posts to the GL Cash/Bank control account exactly as before —
+    /// entirely backward compatible with vouchers created before this field existed.</summary>
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
     public VoucherStatus Status { get; set; } = VoucherStatus.Draft;
     public Guid CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }

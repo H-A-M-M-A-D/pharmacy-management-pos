@@ -8,6 +8,7 @@ using Pharmacy.Application.DTOs.Purchasing;
 using Pharmacy.Application.DTOs.Reports;
 using Pharmacy.Application.DTOs.Suppliers;
 using Pharmacy.Application.Services.Accounting;
+using Pharmacy.Application.Services.Accounting.Periods;
 using Pharmacy.Application.Services.CashierShifts;
 using Pharmacy.Application.Services.Customers;
 using Pharmacy.Application.Services.Finance;
@@ -710,7 +711,7 @@ public sealed class PostgreSqlIntegrationTests
                 """));
 
         Assert.Equal(
-            63L,
+            79L,
             await ScalarAsync<long>(connection, null, """
                 SELECT count(*)
                 FROM information_schema.tables
@@ -1715,7 +1716,7 @@ public sealed class PostgreSqlIntegrationTests
     {
         await using var connection = await OpenConnectionAsync();
 
-        Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
+        Assert.Equal(5L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM "Permissions" WHERE "Code" LIKE 'accounts.coa.%' OR "Code" LIKE 'accounts.journal.%';
             """));
         Assert.Equal(4L, await ScalarAsync<long>(connection, null, """
@@ -1726,8 +1727,8 @@ public sealed class PostgreSqlIntegrationTests
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = 'JournalEntryNumberSequence';
             """));
-        Assert.Equal(34L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"ChartOfAccounts\";"));
-        Assert.Equal(18L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"AccountMappings\";"));
+        Assert.Equal(38L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"ChartOfAccounts\";"));
+        Assert.Equal(22L, await ScalarAsync<long>(connection, null, "SELECT count(*) FROM \"AccountMappings\";"));
         Assert.Equal(1L, await ScalarAsync<long>(connection, null, """
             SELECT count(*) FROM "ChartOfAccounts" WHERE "Code" = '1010' AND "Name" = 'Cash' AND "AccountType" = 1 AND "NormalBalance" = 1;
             """));
@@ -2076,6 +2077,158 @@ public sealed class PostgreSqlIntegrationTests
             balanced.Description = "edited";
             await context.SaveChangesAsync();
         });
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Closed_and_soft_closed_accounting_periods_block_posting_via_the_real_dbcontext_pipeline()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PharmacyDbContext(options);
+        await context.Database.UseTransactionAsync(transaction);
+
+        var branchId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(connection, transaction, branchId);
+        var username = Unique("period-lock-user");
+        await InsertUserAsync(connection, transaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, userId);
+        var cashAccountId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"ChartOfAccounts\" WHERE \"Code\"='1010';");
+        var salesAccountId = await ScalarAsync<Guid>(connection, transaction, "SELECT \"Id\" FROM \"ChartOfAccounts\" WHERE \"Code\"='4010';");
+
+        JournalEntry MakeEntry(DateTime entryDateUtc) => new()
+        {
+            EntryNumber = Unique("JV"), EntryDateUtc = entryDateUtc, SourceType = JournalSourceType.ManualVoucher,
+            Description = "period lock probe", BranchId = branchId, PostedByUserId = userId, PostedAtUtc = DateTime.UtcNow,
+            Lines =
+            [
+                new JournalEntryLine { ChartOfAccountId = cashAccountId, Debit = 100, Credit = 0, BranchId = branchId },
+                new JournalEntryLine { ChartOfAccountId = salesAccountId, Debit = 0, Credit = 100, BranchId = branchId }
+            ]
+        };
+
+        var closedPeriodDate = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+        context.AccountingPeriods.Add(new AccountingPeriod
+        {
+            FiscalYear = 2026, PeriodNumber = 1, Name = "January 2026 (closed)",
+            StartDate = new DateOnly(2026, 1, 1), EndDate = new DateOnly(2026, 1, 31),
+            Status = AccountingPeriodStatus.Closed
+        });
+        var softClosedPeriodDate = new DateTime(2026, 2, 15, 0, 0, 0, DateTimeKind.Utc);
+        context.AccountingPeriods.Add(new AccountingPeriod
+        {
+            FiscalYear = 2026, PeriodNumber = 2, Name = "February 2026 (soft-closed)",
+            StartDate = new DateOnly(2026, 2, 1), EndDate = new DateOnly(2026, 2, 28),
+            Status = AccountingPeriodStatus.SoftClosed
+        });
+        await context.SaveChangesAsync();
+
+        // A closed period always blocks, with no override available at all.
+        context.JournalEntries.Add(MakeEntry(closedPeriodDate));
+        var closedEx = await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+        Assert.Contains("closed accounting period", closedEx.Message);
+
+        // A soft-closed period blocks unless the caller has already verified the override permission
+        // and set AllowPostingIntoSoftClosedPeriod.
+        context.JournalEntries.Add(MakeEntry(softClosedPeriodDate));
+        var softClosedEx = await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+        Assert.Contains("soft-closed accounting period", softClosedEx.Message);
+
+        context.AllowPostingIntoSoftClosedPeriod = true;
+        context.JournalEntries.Add(MakeEntry(softClosedPeriodDate));
+        await context.SaveChangesAsync();
+        Assert.Equal(1, await context.JournalEntries.CountAsync(x => x.EntryDateUtc == softClosedPeriodDate));
+
+        // A date with no covering period at all is always postable — periods are opt-in.
+        context.JournalEntries.Add(MakeEntry(new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc)));
+        await context.SaveChangesAsync();
+    }
+
+    [PostgreSqlFact]
+    [Trait("Category", "PostgreSQL")]
+    public async Task Closing_a_fiscal_year_posts_no_closing_journal_and_leaves_dynamic_earnings_unchanged()
+    {
+        // Unlike the closed/soft-closed period test above, this test calls whole application services
+        // (AccountingPeriodService, JournalPostingService) whose posting paths each open their own
+        // internal ExecuteInTransactionAsync transaction — that can't be nested inside an ambient
+        // ConnectionTransaction set via UseTransactionAsync, so this test seeds via a committed
+        // transaction and then drives the real services off a plain, connection-string-backed
+        // DbContext instead, matching the pattern used by the other whole-service Postgres tests above.
+        await using var seedConnection = await OpenConnectionAsync();
+        await using var seedTransaction = await seedConnection.BeginTransactionAsync();
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionVariable)!;
+        var branchId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var roleId = await ScalarAsync<Guid>(seedConnection, seedTransaction, "SELECT \"Id\" FROM \"Roles\" WHERE \"Name\"='Owner';");
+        await InsertBranchAsync(seedConnection, seedTransaction, branchId);
+        var username = Unique("fyclose-user");
+        await InsertUserAsync(seedConnection, seedTransaction, branchId, roleId, username, username.ToUpperInvariant(), null, null, actorId);
+        await seedTransaction.CommitAsync();
+
+        var options = new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(connectionString).Options;
+        await using var context = new PharmacyDbContext(options);
+        var periodRepository = new AccountingPeriodRepository(context);
+        var accountingRepository = new AccountingRepository(context);
+        var accountingService = new AccountingService(accountingRepository, TimeProvider.System);
+        var periodService = new AccountingPeriodService(periodRepository, accountingService, TimeProvider.System);
+        var posting = new JournalPostingService(accountingRepository, TimeProvider.System);
+
+        // This test commits real rows (service-level transactions can't nest inside an ambient
+        // rollback-only transaction), so the fiscal year/period range is randomized within the
+        // service's valid [2000, 2200] window rather than hardcoded — a fixed year+month would
+        // permanently collide with itself ("this period overlaps") on a second local test run against
+        // the same persistent Postgres test database.
+        var fiscalYear = Random.Shared.Next(2000, 2201);
+        var periodMonth = Random.Shared.Next(1, 13);
+        var periodStart = new DateOnly(fiscalYear, periodMonth, 1);
+        var periodEnd = new DateOnly(fiscalYear, periodMonth, DateTime.DaysInMonth(fiscalYear, periodMonth));
+        var monthStart = periodStart.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var asOfPeriodEnd = periodEnd.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
+
+        async Task Post(JournalSourceType type, DateTime at, params JournalLineInput[] lines) =>
+            await posting.PostAsync(new(type, Guid.NewGuid(), branchId, at, null, type.ToString(), actorId, lines));
+
+        await Post(JournalSourceType.OpeningBalance, monthStart,
+            new(AccountMappingKey.Cash, 1000, 0), new(AccountMappingKey.RetainedEarnings, 0, 1000));
+        await Post(JournalSourceType.Sale, monthStart.AddDays(5),
+            new(AccountMappingKey.Cash, 500, 0), new(AccountMappingKey.SalesRevenue, 0, 500),
+            new(AccountMappingKey.CostOfGoodsSold, 300, 0), new(AccountMappingKey.Inventory, 0, 300));
+        await Post(JournalSourceType.Expense, monthStart.AddDays(10),
+            new(AccountMappingKey.GeneralExpenseDefault, 50, 0), new(AccountMappingKey.Cash, 0, 50));
+        await accountingRepository.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // Scoped by this test's own (freshly-generated, guaranteed-unique) branch, not a raw table-wide
+        // count — the JournalEntries table is shared with every other test that commits real rows, and
+        // xunit may run other test classes concurrently against the same database.
+        Task<int> JournalCountForThisTest() => context.JournalEntries.CountAsync(x => x.BranchId == branchId);
+        var journalCountBeforeClose = await JournalCountForThisTest();
+        var earningsBeforeClose = (await accountingService.GetBalanceSheetAsync(actorId, asOfPeriodEnd, branchId)).CurrentPeriodEarnings;
+
+        var period = await periodService.CreatePeriodAsync(actorId, new(fiscalYear, periodMonth, $"FY{fiscalYear}-M{periodMonth}", periodStart, periodEnd, null));
+        await periodService.ClosePeriodAsync(actorId, period.Id, new(null));
+
+        var close = await periodService.CloseFiscalYearAsync(actorId, new(fiscalYear, "Year-end close"));
+        Assert.Equal(FiscalYearCloseStatus.Closed, close.Status);
+        Assert.Equal(150, close.NetProfit);
+
+        // The defining property of this "procedural lock, not a GL posting" design: closing a fiscal
+        // year must never add, remove, or alter a single JournalEntry, and the dynamically-derived
+        // Balance Sheet earnings figure must be bit-for-bit identical before and after — there is no
+        // closing entry to zero P&L accounts into Retained Earnings.
+        Assert.Equal(journalCountBeforeClose, await JournalCountForThisTest());
+        var earningsAfterClose = (await accountingService.GetBalanceSheetAsync(actorId, asOfPeriodEnd, branchId)).CurrentPeriodEarnings;
+        Assert.Equal(earningsBeforeClose, earningsAfterClose);
+        Assert.Equal(close.NetProfit, earningsAfterClose);
+
+        // Reopening is an audit-trailed status flip, not a data restore: no historical journal entries
+        // are touched, and the earlier closing snapshot record itself is kept (marked Reopened), never deleted.
+        var reopened = await periodService.ReopenFiscalYearAsync(actorId, fiscalYear, new("Correcting a late invoice"));
+        Assert.Equal(FiscalYearCloseStatus.Reopened, reopened.Status);
+        Assert.Equal(journalCountBeforeClose, await JournalCountForThisTest());
+        Assert.NotNull(await periodService.GetFiscalYearCloseAsync(actorId, fiscalYear));
     }
 
     [PostgreSqlFact]

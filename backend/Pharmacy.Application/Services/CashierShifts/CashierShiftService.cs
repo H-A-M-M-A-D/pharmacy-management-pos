@@ -21,6 +21,12 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
             throw new RequestValidationException("Branch is invalid or inactive.");
         if (await repository.GetOpenShiftForCashierAsync(actorId, cancellationToken) is not null)
             throw new ResourceConflictException("You already have an open cashier shift. Close it before opening a new one.");
+        if (request.FinancialAccountId.HasValue)
+        {
+            var financialAccount = await repository.GetFinancialAccountAsync(request.FinancialAccountId.Value, cancellationToken);
+            if (financialAccount is not { IsActive: true, AccountType: FinancialAccountType.Cash } || financialAccount.BranchId != request.BranchId)
+                throw new RequestValidationException("Financial account must be an active Cash-type account in the selected branch.");
+        }
 
         CashierShift? shift = null;
         await repository.ExecuteInTransactionAsync(async ct =>
@@ -33,7 +39,8 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
                 OpeningCash = request.OpeningCash,
                 OpenedAtUtc = UtcNow(),
                 OpeningNotes = Clean(request.OpeningNotes),
-                Status = CashierShiftStatus.Open
+                Status = CashierShiftStatus.Open,
+                FinancialAccountId = request.FinancialAccountId
             };
             await repository.AddShiftAsync(shift, ct);
             await Audit(actorId, "CashierShiftOpened", "CashierShift", shift.Id, new { shift.BranchId, shift.OpeningCash, shift.TerminalName }, ct);
@@ -220,6 +227,10 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
             expected = shift.ExpectedCash ?? 0;
         }
 
+        FinancialAccount? financialAccount = null;
+        if (shift.FinancialAccountId.HasValue)
+            financialAccount = shift.FinancialAccount ?? await repository.GetFinancialAccountAsync(shift.FinancialAccountId.Value, ct);
+
         return new CashierShiftDto(
             shift.Id, shift.BranchId, branch?.Name ?? string.Empty, shift.CashierUserId, cashier?.FullName ?? string.Empty, shift.TerminalName,
             shift.OpeningCash, shift.OpenedAtUtc, shift.OpeningNotes, shift.Status,
@@ -227,7 +238,8 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
             reconciledBy?.FullName, shift.ReconciledAtUtc, shift.ReconciliationNotes,
             breakdown.Sum(x => x.SalesAmount), breakdown.Sum(x => x.RefundsAmount), cashSales, cashRefunds, customerCash,
             cashPaidOut, manualIn, manualOut, breakdown,
-            shift.DrawerEntries.OrderBy(x => x.CreatedAt).Select(x => new CashierShiftDrawerEntryDto(x.Id, x.EntryType, x.Amount, x.Reason, x.CreatedByUser?.FullName ?? string.Empty, x.CreatedAt)).ToList());
+            shift.DrawerEntries.OrderBy(x => x.CreatedAt).Select(x => new CashierShiftDrawerEntryDto(x.Id, x.EntryType, x.Amount, x.Reason, x.CreatedByUser?.FullName ?? string.Empty, x.CreatedAt)).ToList(),
+            shift.FinancialAccountId, financialAccount?.Name);
     }
 
     private async Task PostDrawerEntryJournalAsync(CashierShift shift, CashierShiftDrawerEntry entry, CancellationToken ct)
@@ -245,6 +257,17 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
             };
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashierDrawerEntry, entry.Id, shift.BranchId, entry.CreatedAt,
             entry.EntryType.ToString(), entry.Reason, entry.CreatedByUserId, lines), ct);
+        if (shift.FinancialAccountId.HasValue)
+        {
+            var signedAmount = entry.EntryType == CashierShiftDrawerEntryType.CashIn ? entry.Amount : -entry.Amount;
+            await repository.AddFinancialLedgerEntryAsync(new FinancialLedgerEntry
+            {
+                FinancialAccountId = shift.FinancialAccountId.Value, BranchId = shift.BranchId,
+                EntryType = signedAmount > 0 ? FinancialLedgerEntryType.AdjustmentCredit : FinancialLedgerEntryType.AdjustmentDebit, Amount = signedAmount,
+                ReferenceType = "CashierShiftDrawerEntry", ReferenceId = entry.Id, Description = entry.Reason,
+                CreatedByUserId = entry.CreatedByUserId, OccurredAtUtc = entry.CreatedAt
+            }, ct);
+        }
     }
 
     private async Task PostShiftVarianceJournalAsync(CashierShift shift, Guid actorId, CancellationToken ct)
@@ -265,6 +288,16 @@ public sealed class CashierShiftService(ICashierShiftRepository repository, IJou
             };
         await journalPosting.PostAsync(new JournalPostingRequest(JournalSourceType.CashierShiftVariance, shift.Id, shift.BranchId,
             shift.ReconciledAtUtc!.Value, "Shift reconciliation", $"Cash variance for cashier shift {shift.Id}", actorId, lines), ct);
+        if (shift.FinancialAccountId.HasValue)
+        {
+            await repository.AddFinancialLedgerEntryAsync(new FinancialLedgerEntry
+            {
+                FinancialAccountId = shift.FinancialAccountId.Value, BranchId = shift.BranchId,
+                EntryType = variance > 0 ? FinancialLedgerEntryType.AdjustmentCredit : FinancialLedgerEntryType.AdjustmentDebit, Amount = variance,
+                ReferenceType = "CashierShiftVariance", ReferenceId = shift.Id, Description = $"Cash variance for cashier shift {shift.Id}",
+                CreatedByUserId = actorId, OccurredAtUtc = shift.ReconciledAtUtc!.Value
+            }, ct);
+        }
     }
 
     private async Task<CashierShift> RequiredShift(Guid id, CancellationToken ct) =>

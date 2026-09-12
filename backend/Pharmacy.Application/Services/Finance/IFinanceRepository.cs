@@ -10,6 +10,7 @@ public interface IFinanceRepository
     Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default);
     Task<FinancialAccount?> GetAccountAsync(Guid accountId, bool forUpdate = false, CancellationToken cancellationToken = default);
     Task<ExpenseCategory?> GetCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default);
+    Task<CostCenter?> GetCostCenterAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> AccountNameExistsAsync(Guid branchId, string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<bool> CategoryNameExistsAsync(string normalizedName, Guid? excludingId = null, CancellationToken cancellationToken = default);
     Task<decimal> GetBalanceAsync(Guid accountId, DateTime? beforeUtc = null, CancellationToken cancellationToken = default);
@@ -23,6 +24,8 @@ public interface IFinanceRepository
     Task AddTransferAsync(FinancialTransfer transfer, CancellationToken cancellationToken = default);
     Task AddLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default);
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
+    Task<Expense?> GetExpenseEntityAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<OtherIncome?> GetOtherIncomeEntityAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<FinancialAccountDto>> ListAccountsAsync(Guid? branchId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ExpenseCategoryDto>> ListCategoriesAsync(bool? active, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ExpenseDto>> ListExpensesAsync(ExpenseQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);

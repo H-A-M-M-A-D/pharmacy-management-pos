@@ -14,6 +14,11 @@ public class CashierShift : Entity
     public Guid CashierUserId { get; set; }
     public User? CashierUser { get; set; }
     public string? TerminalName { get; set; }
+    /// <summary>Optional till attribution. When set, drawer entries and the shift-close variance also
+    /// write a <see cref="FinancialLedgerEntry"/> against this account so the shift's cash shows up in
+    /// that account's Cash Book. Left null, drawer/variance postings behave exactly as before.</summary>
+    public Guid? FinancialAccountId { get; set; }
+    public FinancialAccount? FinancialAccount { get; set; }
 
     public decimal OpeningCash { get; set; }
     public DateTime OpenedAtUtc { get; set; }

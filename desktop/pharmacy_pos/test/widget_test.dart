@@ -1553,9 +1553,10 @@ void main() {
 
     expect(find.byKey(const Key('posted_journal_read_only')), findsOneWidget);
     expect(
-      find.text('Posted journals are permanent and read-only.'),
+      find.text('Posted journals are permanent and read-only. Corrections are made by reversal.'),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('journal_reverse')), findsNothing);
   });
 
   testWidgets('manual journal requires total debit to equal total credit', (
@@ -4458,9 +4459,19 @@ class FakeApi implements PharmacyApi {
   ) async => (await listExpenses(token)).first;
 
   @override
+  Future<void> reverseExpense(String token, String id, String reason) async {}
+
+  @override
   Future<void> postOtherIncome(
     String token,
     Map<String, dynamic> values,
+  ) async {}
+
+  @override
+  Future<void> reverseOtherIncome(
+    String token,
+    String id,
+    String reason,
   ) async {}
 
   @override

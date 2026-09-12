@@ -97,14 +97,51 @@ public sealed class SalesQuotationRepository(PharmacyDbContext context) : ISales
 
     public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
-        await using var tx = await context.Database.BeginTransactionAsync(isolationLevel, cancellationToken);
-        try { await operation(cancellationToken); await tx.CommitAsync(cancellationToken); }
-        catch { await tx.RollbackAsync(cancellationToken); throw; }
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            await using var tx = await context.Database.BeginTransactionAsync(isolationLevel, cancellationToken);
+            try
+            {
+                await operation(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (IsSerializationConflict(ex))
+            {
+                try { await tx.RollbackAsync(cancellationToken); }
+                catch (InvalidOperationException rollbackEx) when (rollbackEx.Message.Contains("transaction has completed", StringComparison.OrdinalIgnoreCase)) { }
+                context.ChangeTracker.Clear();
+                if (attempt == 3)
+                    throw new ResourceConflictException("This quotation changed while your request was in progress. Please retry.");
+                await Task.Delay(TimeSpan.FromMilliseconds(25 * attempt), cancellationToken);
+            }
+            catch
+            {
+                await tx.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+    }
+
+    private static bool IsSerializationConflict(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+                return true;
+            if (current is InvalidOperationException && current.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException ex) when (IsSerializationConflict(ex))
+        {
+            throw new ResourceConflictException("This quotation changed while your request was in progress. Please retry.");
+        }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             throw new ResourceConflictException("A quotation with this unique value already exists.");
@@ -112,10 +149,6 @@ public sealed class SalesQuotationRepository(PharmacyDbContext context) : ISales
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.CheckViolation })
         {
             throw new RequestValidationException("Quotation constraints were violated.");
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
-        {
-            throw new ResourceConflictException("This quotation changed while your request was in progress. Please retry.");
         }
     }
 }

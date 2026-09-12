@@ -21,6 +21,9 @@ public class JournalEntry : Entity
     public User? PostedByUser { get; set; }
     public DateTime PostedAtUtc { get; set; }
     public JournalEntryStatus Status { get; set; } = JournalEntryStatus.Posted;
+    public Guid? ReversesJournalEntryId { get; set; }
+    public JournalEntry? ReversesJournalEntry { get; set; }
+    public string? ReversalReason { get; set; }
     public ICollection<JournalEntryLine> Lines { get; set; } = [];
 }
 
@@ -39,6 +42,8 @@ public class JournalEntryLine : Entity
     public Guid? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
     public string? Description { get; set; }
+    public Guid? CostCenterId { get; set; }
+    public CostCenter? CostCenter { get; set; }
 }
 
 public enum JournalEntryStatus
@@ -71,5 +76,17 @@ public enum JournalSourceType
     BankReceiptVoucher = 21,
     BankPaymentVoucher = 22,
     ContraVoucher = 23,
-    JournalVoucher = 24
+    JournalVoucher = 24,
+    JournalReversal = 25,
+    RecurringJournal = 26,
+    CreditNote = 27,
+    DebitNote = 28,
+    CustomerWriteOff = 29,
+    SupplierWriteOff = 30,
+    CustomerAdvance = 31,
+    CustomerAdvanceApplication = 32,
+    SupplierAdvance = 33,
+    SupplierAdvanceApplication = 34,
+    ExpenseReversal = 35,
+    OtherIncomeReversal = 36
 }

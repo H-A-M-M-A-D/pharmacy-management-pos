@@ -19,6 +19,11 @@ public sealed class CashierShiftRepository(PharmacyDbContext context) : ICashier
     public Task<Branch?> GetBranchAsync(Guid branchId, CancellationToken cancellationToken = default) =>
         context.Branches.FirstOrDefaultAsync(x => x.Id == branchId, cancellationToken);
 
+    public Task<FinancialAccount?> GetFinancialAccountAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.FinancialAccounts.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public async Task AddFinancialLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default) => await context.FinancialLedgerEntries.AddAsync(entry, cancellationToken);
+
     public Task<CashierShift?> GetOpenShiftForCashierAsync(Guid cashierUserId, CancellationToken cancellationToken = default) =>
         ShiftQuery().FirstOrDefaultAsync(x => x.CashierUserId == cashierUserId && x.Status == CashierShiftStatus.Open, cancellationToken);
 

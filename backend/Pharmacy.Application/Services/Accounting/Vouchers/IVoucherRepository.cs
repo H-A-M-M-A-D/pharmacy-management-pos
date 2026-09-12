@@ -16,6 +16,8 @@ public interface IVoucherRepository
     Task<Supplier?> GetSupplierAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ChartOfAccount?> GetAccountAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Dictionary<AccountMappingKey, Guid>> GetAccountMappingLookupAsync(CancellationToken cancellationToken = default);
+    Task<FinancialAccount?> GetFinancialAccountAsync(Guid id, CancellationToken cancellationToken = default);
+    Task AddFinancialLedgerEntryAsync(FinancialLedgerEntry entry, CancellationToken cancellationToken = default);
 
     Task<string> NextVoucherNumberAsync(VoucherType type, DateTime voucherDateUtc, CancellationToken cancellationToken = default);
     Task<string> NextJournalEntryNumberAsync(DateTime entryDateUtc, CancellationToken cancellationToken = default);
@@ -24,6 +26,7 @@ public interface IVoucherRepository
     Task<PagedResult<VoucherListItemDto>> ListVouchersAsync(VoucherListQuery query, Guid? actorBranchId, bool canSelectBranch, CancellationToken cancellationToken = default);
     Task AddJournalEntryAsync(JournalEntry entry, CancellationToken cancellationToken = default);
     Task<bool> JournalEntryExistsForSourceAsync(JournalSourceType sourceType, Guid sourceId, CancellationToken cancellationToken = default);
+    Task<bool> VoucherHasReversalAsync(Guid voucherId, CancellationToken cancellationToken = default);
 
     Task<string> NextCustomerPaymentReceiptNumberAsync(DateTime paymentDateUtc, CancellationToken cancellationToken = default);
     Task AddCustomerPaymentAsync(CustomerPayment payment, CancellationToken cancellationToken = default);
@@ -38,4 +41,5 @@ public interface IVoucherRepository
     Task AddAuditAsync(AuditLog audit, CancellationToken cancellationToken = default);
     Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+    void AllowPostingIntoSoftClosedPeriod();
 }
