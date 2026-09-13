@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../auth/auth_state.dart';
 import 'bulk_pricing_dialog.dart';
@@ -303,11 +304,11 @@ class _Phase6ScreenState extends State<Phase6Screen>
             : TabBar(controller: _tabs, tabs: tabs, isScrollable: true),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingState()
           : _error != null
           ? _ErrorState(message: _error!, onRetry: _load)
           : views.isEmpty
-          ? const Center(child: Text('No Phase 6 permissions assigned.'))
+          ? AppEmptyState(title: 'No Phase 6 permissions assigned.')
           : TabBarView(controller: _tabs, children: views),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../auth/auth_state.dart';
@@ -192,7 +193,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           const SizedBox(height: 16),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState()
                 : _error != null
                 ? Center(
                     child: Column(
@@ -214,7 +215,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: SingleChildScrollView(
-                      child: DataTable(
+                      child: AppDataTable(
                         columns: const [
                           DataColumn(label: Text('Product')),
                           DataColumn(label: Text('SKU')),
@@ -223,7 +224,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           DataColumn(label: Text('Category')),
                           DataColumn(label: Text('Manufacturer')),
                           DataColumn(label: Text('Unit')),
-                          DataColumn(label: Text('Retail Price')),
+                          DataColumn(label: Text('Retail Price'), numeric: true),
                           DataColumn(label: Text('Status')),
                           DataColumn(label: Text('Actions')),
                         ],

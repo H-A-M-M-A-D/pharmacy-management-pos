@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pharmacy_pos/ui/app_widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pharmacy_pos/core/api_client.dart';
 import 'package:pharmacy_pos/core/models.dart';
@@ -140,11 +141,103 @@ void main() {
 
       // Scroll the rail down (mouse-wheel drag) and confirm a destination
       // near the bottom of the list is reachable and tappable.
-      await tester.drag(find.byType(NavigationRail), const Offset(0, -3000));
+      await tester.drag(find.byKey(const Key('app_sidebar_scroll')), const Offset(0, -3000));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Administration'));
       await tester.pumpAndSettle();
       expect(find.text('System Info'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'sidebar groups destinations under section headers and grouped items remain navigable',
+    (tester) async {
+      final fixture = TestFixture(
+        permissions: {
+          'sales.view',
+          'suppliers.view',
+          'purchases.view',
+          'reports.view',
+        },
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+
+      // Section headers only render when at least one of their destinations
+      // is visible for the current permission set.
+      expect(find.text('SALES'), findsOneWidget);
+      expect(find.text('PURCHASING'), findsOneWidget);
+      expect(find.text('FINANCE / MANAGEMENT'), findsOneWidget);
+      expect(find.text('INVENTORY'), findsNothing);
+
+      // A destination inside a group is still reachable and tappable.
+      await tester.ensureVisible(find.text('Suppliers'));
+      await tester.tap(find.text('Suppliers'));
+      await tester.pumpAndSettle();
+      expect(find.text('ABC Pharma'), findsOneWidget);
+      expect(find.byKey(const Key('add_supplier')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'dashboard renders KPI, secondary and trend cards at 800x600 without overflow',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = TestFixture(
+        permissions: {
+          'reports.view',
+          'sales.view',
+          'alerts.view',
+          'inventory.reorder.view',
+          'purchase_orders.view',
+        },
+      );
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Sales Today'), findsOneWidget);
+      expect(find.text('PKR 900.00'), findsWidgets);
+      expect(find.text('Gross Profit'), findsOneWidget);
+      expect(find.text('Transactions Today'), findsOneWidget);
+      expect(find.text('Receivables'), findsOneWidget);
+      expect(find.text('Payables'), findsOneWidget);
+      expect(find.text('Inventory Value'), findsOneWidget);
+      expect(find.text('Low Stock'), findsOneWidget);
+      expect(find.text('Out of Stock'), findsOneWidget);
+      expect(find.text('Near Expiry'), findsOneWidget);
+      await tester.drag(find.byKey(const Key('dashboard_scroll')), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      expect(find.text('Sales Trend (30 days)'), findsOneWidget);
+      expect(find.text('Business Alerts'), findsOneWidget);
+      await tester.drag(find.byKey(const Key('dashboard_scroll')), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      expect(find.text('Recent Sales'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'dashboard hides sales and financial KPIs without reporting permission',
+    (tester) async {
+      final fixture = TestFixture(permissions: const {});
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await _login(tester);
+
+      expect(find.text('Dashboard'), findsWidgets);
+      expect(find.text('Sales Today'), findsNothing);
+      expect(find.text('Gross Profit'), findsNothing);
+      expect(
+        find.text(
+          'Sales and financial figures require reporting permission and are hidden for this role.',
+        ),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -461,7 +554,7 @@ void main() {
     await tester.tap(find.byKey(const Key('confirm_finalize_stock_count')));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(Chip, 'Completed'), findsOneWidget);
+    expect(find.widgetWithText(AppStatusChip, 'Completed'), findsOneWidget);
   });
 
   testWidgets('cashier shift can be opened, adjusted, closed and reconciled', (
@@ -533,7 +626,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('confirm_reconcile_shift')));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(Chip, 'Reconciled'), findsOneWidget);
+    expect(find.widgetWithText(AppStatusChip, 'Reconciled'), findsOneWidget);
   });
 
   testWidgets('godowns navigation follows godowns.view permission', (
@@ -1866,7 +1959,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('save_request_transfer')), findsNothing);
-      expect(find.widgetWithText(Chip, 'Requested'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'Requested'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
       await tester.pumpAndSettle();
@@ -1876,21 +1969,21 @@ void main() {
       expect(find.text('Approve transfer'), findsOneWidget);
       await tester.tap(find.byKey(const Key('confirm_approve')));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(Chip, 'Approved'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'Approved'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('transfer_action_dispatch')));
       await tester.pumpAndSettle();
       expect(find.text('Dispatch transfer'), findsOneWidget);
       await tester.tap(find.byKey(const Key('confirm_dispatch')));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(Chip, 'Dispatched'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'Dispatched'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('transfer_action_receive')));
       await tester.pumpAndSettle();
       expect(find.text('Receive transfer'), findsOneWidget);
       await tester.tap(find.byKey(const Key('confirm_receive')));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(Chip, 'Received'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'Received'), findsOneWidget);
 
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
@@ -1931,14 +2024,14 @@ void main() {
       await tester.tap(find.byKey(const Key('save_request_transfer')));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(Chip, 'Requested'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'Requested'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
       await tester.pumpAndSettle();
       expect(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.widgetWithText(Chip, 'Requested'),
+          matching: find.widgetWithText(AppStatusChip, 'Requested'),
         ),
         findsOneWidget,
       );
@@ -1977,7 +2070,7 @@ void main() {
     await tester.tap(find.byKey(const Key('save_draft_transfer')));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(Chip, 'Draft'), findsOneWidget);
+    expect(find.widgetWithText(AppStatusChip, 'Draft'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('transfer_row_transfer-1')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('transfer_action_cancel')));
@@ -1988,7 +2081,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('confirm_reason')));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(Chip, 'Cancelled'), findsOneWidget);
+    expect(find.widgetWithText(AppStatusChip, 'Cancelled'), findsOneWidget);
   });
 
   testWidgets('edit action is visible on a draft transfer', (tester) async {
@@ -2319,7 +2412,7 @@ void main() {
       await tester.tap(find.byKey(const Key('confirm_receive')));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(Chip, 'PartiallyReceived'), findsOneWidget);
+      expect(find.widgetWithText(AppStatusChip, 'PartiallyReceived'), findsOneWidget);
       expect(find.textContaining('carton damaged'), findsOneWidget);
       expect(find.text('Notes: dock note'), findsOneWidget);
     },
@@ -4646,20 +4739,57 @@ class FakeApi implements PharmacyApi {
   }) async {
     if (reportDelay != Duration.zero) await Future<void>.delayed(reportDelay);
     if (reportError) throw const ApiException('Internal report failure');
-    return path == 'overview'
-        ? <String, dynamic>{
-            'netSales': 900,
-            'grossProfit': 300,
-            'inventoryValue': 5000,
-            'lowStockCount': 2,
-            'nearExpiryCount': 1,
-            'customerOutstanding': 1000,
-            'supplierOutstanding': 2000,
-            'expenses': 100,
-            'cashPosition': 8000,
-            'topProducts': <dynamic>[],
-          }
-        : <dynamic>[];
+    if (path == 'overview') {
+      return <String, dynamic>{
+        'netSales': 900,
+        'grossProfit': 300,
+        'inventoryValue': 5000,
+        'lowStockCount': 2,
+        'nearExpiryCount': 1,
+        'customerOutstanding': 1000,
+        'supplierOutstanding': 2000,
+        'expenses': 100,
+        'cashPosition': 8000,
+        'topProducts': <dynamic>[],
+      };
+    }
+    if (path == 'management/overview') {
+      return <String, dynamic>{
+        'sales': {'netSales': 900, 'invoiceCount': 12, 'averageInvoice': 75},
+        'profitability': {'grossProfit': 300, 'grossMarginPercent': 33},
+        'purchases': {'netPurchaseValue': 500},
+        'inventory': {
+          'inventoryValue': 5000,
+          'lowStockItems': 2,
+          'outOfStockItems': 1,
+        },
+        'finance': {
+          'position': {
+            'cash': 4000,
+            'bank': 4000,
+            'receivables': 1000,
+            'payables': 2000,
+          },
+        },
+        'calendarSales': {
+          'salesToday': 900,
+          'salesThisMonth': 15000,
+          'salesThisYear': 90000,
+        },
+        'calendarPurchases': {'purchasesToday': 300, 'purchasesThisMonth': 6000},
+        'trend': [
+          {'name': 'Mon', 'netSales': 100},
+          {'name': 'Tue', 'netSales': 200},
+        ],
+        'expiryExposure': [
+          {'bucket': '0–30', 'batches': 3, 'quantity': 10, 'costValue': 500},
+        ],
+        'topProducts': [
+          {'name': 'Paracetamol 500mg', 'netSales': 400, 'quantitySold': 40},
+        ],
+      };
+    }
+    return <dynamic>[];
   }
 
   @override

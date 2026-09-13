@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -264,7 +265,7 @@ class _UsersScreenState extends State<UsersScreen> {
           const SizedBox(height: 18),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState()
                 : _error != null
                 ? Center(child: Text(_error!))
                 : _users.isEmpty
@@ -275,7 +276,7 @@ class _UsersScreenState extends State<UsersScreen> {
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SingleChildScrollView(
-                        child: DataTable(
+                        child: AppDataTable(
                           columns: const [
                             DataColumn(label: Text('Name')),
                             DataColumn(label: Text('Username')),

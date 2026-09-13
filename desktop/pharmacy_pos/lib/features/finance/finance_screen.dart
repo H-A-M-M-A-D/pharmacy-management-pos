@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -119,7 +120,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
           ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppLoadingState()
               : switch (_tab) {
                   0 => _accountsView(),
                   1 => _expensesView(),
@@ -165,13 +166,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
               width: double.infinity,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
+                child: AppDataTable(
                 columns: const [
                   DataColumn(label: Text('Account')),
                   DataColumn(label: Text('Actions')),
                   DataColumn(label: Text('Type')),
                   DataColumn(label: Text('Branch')),
-                  DataColumn(label: Text('Balance')),
+                  DataColumn(label: Text('Balance'), numeric: true),
                   DataColumn(label: Text('Status')),
                 ],
                 rows: _accounts
@@ -227,14 +228,14 @@ class _FinanceScreenState extends State<FinanceScreen> {
               width: double.infinity,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
+                child: AppDataTable(
                 columns: const [
                   DataColumn(label: Text('Expense #')),
                   DataColumn(label: Text('Date')),
                   DataColumn(label: Text('Category')),
                   DataColumn(label: Text('Payee')),
                   DataColumn(label: Text('Account')),
-                  DataColumn(label: Text('Amount')),
+                  DataColumn(label: Text('Amount'), numeric: true),
                   DataColumn(label: Text('Created by')),
                 ],
                 rows: _expenses
@@ -264,7 +265,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
   Widget _positionView() {
     final p = _position;
     if (p == null) {
-      return const Center(child: Text('Cash position permission is required.'));
+      return AppEmptyState(title: 'Cash position permission is required.');
     }
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -714,18 +715,18 @@ class _FinanceScreenState extends State<FinanceScreen> {
             width: 850,
             height: 460,
             child: entries.isEmpty
-                ? const Center(child: Text('No ledger entries'))
+                ? AppEmptyState(title: 'No ledger entries')
                 : SingleChildScrollView(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: AppDataTable(
                       columns: const [
                         DataColumn(label: Text('Date/time')),
                         DataColumn(label: Text('Type')),
                         DataColumn(label: Text('Description')),
                         DataColumn(label: Text('In')),
                         DataColumn(label: Text('Out')),
-                        DataColumn(label: Text('Balance')),
+                        DataColumn(label: Text('Balance'), numeric: true),
                       ],
                       rows: entries
                           .map(

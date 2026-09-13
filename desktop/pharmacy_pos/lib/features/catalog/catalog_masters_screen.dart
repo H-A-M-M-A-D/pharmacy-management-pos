@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -176,11 +177,11 @@ class _CatalogMastersScreenState extends State<CatalogMastersScreen> {
           const SizedBox(height: 16),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState()
                 : _error != null
                 ? Center(child: Text(_error!))
                 : _items.isEmpty
-                ? Center(child: Text('No ${_title.toLowerCase()} found.'))
+                ? AppEmptyState(title: 'No ${_title.toLowerCase()} found.')
                 : ListView.separated(
                     itemCount: _items.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),

@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
+import '../../ui/app_report_grid.dart';
 
 import '../auth/auth_state.dart';
 import 'report_periods.dart';
@@ -65,13 +67,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
       lastDate: DateTime.now().add(const Duration(days: 1)),
       initialDateRange: DateTimeRange(
         start: _from.add(const Duration(hours: 5)),
-        end: _to.add(const Duration(hours: 5)).subtract(const Duration(days: 1)),
+        end: _to
+            .add(const Duration(hours: 5))
+            .subtract(const Duration(days: 1)),
       ),
     );
     if (range != null) {
       setState(() {
         _preset = 'Custom';
-        _from = DateTime.utc(range.start.year, range.start.month, range.start.day).subtract(const Duration(hours: 5));
+        _from = DateTime.utc(
+          range.start.year,
+          range.start.month,
+          range.start.day,
+        ).subtract(const Duration(hours: 5));
         _to = DateTime.utc(
           range.end.year,
           range.end.month,
@@ -83,11 +91,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   static const _reports = <String, Map<String, String>>{
     'Phase 6': {
-      'Price Change History': 'phase6/price-history', 'Promotion Performance': 'phase6/promotion-performance',
-      'Margin Exceptions': 'phase6/margin-exceptions', 'Low Margin Products': 'phase6/low-margin',
-      'Reorder Suggestions': 'phase6/reorder', 'Stockout Risk': 'phase6/stockout-risk',
-      'Slow/Dead Stock Summary': 'phase6/slow-dead-stock', 'Expiry Alert Summary': 'phase6/expiry-summary',
-      'Automation Execution Log': 'phase6/automation-log', 'Alert Summary': 'phase6/alert-summary',
+      'Price Change History': 'phase6/price-history',
+      'Promotion Performance': 'phase6/promotion-performance',
+      'Margin Exceptions': 'phase6/margin-exceptions',
+      'Low Margin Products': 'phase6/low-margin',
+      'Reorder Suggestions': 'phase6/reorder',
+      'Stockout Risk': 'phase6/stockout-risk',
+      'Slow/Dead Stock Summary': 'phase6/slow-dead-stock',
+      'Expiry Alert Summary': 'phase6/expiry-summary',
+      'Automation Execution Log': 'phase6/automation-log',
+      'Alert Summary': 'phase6/alert-summary',
     },
     'Sales': {
       'Summary': 'sales/summary',
@@ -246,10 +259,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          AppFilterBar(
             children: [
               DropdownButton<String>(
                 value: _section,
@@ -314,6 +324,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 icon: const Icon(Icons.filter_alt_outlined),
                 label: const Text('Apply'),
               ),
+              OutlinedButton(
+                onPressed: () => setState(() {
+                  _branchId = null;
+                  _applyPreset('Today');
+                }),
+                child: const Text('Reset'),
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -328,7 +345,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) {
       return Center(
         child: Text(
@@ -339,15 +356,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
     final data = _data;
     if (data == null) {
-      return const Center(child: Text('Select a report and apply filters.'));
+      return AppEmptyState(title: 'Select a report and apply filters.');
     }
     if (data is List && data.isEmpty) {
-      return const Center(child: Text('No report data for this period.'));
+      return AppEmptyState(title: 'No report data for this period.');
     }
     if (data is Map<String, dynamic> &&
         data['items'] is List &&
         (data['items'] as List).isEmpty) {
-      return const Center(child: Text('No report data for this period.'));
+      return AppEmptyState(title: 'No report data for this period.');
     }
     if (data is Map<String, dynamic> && _section == 'Overview') {
       return _overview(data);
@@ -381,22 +398,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
               .map(
                 (x) => SizedBox(
                   width: 190,
-                  height: 180,
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(x.key),
-                          Text(
-                            _metricDisplay(x.key, x.value),
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                    ),
+                  child: AppStatCard(
+                    label: x.key,
+                    value: _metricDisplay(x.key, x.value),
+                    icon: Icons.assessment_outlined,
                   ),
                 ),
               )
@@ -471,34 +476,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Widget _table(List<dynamic> values) {
     if (values.isEmpty) {
-      return const Center(child: Text('No report data for this period.'));
+      return AppEmptyState(title: 'No report data for this period.');
     }
     final rows = values.whereType<Map<String, dynamic>>().toList();
     if (rows.isEmpty) {
-      return const Center(child: Text('No report data for this period.'));
+      return AppEmptyState(title: 'No report data for this period.');
     }
     final columns = rows.first.keys
         .where((x) => !const {'id', 'productId', 'partyId'}.contains(x))
         .take(10)
         .toList();
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        child: DataTable(
-          columns: columns
-              .map((x) => DataColumn(label: Text(_label(x))))
-              .toList(),
-          rows: rows
-              .map(
-                (row) => DataRow(
-                  cells: columns
-                      .map((x) => DataCell(Text(_display(row[x]))))
-                      .toList(),
-                ),
-              )
-              .toList(),
-        ),
-      ),
+    return AppReportGrid(
+      rows: rows,
+      columns: columns,
+      label: _label,
+      display: _display,
     );
   }
 

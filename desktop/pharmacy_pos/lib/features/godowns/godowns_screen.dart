@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -61,20 +62,11 @@ class _GodownsScreenState extends State<GodownsScreen> {
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
+        AppPageHeader(title: 'Godowns'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: AppFilterBar(
             children: [
-              SizedBox(
-                width: 200,
-                child: Text(
-                  'Godowns',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
               SizedBox(
                 width: 220,
                 child: DropdownButtonFormField<String?>(
@@ -84,7 +76,10 @@ class _GodownsScreenState extends State<GodownsScreen> {
                   items: [
                     const DropdownMenuItem<String?>(
                       value: null,
-                      child: Text('All branches', overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'All branches',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     ..._branches.map(
                       (b) => DropdownMenuItem<String?>(
@@ -131,15 +126,15 @@ class _GodownsScreenState extends State<GodownsScreen> {
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!));
+    if (_loading) return const AppLoadingState();
+    if (_error != null) return AppErrorState(_error!, onRetry: _load);
     final items = _godowns?.items ?? const <GodownListItem>[];
-    if (items.isEmpty) return const Center(child: Text('No godowns found'));
+    if (items.isEmpty) return AppEmptyState(title: 'No godowns found');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Branch')),
             DataColumn(label: Text('Code')),
@@ -160,11 +155,8 @@ class _GodownsScreenState extends State<GodownsScreen> {
                       Wrap(
                         spacing: 6,
                         children: [
-                          Chip(
-                            label: Text(
-                              godown.isActive ? 'Active' : 'Inactive',
-                            ),
-                            visualDensity: VisualDensity.compact,
+                          AppStatusChip(
+                            godown.isActive ? 'Active' : 'Inactive',
                           ),
                           if (godown.isDefault)
                             const Chip(
@@ -477,7 +469,7 @@ class _GodownUsersDialogState extends State<_GodownUsersDialog> {
     content: SizedBox(
       width: 480,
       child: _assignments == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingState()
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -517,9 +509,8 @@ class _GodownUsersDialogState extends State<_GodownUsersDialog> {
                         ),
                         items: _branchUsers
                             .where(
-                              (u) => _assignments!.every(
-                                (a) => a.userId != u.id,
-                              ),
+                              (u) =>
+                                  _assignments!.every((a) => a.userId != u.id),
                             )
                             .map(
                               (u) => DropdownMenuItem<String>(
@@ -537,14 +528,12 @@ class _GodownUsersDialogState extends State<_GodownUsersDialog> {
                           ? null
                           : () async {
                               try {
-                                await widget.authState.assignUserGodown(
-                                  widget.godown.id,
-                                  {
-                                    'userId': _selectedUserId,
-                                    'godownId': widget.godown.id,
-                                    'isDefault': false,
-                                  },
-                                );
+                                await widget.authState
+                                    .assignUserGodown(widget.godown.id, {
+                                      'userId': _selectedUserId,
+                                      'godownId': widget.godown.id,
+                                      'isDefault': false,
+                                    });
                                 setState(() => _selectedUserId = null);
                                 await _load();
                               } on ApiException catch (e) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -89,20 +90,8 @@ class _InventoryScreenState extends State<InventoryScreen>
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 280,
-                child: Text(
-                  'Inventory',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
+        AppPageHeader(title: 'Inventory'),
+        Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 12), child: AppFilterBar(children: [
               SizedBox(
                 width: 320,
                 child: TextField(
@@ -174,9 +163,7 @@ class _InventoryScreenState extends State<InventoryScreen>
                   icon: const Icon(Icons.checklist_outlined),
                   label: const Text('New Stock Taking'),
                 ),
-            ],
-          ),
-        ),
+            ])),
         TabBar(
           controller: _tabs,
           tabs: const [
@@ -193,7 +180,7 @@ class _InventoryScreenState extends State<InventoryScreen>
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) {
       return Center(
         child: Column(
@@ -294,15 +281,15 @@ class _InventoryTable extends StatelessWidget {
   Widget build(BuildContext context) => _TableShell(
     empty: 'No inventory found',
     isEmpty: items.isEmpty,
-    child: DataTable(
+    child: AppDataTable(
       columns: const [
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('SKU')),
-        DataColumn(label: Text('Quantity')),
+        DataColumn(label: Text('Quantity'), numeric: true),
         DataColumn(label: Text('Reorder')),
         DataColumn(label: Text('Nearest Expiry')),
         DataColumn(label: Text('Batches')),
-        DataColumn(label: Text('Stock Value')),
+        DataColumn(label: Text('Stock Value'), numeric: true),
         DataColumn(label: Text('Status')),
       ],
       rows: items
@@ -333,14 +320,14 @@ class _BatchTable extends StatelessWidget {
   Widget build(BuildContext context) => _TableShell(
     empty: 'No batches found',
     isEmpty: items.isEmpty,
-    child: DataTable(
+    child: AppDataTable(
       columns: const [
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('Batch')),
         DataColumn(label: Text('Branch')),
         DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Expiry')),
-        DataColumn(label: Text('Qty')),
+        DataColumn(label: Text('Qty'), numeric: true),
         DataColumn(label: Text('Purchase')),
         DataColumn(label: Text('Retail')),
         DataColumn(label: Text('Value')),
@@ -376,14 +363,14 @@ class _ExpiryTable extends StatelessWidget {
   Widget build(BuildContext context) => _TableShell(
     empty: 'No expiring stock found',
     isEmpty: items.isEmpty,
-    child: DataTable(
+    child: AppDataTable(
       columns: const [
         DataColumn(label: Text('Product')),
         DataColumn(label: Text('Batch')),
         DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Expiry Date')),
         DataColumn(label: Text('Days')),
-        DataColumn(label: Text('Quantity')),
+        DataColumn(label: Text('Quantity'), numeric: true),
         DataColumn(label: Text('Value')),
       ],
       rows: items
@@ -412,7 +399,7 @@ class _MovementTable extends StatelessWidget {
   Widget build(BuildContext context) => _TableShell(
     empty: 'No stock movements found',
     isEmpty: items.isEmpty,
-    child: DataTable(
+    child: AppDataTable(
       columns: const [
         DataColumn(label: Text('Date/Time')),
         DataColumn(label: Text('Product')),
@@ -420,7 +407,7 @@ class _MovementTable extends StatelessWidget {
         DataColumn(label: Text('Branch')),
         DataColumn(label: Text('Godown')),
         DataColumn(label: Text('Type')),
-        DataColumn(label: Text('Quantity')),
+        DataColumn(label: Text('Quantity'), numeric: true),
       ],
       rows: items
           .map(
@@ -449,7 +436,7 @@ class _StockCountSessionTable extends StatelessWidget {
   Widget build(BuildContext context) => _TableShell(
     empty: 'No stock count sessions found',
     isEmpty: items.isEmpty,
-    child: DataTable(
+    child: AppDataTable(
       columns: const [
         DataColumn(label: Text('Count #')),
         DataColumn(label: Text('Branch')),
@@ -834,7 +821,7 @@ class _StockCountSessionDialogState extends State<_StockCountSessionDialog> {
         width: 720,
         height: 480,
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const AppLoadingState()
             : session == null
             ? Center(child: Text(_error ?? 'Session not found'))
             : _content(session),
@@ -909,13 +896,13 @@ class _StockCountSessionDialogState extends State<_StockCountSessionDialog> {
         child: SingleChildScrollView(
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: DataTable(
+            child: AppDataTable(
               columns: const [
                 DataColumn(label: Text('Product')),
                 DataColumn(label: Text('Batch')),
                 DataColumn(label: Text('Expiry')),
-                DataColumn(label: Text('System Qty')),
-                DataColumn(label: Text('Counted Qty')),
+                DataColumn(label: Text('System Qty'), numeric: true),
+                DataColumn(label: Text('Counted Qty'), numeric: true),
                 DataColumn(label: Text('Variance')),
               ],
               rows: session.items.map((item) {
@@ -979,7 +966,7 @@ class _StatusChip extends StatelessWidget {
   final String label;
   @override
   Widget build(BuildContext context) =>
-      Chip(label: Text(label), visualDensity: VisualDensity.compact);
+      AppStatusChip(label);
 }
 
 class _OpeningStockDialog extends StatefulWidget {

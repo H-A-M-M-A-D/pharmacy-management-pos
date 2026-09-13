@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -56,20 +57,11 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
+        AppPageHeader(title: 'Quotations'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: AppFilterBar(
             children: [
-              SizedBox(
-                width: 200,
-                child: Text(
-                  'Quotations',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
               SizedBox(
                 width: 260,
                 child: TextField(
@@ -91,35 +83,67 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                   items: const [
                     DropdownMenuItem(
                       value: null,
-                      child: Text('All', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'All',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Draft',
-                      child: Text('Draft', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Draft',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Sent',
-                      child: Text('Sent', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Sent',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Accepted',
-                      child: Text('Accepted', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Accepted',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Rejected',
-                      child: Text('Rejected', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Rejected',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Expired',
-                      child: Text('Expired', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Expired',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Converted',
-                      child: Text('Converted', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Converted',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Cancelled',
-                      child: Text('Cancelled', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Cancelled',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                   onChanged: (v) {
@@ -149,22 +173,22 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!));
+    if (_loading) return const AppLoadingState();
+    if (_error != null) return AppErrorState(_error!, onRetry: _load);
     final items = _quotations?.items ?? const <QuotationListItem>[];
-    if (items.isEmpty) return const Center(child: Text('No quotations found'));
+    if (items.isEmpty) return AppEmptyState(title: 'No quotations found');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Quotation #')),
             DataColumn(label: Text('Customer')),
             DataColumn(label: Text('Date')),
             DataColumn(label: Text('Valid Until')),
             DataColumn(label: Text('Status')),
-            DataColumn(label: Text('Total')),
+            DataColumn(label: Text('Total'), numeric: true),
             DataColumn(label: Text('Created By')),
             DataColumn(label: Text('')),
           ],
@@ -175,8 +199,12 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
                     DataCell(Text(q.quotationNumber)),
                     DataCell(Text(q.customerName)),
                     DataCell(Text(_fmtDate(q.quotationDate))),
-                    DataCell(Text(q.validUntil == null ? '-' : _fmtDate(q.validUntil!))),
-                    DataCell(Chip(label: Text(q.status), visualDensity: VisualDensity.compact)),
+                    DataCell(
+                      Text(
+                        q.validUntil == null ? '-' : _fmtDate(q.validUntil!),
+                      ),
+                    ),
+                    DataCell(AppStatusChip(q.status)),
                     DataCell(Text(q.netTotal.toStringAsFixed(2))),
                     DataCell(Text(q.createdByName)),
                     DataCell(
@@ -206,7 +234,8 @@ class _QuotationsScreenState extends State<QuotationsScreen> {
   Future<void> _openDetails(String id) async {
     final changed = await showDialog<bool>(
       context: context,
-      builder: (_) => _QuotationDetailsDialog(authState: widget.authState, id: id),
+      builder: (_) =>
+          _QuotationDetailsDialog(authState: widget.authState, id: id),
     );
     if (changed == true) await _load();
   }
@@ -278,14 +307,18 @@ class _QuotationFormState extends State<_QuotationForm> {
                   setState(() => _customerResults = []);
                   return;
                 }
-                final results = await widget.authState.lookupCustomers(search: v);
+                final results = await widget.authState.lookupCustomers(
+                  search: v,
+                );
                 if (mounted) setState(() => _customerResults = results);
               },
             ),
             if (_customerResults.isNotEmpty)
               Container(
                 constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey)),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey),
+                ),
                 child: ListView(
                   shrinkWrap: true,
                   children: _customerResults
@@ -318,7 +351,9 @@ class _QuotationFormState extends State<_QuotationForm> {
                     onPressed: () async {
                       final picked = await showDatePicker(
                         context: context,
-                        initialDate: DateTime.now().add(const Duration(days: 7)),
+                        initialDate: DateTime.now().add(
+                          const Duration(days: 7),
+                        ),
                         firstDate: DateTime.now(),
                         lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
@@ -348,7 +383,9 @@ class _QuotationFormState extends State<_QuotationForm> {
             if (_productResults.isNotEmpty)
               Container(
                 constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey)),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey),
+                ),
                 child: ListView(
                   shrinkWrap: true,
                   children: _productResults
@@ -356,7 +393,9 @@ class _QuotationFormState extends State<_QuotationForm> {
                         (p) => ListTile(
                           dense: true,
                           title: Text(p.name),
-                          subtitle: Text('${p.sku} - ${p.retailPrice.toStringAsFixed(2)}'),
+                          subtitle: Text(
+                            '${p.sku} - ${p.retailPrice.toStringAsFixed(2)}',
+                          ),
                           onTap: () => setState(() {
                             _lines.add(_LineDraft(product: p));
                             _productResults = [];
@@ -417,7 +456,10 @@ class _QuotationFormState extends State<_QuotationForm> {
               ),
             ),
             if (_error != null)
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
           ],
         ),
       ),
@@ -483,7 +525,8 @@ class _QuotationDetailsDialog extends StatefulWidget {
   final String id;
 
   @override
-  State<_QuotationDetailsDialog> createState() => _QuotationDetailsDialogState();
+  State<_QuotationDetailsDialog> createState() =>
+      _QuotationDetailsDialogState();
 }
 
 class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
@@ -504,7 +547,11 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
     try {
       final data = await widget.authState.salesQuotations(widget.id);
       if (mounted) {
-        setState(() => _details = QuotationDetails.fromJson(data as Map<String, dynamic>));
+        setState(
+          () => _details = QuotationDetails.fromJson(
+            data as Map<String, dynamic>,
+          ),
+        );
       }
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -535,24 +582,27 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
       content: SizedBox(
         width: 640,
         child: details == null
-            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+            ? const SizedBox(height: 120, child: AppLoadingState())
             : SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${details.customerName} (${details.customerCode})'),
                     Text('Status: ${details.status}'),
-                    Text('Date: ${_fmtDate(details.quotationDate)}'
-                        '${details.validUntil == null ? '' : '  ·  Valid until ${_fmtDate(details.validUntil!)}'}'),
-                    if (details.priceLevelName != null) Text('Price level: ${details.priceLevelName}'),
+                    Text(
+                      'Date: ${_fmtDate(details.quotationDate)}'
+                      '${details.validUntil == null ? '' : '  ·  Valid until ${_fmtDate(details.validUntil!)}'}',
+                    ),
+                    if (details.priceLevelName != null)
+                      Text('Price level: ${details.priceLevelName}'),
                     const SizedBox(height: 12),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: AppDataTable(
                         columns: const [
                           DataColumn(label: Text('Product')),
-                          DataColumn(label: Text('Qty')),
-                          DataColumn(label: Text('Price')),
+                          DataColumn(label: Text('Qty'), numeric: true),
+                          DataColumn(label: Text('Price'), numeric: true),
                           DataColumn(label: Text('Disc %')),
                           DataColumn(label: Text('Net')),
                         ],
@@ -562,9 +612,15 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
                                 cells: [
                                   DataCell(Text(i.productName)),
                                   DataCell(Text('${i.quantity}')),
-                                  DataCell(Text(i.unitPrice.toStringAsFixed(2))),
-                                  DataCell(Text(i.discountPercent.toStringAsFixed(1))),
-                                  DataCell(Text(i.netAmount.toStringAsFixed(2))),
+                                  DataCell(
+                                    Text(i.unitPrice.toStringAsFixed(2)),
+                                  ),
+                                  DataCell(
+                                    Text(i.discountPercent.toStringAsFixed(1)),
+                                  ),
+                                  DataCell(
+                                    Text(i.netAmount.toStringAsFixed(2)),
+                                  ),
                                 ],
                               ),
                             )
@@ -579,13 +635,22 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
                       ),
                     ),
                     if (details.convertedToSalesOrderNumber != null)
-                      Text('Converted to order ${details.convertedToSalesOrderNumber}'),
+                      Text(
+                        'Converted to order ${details.convertedToSalesOrderNumber}',
+                      ),
                     if (details.convertedToSaleInvoiceNumber != null)
-                      Text('Converted to sale ${details.convertedToSaleInvoiceNumber}'),
+                      Text(
+                        'Converted to sale ${details.convertedToSaleInvoiceNumber}',
+                      ),
                     if (details.cancellationReason != null)
                       Text('Cancelled: ${details.cancellationReason}'),
                     if (_error != null)
-                      Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -595,15 +660,19 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
           onPressed: () => Navigator.pop(context, _changed),
           child: const Text('Close'),
         ),
-        if (details != null && details.status == 'Draft' && can('quotations.send'))
+        if (details != null &&
+            details.status == 'Draft' &&
+            can('quotations.send'))
           FilledButton(
             key: const Key('send_quotation'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesQuotations(
-                    '${widget.id}/send',
-                    method: 'POST',
-                  )),
+                : () => _act(
+                    () => widget.authState.salesQuotations(
+                      '${widget.id}/send',
+                      method: 'POST',
+                    ),
+                  ),
             child: const Text('Send'),
           ),
         if (details != null &&
@@ -613,10 +682,12 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
             key: const Key('accept_quotation'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesQuotations(
-                    '${widget.id}/accept',
-                    method: 'POST',
-                  )),
+                : () => _act(
+                    () => widget.authState.salesQuotations(
+                      '${widget.id}/accept',
+                      method: 'POST',
+                    ),
+                  ),
             child: const Text('Accept'),
           ),
         if (details != null &&
@@ -626,23 +697,29 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
             key: const Key('reject_quotation'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesQuotations(
-                    '${widget.id}/reject',
-                    method: 'POST',
-                    body: const {'reason': null},
-                  )),
+                : () => _act(
+                    () => widget.authState.salesQuotations(
+                      '${widget.id}/reject',
+                      method: 'POST',
+                      body: const {'reason': null},
+                    ),
+                  ),
             child: const Text('Reject'),
           ),
-        if (details != null && details.status == 'Accepted' && can('quotations.convert'))
+        if (details != null &&
+            details.status == 'Accepted' &&
+            can('quotations.convert'))
           FilledButton(
             key: const Key('convert_quotation_order'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesQuotations(
-                    '${widget.id}/convert-to-order',
-                    method: 'POST',
-                    body: const {'expectedDeliveryDate': null},
-                  )),
+                : () => _act(
+                    () => widget.authState.salesQuotations(
+                      '${widget.id}/convert-to-order',
+                      method: 'POST',
+                      body: const {'expectedDeliveryDate': null},
+                    ),
+                  ),
             child: const Text('Convert to Order'),
           ),
         if (details != null &&
@@ -652,11 +729,15 @@ class _QuotationDetailsDialogState extends State<_QuotationDetailsDialog> {
             key: const Key('cancel_quotation'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesQuotations(
-                    '${widget.id}/cancel',
-                    method: 'POST',
-                    body: const {'reason': 'Cancelled from Quotations screen'},
-                  )),
+                : () => _act(
+                    () => widget.authState.salesQuotations(
+                      '${widget.id}/cancel',
+                      method: 'POST',
+                      body: const {
+                        'reason': 'Cancelled from Quotations screen',
+                      },
+                    ),
+                  ),
             child: const Text('Cancel'),
           ),
       ],

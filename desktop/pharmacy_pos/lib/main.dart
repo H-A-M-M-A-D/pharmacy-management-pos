@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'core/api_client.dart';
+import 'ui/app_theme.dart';
 import 'core/token_store.dart';
 import 'features/auth/auth_state.dart';
 import 'features/auth/force_change_password_screen.dart';
@@ -38,16 +39,13 @@ void main() {
     ),
   );
 
-  runZonedGuarded(
-    () {
-      FlutterError.onError = (details) {
-        FlutterError.presentError(details);
-        debugPrint('Unhandled Flutter error: ${details.exceptionAsString()}');
-      };
-      runApp(const PharmacyPOSApp());
-    },
-    (error, stack) => debugPrint('Unhandled error: $error\n$stack'),
-  );
+  runZonedGuarded(() {
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      debugPrint('Unhandled Flutter error: ${details.exceptionAsString()}');
+    };
+    runApp(const PharmacyPOSApp());
+  }, (error, stack) => debugPrint('Unhandled error: $error\n$stack'));
 }
 
 class PharmacyPOSApp extends StatefulWidget {
@@ -87,22 +85,7 @@ class _PharmacyPOSAppState extends State<PharmacyPOSApp> {
     builder: (context, _) => MaterialApp(
       title: 'Pharmacy Management System',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B5B)),
-        scaffoldBackgroundColor: const Color(0xFFF4F6F5),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-          isDense: true,
-        ),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(6)),
-            side: BorderSide(color: Color(0xFFD8DEDB)),
-          ),
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: switch (_authState.status) {
         AuthenticationStatus.initializing => const Scaffold(
           body: Center(child: CircularProgressIndicator()),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../auth/auth_state.dart';
 import 'bank_reconciliation_view.dart';
@@ -66,7 +67,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
         _AccountsSection('Party Adjustments', Icons.swap_horiz, PartyAdjustmentsView(authState: widget.authState)),
     ];
     if (_selected >= sections.length) _selected = 0;
-    if (sections.isEmpty) return const Center(child: Text('No accounting features are available for this user.'));
+    if (sections.isEmpty) return AppEmptyState(title: 'No accounting features are available for this user.');
 
     return SafeArea(
       child: LayoutBuilder(

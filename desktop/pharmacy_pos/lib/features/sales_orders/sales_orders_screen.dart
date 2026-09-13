@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -56,20 +57,11 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
+        AppPageHeader(title: 'Sales Orders'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: AppFilterBar(
             children: [
-              SizedBox(
-                width: 200,
-                child: Text(
-                  'Sales Orders',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
               SizedBox(
                 width: 260,
                 child: TextField(
@@ -91,15 +83,27 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
                   items: const [
                     DropdownMenuItem(
                       value: null,
-                      child: Text('All', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'All',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Draft',
-                      child: Text('Draft', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Draft',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Confirmed',
-                      child: Text('Confirmed', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Confirmed',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'PartiallyFulfilled',
@@ -111,11 +115,19 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
                     ),
                     DropdownMenuItem(
                       value: 'Fulfilled',
-                      child: Text('Fulfilled', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Fulfilled',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'Cancelled',
-                      child: Text('Cancelled', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Cancelled',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                   onChanged: (v) {
@@ -145,21 +157,21 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!));
+    if (_loading) return const AppLoadingState();
+    if (_error != null) return AppErrorState(_error!, onRetry: _load);
     final items = _orders?.items ?? const <SalesOrderListItem>[];
-    if (items.isEmpty) return const Center(child: Text('No sales orders found'));
+    if (items.isEmpty) return AppEmptyState(title: 'No sales orders found');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Order #')),
             DataColumn(label: Text('Customer')),
             DataColumn(label: Text('Date')),
             DataColumn(label: Text('Status')),
-            DataColumn(label: Text('Total')),
+            DataColumn(label: Text('Total'), numeric: true),
             DataColumn(label: Text('Ordered')),
             DataColumn(label: Text('Fulfilled')),
             DataColumn(label: Text('Remaining')),
@@ -172,11 +184,13 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
                     DataCell(Text(o.orderNumber)),
                     DataCell(Text(o.customerName)),
                     DataCell(Text(_fmtDate(o.orderDate))),
-                    DataCell(Chip(label: Text(o.status), visualDensity: VisualDensity.compact)),
+                    DataCell(AppStatusChip(o.status)),
                     DataCell(Text(o.netTotal.toStringAsFixed(2))),
                     DataCell(Text('${o.orderedQuantity}')),
                     DataCell(Text('${o.fulfilledQuantity}')),
-                    DataCell(Text('${o.orderedQuantity - o.fulfilledQuantity}')),
+                    DataCell(
+                      Text('${o.orderedQuantity - o.fulfilledQuantity}'),
+                    ),
                     DataCell(
                       IconButton(
                         tooltip: 'Open',
@@ -204,7 +218,8 @@ class _SalesOrdersScreenState extends State<SalesOrdersScreen> {
   Future<void> _openDetails(String id) async {
     final changed = await showDialog<bool>(
       context: context,
-      builder: (_) => _SalesOrderDetailsDialog(authState: widget.authState, id: id),
+      builder: (_) =>
+          _SalesOrderDetailsDialog(authState: widget.authState, id: id),
     );
     if (changed == true) await _load();
   }
@@ -271,14 +286,18 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
                   setState(() => _customerResults = []);
                   return;
                 }
-                final results = await widget.authState.lookupCustomers(search: v);
+                final results = await widget.authState.lookupCustomers(
+                  search: v,
+                );
                 if (mounted) setState(() => _customerResults = results);
               },
             ),
             if (_customerResults.isNotEmpty)
               Container(
                 constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey)),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey),
+                ),
                 child: ListView(
                   shrinkWrap: true,
                   children: _customerResults
@@ -334,7 +353,9 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
             if (_productResults.isNotEmpty)
               Container(
                 constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey)),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey),
+                ),
                 child: ListView(
                   shrinkWrap: true,
                   children: _productResults
@@ -342,7 +363,9 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
                         (p) => ListTile(
                           dense: true,
                           title: Text(p.name),
-                          subtitle: Text('${p.sku} - ${p.retailPrice.toStringAsFixed(2)}'),
+                          subtitle: Text(
+                            '${p.sku} - ${p.retailPrice.toStringAsFixed(2)}',
+                          ),
                           onTap: () => setState(() {
                             _lines.add(_LineDraft(product: p));
                             _productResults = [];
@@ -365,7 +388,8 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
                         initialValue: '${line.quantity}',
                         decoration: const InputDecoration(labelText: 'Qty'),
                         keyboardType: TextInputType.number,
-                        onChanged: (v) => line.quantity = int.tryParse(v) ?? line.quantity,
+                        onChanged: (v) =>
+                            line.quantity = int.tryParse(v) ?? line.quantity,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -375,8 +399,8 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
                         initialValue: '${line.discountPercent}',
                         decoration: const InputDecoration(labelText: 'Disc %'),
                         keyboardType: TextInputType.number,
-                        onChanged: (v) =>
-                            line.discountPercent = double.tryParse(v) ?? line.discountPercent,
+                        onChanged: (v) => line.discountPercent =
+                            double.tryParse(v) ?? line.discountPercent,
                       ),
                     ),
                     IconButton(
@@ -393,7 +417,10 @@ class _SalesOrderFormState extends State<_SalesOrderForm> {
               maxLines: 2,
             ),
             if (_error != null)
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
           ],
         ),
       ),
@@ -459,7 +486,8 @@ class _SalesOrderDetailsDialog extends StatefulWidget {
   final String id;
 
   @override
-  State<_SalesOrderDetailsDialog> createState() => _SalesOrderDetailsDialogState();
+  State<_SalesOrderDetailsDialog> createState() =>
+      _SalesOrderDetailsDialogState();
 }
 
 class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
@@ -481,7 +509,11 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
     try {
       final data = await widget.authState.salesOrders(widget.id);
       if (mounted) {
-        setState(() => _details = SalesOrderDetails.fromJson(data as Map<String, dynamic>));
+        setState(
+          () => _details = SalesOrderDetails.fromJson(
+            data as Map<String, dynamic>,
+          ),
+        );
       }
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -512,7 +544,9 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
         .map((i) => {'productId': i.productId, 'quantity': _fulfillQty[i.id]})
         .toList();
     if (items.isEmpty) {
-      setState(() => _error = 'Enter a quantity to fulfill for at least one line.');
+      setState(
+        () => _error = 'Enter a quantity to fulfill for at least one line.',
+      );
       return;
     }
     final accounts = (await widget.authState.listFinancialAccounts(
@@ -529,7 +563,8 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
         title: const Text('Payment account'),
         children: [
           SimpleDialogOption(
-            onPressed: () => Navigator.pop<FinancialAccountInfo?>(context, null),
+            onPressed: () =>
+                Navigator.pop<FinancialAccountInfo?>(context, null),
             child: const Text('Record fully on customer credit'),
           ),
           ...accounts.map(
@@ -570,27 +605,29 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
       content: SizedBox(
         width: 680,
         child: details == null
-            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+            ? const SizedBox(height: 120, child: AppLoadingState())
             : SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${details.customerName} (${details.customerCode})'),
                     Text('Status: ${details.status}'),
-                    Text('Date: ${_fmtDate(details.orderDate)}'
-                        '${details.expectedDeliveryDate == null ? '' : '  ·  Expected ${_fmtDate(details.expectedDeliveryDate!)}'}'),
+                    Text(
+                      'Date: ${_fmtDate(details.orderDate)}'
+                      '${details.expectedDeliveryDate == null ? '' : '  ·  Expected ${_fmtDate(details.expectedDeliveryDate!)}'}',
+                    ),
                     if (details.quotationNumber != null)
                       Text('From quotation: ${details.quotationNumber}'),
                     const SizedBox(height: 12),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: AppDataTable(
                         columns: [
                           const DataColumn(label: Text('Product')),
                           const DataColumn(label: Text('Ordered')),
                           const DataColumn(label: Text('Fulfilled')),
                           const DataColumn(label: Text('Remaining')),
-                          const DataColumn(label: Text('Price')),
+                          const DataColumn(label: Text('Price'), numeric: true),
                           if (details.status == 'Confirmed' ||
                               details.status == 'PartiallyFulfilled')
                             const DataColumn(label: Text('Fulfill now')),
@@ -603,7 +640,9 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
                                   DataCell(Text('${i.orderedQuantity}')),
                                   DataCell(Text('${i.fulfilledQuantity}')),
                                   DataCell(Text('${i.remainingQuantity}')),
-                                  DataCell(Text(i.unitPrice.toStringAsFixed(2))),
+                                  DataCell(
+                                    Text(i.unitPrice.toStringAsFixed(2)),
+                                  ),
                                   if (details.status == 'Confirmed' ||
                                       details.status == 'PartiallyFulfilled')
                                     DataCell(
@@ -611,10 +650,12 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
                                         width: 70,
                                         child: TextFormField(
                                           key: Key('fulfill_qty_${i.id}'),
-                                          decoration: const InputDecoration(hintText: '0'),
+                                          decoration: const InputDecoration(
+                                            hintText: '0',
+                                          ),
                                           keyboardType: TextInputType.number,
-                                          onChanged: (v) =>
-                                              _fulfillQty[i.id] = int.tryParse(v) ?? 0,
+                                          onChanged: (v) => _fulfillQty[i.id] =
+                                              int.tryParse(v) ?? 0,
                                         ),
                                       ),
                                     ),
@@ -633,15 +674,25 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
                     ),
                     if (details.linkedSales.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text('Linked invoices', style: Theme.of(context).textTheme.titleSmall),
+                      Text(
+                        'Linked invoices',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                       ...details.linkedSales.map(
-                        (s) => Text('${s.invoiceNumber ?? s.saleId} - ${s.netTotal.toStringAsFixed(2)}'),
+                        (s) => Text(
+                          '${s.invoiceNumber ?? s.saleId} - ${s.netTotal.toStringAsFixed(2)}',
+                        ),
                       ),
                     ],
                     if (details.cancellationReason != null)
                       Text('Cancelled: ${details.cancellationReason}'),
                     if (_error != null)
-                      Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -651,19 +702,24 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
           onPressed: () => Navigator.pop(context, _changed),
           child: const Text('Close'),
         ),
-        if (details != null && details.status == 'Draft' && can('sales_orders.confirm'))
+        if (details != null &&
+            details.status == 'Draft' &&
+            can('sales_orders.confirm'))
           FilledButton(
             key: const Key('confirm_sales_order'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesOrders(
-                    '${widget.id}/confirm',
-                    method: 'POST',
-                  )),
+                : () => _act(
+                    () => widget.authState.salesOrders(
+                      '${widget.id}/confirm',
+                      method: 'POST',
+                    ),
+                  ),
             child: const Text('Confirm'),
           ),
         if (details != null &&
-            (details.status == 'Confirmed' || details.status == 'PartiallyFulfilled') &&
+            (details.status == 'Confirmed' ||
+                details.status == 'PartiallyFulfilled') &&
             can('sales_orders.fulfill'))
           FilledButton(
             key: const Key('fulfill_sales_order'),
@@ -677,11 +733,15 @@ class _SalesOrderDetailsDialogState extends State<_SalesOrderDetailsDialog> {
             key: const Key('cancel_sales_order'),
             onPressed: _busy
                 ? null
-                : () => _act(() => widget.authState.salesOrders(
-                    '${widget.id}/cancel',
-                    method: 'POST',
-                    body: const {'reason': 'Cancelled from Sales Orders screen'},
-                  )),
+                : () => _act(
+                    () => widget.authState.salesOrders(
+                      '${widget.id}/cancel',
+                      method: 'POST',
+                      body: const {
+                        'reason': 'Cancelled from Sales Orders screen',
+                      },
+                    ),
+                  ),
             child: const Text('Cancel'),
           ),
       ],

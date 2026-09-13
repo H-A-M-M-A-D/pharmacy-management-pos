@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -58,10 +59,10 @@ class _PeriodsViewState extends State<PeriodsView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
-    if (_periods.isEmpty) return const Center(child: Text('No periods defined for this fiscal year.'));
-    return horizontalTable(DataTable(columns: const [
+    if (_periods.isEmpty) return AppEmptyState(title: 'No periods defined for this fiscal year.');
+    return horizontalTable(AppDataTable(columns: const [
       DataColumn(label: Text('#')), DataColumn(label: Text('Name')), DataColumn(label: Text('Start')), DataColumn(label: Text('End')),
       DataColumn(label: Text('Status')), DataColumn(label: Text('Actions')),
     ], rows: _periods.map((p) => DataRow(cells: [
@@ -71,8 +72,7 @@ class _PeriodsViewState extends State<PeriodsView> {
     ])).toList()));
   }
 
-  Widget _statusChip(String status) => Chip(label: Text(status), visualDensity: VisualDensity.compact,
-    backgroundColor: status == 'Closed' ? Colors.red.withValues(alpha: .15) : status == 'SoftClosed' ? Colors.orange.withValues(alpha: .15) : Colors.green.withValues(alpha: .15));
+  Widget _statusChip(String status) => AppStatusChip(status);
 
   List<Widget> _actions(Map<String, dynamic> p) {
     final status = enumName(p['status']);

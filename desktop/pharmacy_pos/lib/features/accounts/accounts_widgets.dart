@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 String money(num value) => 'PKR ${value.toStringAsFixed(2)}';
 String shortDate(DateTime value) => '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
@@ -8,16 +9,7 @@ class AccountsPageHeader extends StatelessWidget {
   final String title, subtitle;
   final List<Widget> actions;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-    child: Row(children: [
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 2), Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-      ])),
-      ...actions,
-    ]),
-  );
+  Widget build(BuildContext context) => AppPageHeader(title: title, subtitle: subtitle, actions: actions);
 }
 
 class AccountsError extends StatelessWidget {
@@ -25,11 +17,7 @@ class AccountsError extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
   @override
-  Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-    Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 36),
-    const SizedBox(height: 8), Text(message, textAlign: TextAlign.center),
-    if (onRetry != null) ...[const SizedBox(height: 10), OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Retry'))],
-  ]));
+  Widget build(BuildContext context) => AppErrorState(message, onRetry: onRetry);
 }
 
 Future<DateTime?> pickAccountDate(BuildContext context, DateTime current) => showDatePicker(

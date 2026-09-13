@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -101,7 +102,7 @@ class _LevelsTabState extends State<_LevelsTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -130,7 +131,7 @@ class _LevelsTabState extends State<_LevelsTab> {
             child: SingleChildScrollView(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
+                child: AppDataTable(
                   columns: const [
                     DataColumn(label: Text('Name')),
                     DataColumn(label: Text('Code')),
@@ -152,11 +153,8 @@ class _LevelsTabState extends State<_LevelsTab> {
                                   : const SizedBox.shrink(),
                             ),
                             DataCell(
-                              Chip(
-                                label: Text(
-                                  level.isActive ? 'Active' : 'Inactive',
-                                ),
-                                visualDensity: VisualDensity.compact,
+                              AppStatusChip(
+                                level.isActive ? 'Active' : 'Inactive',
                               ),
                             ),
                             DataCell(
@@ -382,12 +380,14 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
         setState(() {
           _prices = (pricesData as List<dynamic>)
               .map(
-                (x) => ProductPriceLevelInfo.fromJson(x as Map<String, dynamic>),
+                (x) =>
+                    ProductPriceLevelInfo.fromJson(x as Map<String, dynamic>),
               )
               .toList();
           _breaks = (breaksData as List<dynamic>)
               .map(
-                (x) => ProductPriceBreakInfo.fromJson(x as Map<String, dynamic>),
+                (x) =>
+                    ProductPriceBreakInfo.fromJson(x as Map<String, dynamic>),
               )
               .toList();
         });
@@ -468,10 +468,10 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
                   ),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                    child: AppDataTable(
                       columns: const [
                         DataColumn(label: Text('Level')),
-                        DataColumn(label: Text('Price')),
+                        DataColumn(label: Text('Price'), numeric: true),
                         DataColumn(label: Text('Status')),
                         DataColumn(label: Text('')),
                       ],
@@ -527,20 +527,18 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
                   ),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                    child: AppDataTable(
                       columns: const [
                         DataColumn(label: Text('Level')),
-                        DataColumn(label: Text('Min Qty')),
-                        DataColumn(label: Text('Price')),
+                        DataColumn(label: Text('Min Qty'), numeric: true),
+                        DataColumn(label: Text('Price'), numeric: true),
                         DataColumn(label: Text('')),
                       ],
                       rows: _breaks
                           .map(
                             (b) => DataRow(
                               cells: [
-                                DataCell(
-                                  Text(b.priceLevelName ?? 'Any level'),
-                                ),
+                                DataCell(Text(b.priceLevelName ?? 'Any level')),
                                 DataCell(Text('${b.minimumQuantity}')),
                                 DataCell(
                                   Text(b.sellingPrice.toStringAsFixed(2)),
@@ -591,7 +589,9 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Price Level'),
                 items: _levels
-                    .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
+                    .map(
+                      (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
+                    )
                     .toList(),
                 onChanged: (v) => setDialogState(() => levelId = v),
               ),
@@ -662,7 +662,9 @@ class _ProductPricingTabState extends State<_ProductPricingTab> {
               TextField(
                 key: const Key('product_break_quantity'),
                 controller: qtyController,
-                decoration: const InputDecoration(labelText: 'Minimum Quantity'),
+                decoration: const InputDecoration(
+                  labelText: 'Minimum Quantity',
+                ),
                 keyboardType: TextInputType.number,
               ),
               TextField(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -52,20 +53,8 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 240,
-                child: Text(
-                  'Suppliers',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
+        AppPageHeader(title: 'Suppliers'),
+        Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 12), child: AppFilterBar(children: [
               SizedBox(
                 width: 320,
                 child: TextField(
@@ -89,31 +78,29 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                   icon: const Icon(Icons.add_business_outlined),
                   label: const Text('Add Supplier'),
                 ),
-            ],
-          ),
-        ),
+            ])),
         Expanded(child: _body()),
       ],
     ),
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!));
+    if (_loading) return const AppLoadingState();
+    if (_error != null) return AppErrorState(_error!, onRetry: _load);
     final items = _suppliers?.items ?? const <SupplierListItem>[];
-    if (items.isEmpty) return const Center(child: Text('No suppliers found'));
+    if (items.isEmpty) return AppEmptyState(title: 'No suppliers found');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Supplier')),
             DataColumn(label: Text('Contact')),
             DataColumn(label: Text('Phone')),
             DataColumn(label: Text('City')),
-            DataColumn(label: Text('Credit Limit')),
-            DataColumn(label: Text('Outstanding Balance')),
+            DataColumn(label: Text('Credit Limit'), numeric: true),
+            DataColumn(label: Text('Outstanding Balance'), numeric: true),
             DataColumn(label: Text('Status')),
             DataColumn(label: Text('Actions')),
           ],
@@ -134,10 +121,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                     ),
                     DataCell(Text(_balance(supplier.outstandingBalance))),
                     DataCell(
-                      Chip(
-                        label: Text(supplier.isActive ? 'Active' : 'Inactive'),
-                        visualDensity: VisualDensity.compact,
-                      ),
+                      AppStatusChip(supplier.isActive ? 'Active' : 'Inactive'),
                     ),
                     DataCell(
                       Row(
@@ -502,17 +486,17 @@ class _SupplierLedgerDialogState extends State<_SupplierLedgerDialog> {
     content: SizedBox(
       width: 720,
       child: _ledger == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingState()
           : SingleChildScrollView(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
+                child: AppDataTable(
                   columns: const [
                     DataColumn(label: Text('Date')),
                     DataColumn(label: Text('Branch')),
                     DataColumn(label: Text('Type')),
-                    DataColumn(label: Text('Amount')),
-                    DataColumn(label: Text('Balance')),
+                    DataColumn(label: Text('Amount'), numeric: true),
+                    DataColumn(label: Text('Balance'), numeric: true),
                     DataColumn(label: Text('Notes')),
                   ],
                   rows: _ledger!.items

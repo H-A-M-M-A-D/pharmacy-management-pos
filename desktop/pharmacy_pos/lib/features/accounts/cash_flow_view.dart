@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -39,7 +40,7 @@ class _CashFlowViewState extends State<CashFlowView> {
       OutlinedButton(onPressed: () async { final x = await pickAccountDate(context, _to); if (x != null) setState(() => _to = x); }, child: Text('To ${shortDate(_to)}')),
       const SizedBox(width: 8), FilledButton.tonal(onPressed: _load, child: const Text('Apply')),
     ]),
-    Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : _error != null ? AccountsError(_error!, onRetry: _load) : _body()),
+    Expanded(child: _loading ? const AppLoadingState() : _error != null ? AccountsError(_error!, onRetry: _load) : _body()),
   ]);
 
   Widget _body() {

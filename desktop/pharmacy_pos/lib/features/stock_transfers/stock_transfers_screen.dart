@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -65,20 +67,8 @@ class _StockTransfersScreenState extends State<StockTransfersScreen> {
   Widget build(BuildContext context) => SafeArea(
     child: Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 200,
-                child: Text(
-                  'Stock Transfers',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
+        AppPageHeader(title: 'Stock Transfers'),
+        Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 12), child: AppFilterBar(children: [
               SizedBox(
                 width: 200,
                 child: DropdownButtonFormField<String?>(
@@ -134,35 +124,33 @@ class _StockTransfersScreenState extends State<StockTransfersScreen> {
                   icon: const Icon(Icons.compare_arrows),
                   label: const Text('New Transfer'),
                 ),
-            ],
-          ),
-        ),
+            ])),
         Expanded(child: _body()),
       ],
     ),
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!));
+    if (_loading) return const AppLoadingState();
+    if (_error != null) return AppErrorState(_error!, onRetry: _load);
     final items = _transfers?.items ?? const <StockTransferListItem>[];
-    if (items.isEmpty) return const Center(child: Text('No transfers found'));
+    if (items.isEmpty) return AppEmptyState(title: 'No transfers found');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Transfer #')),
             DataColumn(label: Text('Date')),
             DataColumn(label: Text('From')),
             DataColumn(label: Text('To')),
             DataColumn(label: Text('Status')),
-            DataColumn(label: Text('Requested')),
-            DataColumn(label: Text('Dispatched')),
-            DataColumn(label: Text('Received')),
-            DataColumn(label: Text('In Transit')),
-            DataColumn(label: Text('Requested By')),
+            DataColumn(label: Text('Requested'), numeric: true),
+            DataColumn(label: Text('Dispatched'), numeric: true),
+            DataColumn(label: Text('Received'), numeric: true),
+            DataColumn(label: Text('In Transit'), numeric: true),
+            DataColumn(label: Text('Requested By'), numeric: true),
           ],
           rows: items
               .map(
@@ -228,7 +216,7 @@ class _StatusChip extends StatelessWidget {
   final String status;
   @override
   Widget build(BuildContext context) =>
-      Chip(label: Text(status), visualDensity: VisualDensity.compact);
+      AppStatusChip(status);
 }
 
 class _CreateTransferDialog extends StatefulWidget {
@@ -402,6 +390,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+            const AppWorkflowStrip(steps: ['Source godown', 'Stock & quantities', 'Destination', 'Review']),
           Row(
             children: [
               Expanded(
@@ -478,7 +467,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
               padding: EdgeInsets.only(top: 6),
               child: Text(
                 'Source and destination godown must be different.',
-                style: TextStyle(color: Colors.orange),
+                style: TextStyle(color: AppColors.warning),
               ),
             ),
           const SizedBox(height: 10),
@@ -527,7 +516,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
           SizedBox(
             height: 160,
             child: _lines.isEmpty
-                ? const Center(child: Text('No items added yet'))
+                ? AppEmptyState(title: 'No items added yet')
                 : ListView(
                     children: _lines
                         .map(
@@ -697,7 +686,7 @@ class _TransferDetailDialogState extends State<_TransferDetailDialog> {
       content: SizedBox(
         width: 760,
         child: t == null
-            ? (_error != null ? Text(_error!) : const Center(child: CircularProgressIndicator()))
+            ? (_error != null ? Text(_error!) : const AppLoadingState())
             : SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -730,7 +719,7 @@ class _TransferDetailDialogState extends State<_TransferDetailDialog> {
                     Text('Items', style: Theme.of(context).textTheme.titleSmall),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: AppDataTable(
                         columns: const [
                           DataColumn(label: Text('Product')),
                           DataColumn(label: Text('Batch')),
@@ -738,7 +727,7 @@ class _TransferDetailDialogState extends State<_TransferDetailDialog> {
                           DataColumn(label: Text('App')),
                           DataColumn(label: Text('Disp')),
                           DataColumn(label: Text('Recv')),
-                          DataColumn(label: Text('In Transit')),
+                          DataColumn(label: Text('In Transit'), numeric: true),
                           DataColumn(label: Text('Notes')),
                         ],
                         rows: t.items

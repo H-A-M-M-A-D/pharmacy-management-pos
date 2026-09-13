@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -154,12 +156,12 @@ class _WholesaleScreenState extends State<WholesaleScreen>
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Invoice')),
             DataColumn(label: Text('Customer')),
-            DataColumn(label: Text('Net Total')),
-            DataColumn(label: Text('Credit')),
+            DataColumn(label: Text('Net Total'), numeric: true),
+            DataColumn(label: Text('Credit'), numeric: true),
             DataColumn(label: Text('Status')),
           ],
           rows: items
@@ -170,7 +172,7 @@ class _WholesaleScreenState extends State<WholesaleScreen>
                     DataCell(Text(s.customerName ?? 'Walk-in')),
                     DataCell(Text(s.netTotal.toStringAsFixed(2))),
                     DataCell(Text(s.creditAmount.toStringAsFixed(2))),
-                    DataCell(Text(s.status)),
+                    DataCell(AppStatusChip(s.status)),
                   ],
                 ),
               )
@@ -253,7 +255,7 @@ class _WholesaleScreenState extends State<WholesaleScreen>
                             if (!_customerDetails!.creditAllowed)
                               const Text(
                                 'Credit sales are not allowed for this customer.',
-                                style: TextStyle(color: Colors.red),
+                                style: TextStyle(color: AppColors.danger),
                               ),
                           ],
                         ),
@@ -355,11 +357,11 @@ class _WholesaleScreenState extends State<WholesaleScreen>
         if (_lines.isNotEmpty)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: DataTable(
+            child: AppDataTable(
               columns: const [
                 DataColumn(label: Text('Product')),
-                DataColumn(label: Text('Qty')),
-                DataColumn(label: Text('Resolved Price')),
+                DataColumn(label: Text('Qty'), numeric: true),
+                DataColumn(label: Text('Resolved Price'), numeric: true),
                 DataColumn(label: Text('Source')),
                 DataColumn(label: Text('Override')),
                 DataColumn(label: Text('Disc %')),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-
+import '../../ui/app_theme.dart';
+import '../../ui/app_sidebar.dart';
 import '../auth/auth_state.dart';
+import '../dashboard/dashboard_screen.dart';
 import '../profile/profile_screen.dart';
 import '../catalog/products_screen.dart';
 import '../catalog/catalog_masters_screen.dart';
@@ -26,16 +28,15 @@ import '../accounts/accounts_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({required this.authState, super.key});
-
   final AuthState authState;
-
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
   int _selected = 0;
-
+  final Set<int> _visited = {0};
+  bool? _expanded;
   @override
   Widget build(BuildContext context) {
     final canViewUsers = widget.authState.can('users.view');
@@ -101,255 +102,381 @@ class _AppShellState extends State<AppShell> {
       'customers.view',
       'suppliers.view',
     ].any(widget.authState.can);
-    final destinations = <NavigationRailDestination>[
-      const NavigationRailDestination(
-        icon: Icon(Icons.dashboard_outlined),
-        selectedIcon: Icon(Icons.dashboard),
-        label: Text('Dashboard'),
-      ),
-      if (canViewUsers)
-        const NavigationRailDestination(
-          icon: Icon(Icons.manage_accounts_outlined),
-          selectedIcon: Icon(Icons.manage_accounts),
-          label: Text('Users'),
+    final canViewMis = widget.authState.can('reports.view');
+    // Destinations are grouped conceptually (Main / Sales / Inventory /
+    // Purchasing / Finance & Management) to make a long, permission-gated
+    // navigation list scannable. Each group only renders if at least one of
+    // its destinations is visible to the current user, and each item's
+    // destination/page are paired together so reordering can never drift
+    // the two lists out of sync.
+    final groups = <_NavGroup>[
+      _NavGroup('Main', [
+        _NavItem(
+          const NavigationRailDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: Text('Dashboard'),
+          ),
+          DashboardScreen(authState: widget.authState),
         ),
-      if (canViewProducts)
-        const NavigationRailDestination(
-          icon: Icon(Icons.medication_outlined),
-          selectedIcon: Icon(Icons.medication),
-          label: Text('Products'),
-        ),
-      if (canViewCategories)
-        const NavigationRailDestination(
-          icon: Icon(Icons.category_outlined),
-          selectedIcon: Icon(Icons.category),
-          label: Text('Categories'),
-        ),
-      if (canViewManufacturers)
-        const NavigationRailDestination(
-          icon: Icon(Icons.factory_outlined),
-          selectedIcon: Icon(Icons.factory),
-          label: Text('Manufacturers'),
-        ),
-      if (canViewInventory)
-        const NavigationRailDestination(
-          icon: Icon(Icons.inventory_2_outlined),
-          selectedIcon: Icon(Icons.inventory_2),
-          label: Text('Inventory'),
-        ),
-      if (canViewGodowns)
-        const NavigationRailDestination(
-          icon: Icon(Icons.warehouse_outlined),
-          selectedIcon: Icon(Icons.warehouse),
-          label: Text('Godowns'),
-        ),
-      if (canViewStockTransfers)
-        const NavigationRailDestination(
-          icon: Icon(Icons.compare_arrows_outlined),
-          selectedIcon: Icon(Icons.compare_arrows),
-          label: Text('Transfers'),
-        ),
-      if (canViewSuppliers)
-        const NavigationRailDestination(
-          icon: Icon(Icons.local_shipping_outlined),
-          selectedIcon: Icon(Icons.local_shipping),
-          label: Text('Suppliers'),
-        ),
-      if (canViewCustomers)
-        const NavigationRailDestination(
-          icon: Icon(Icons.people_alt_outlined),
-          selectedIcon: Icon(Icons.people_alt),
-          label: Text('Customers'),
-        ),
-      if (canViewPurchasing)
-        const NavigationRailDestination(
-          icon: Icon(Icons.shopping_cart_outlined),
-          selectedIcon: Icon(Icons.shopping_cart),
-          label: Text('Purchasing'),
-        ),
-      if (canViewSales)
-        const NavigationRailDestination(
-          icon: Icon(Icons.point_of_sale_outlined),
-          selectedIcon: Icon(Icons.point_of_sale),
-          label: Text('Sales'),
-        ),
-      if (canViewQuotations)
-        const NavigationRailDestination(
-          icon: Icon(Icons.request_quote_outlined),
-          selectedIcon: Icon(Icons.request_quote),
-          label: Text('Quotations'),
-        ),
-      if (canViewSalesOrders)
-        const NavigationRailDestination(
-          icon: Icon(Icons.assignment_outlined),
-          selectedIcon: Icon(Icons.assignment),
-          label: Text('Sales Orders'),
-        ),
-      if (canViewWholesale)
-        const NavigationRailDestination(
-          icon: Icon(Icons.storefront_outlined),
-          selectedIcon: Icon(Icons.storefront),
-          label: Text('Wholesale'),
-        ),
-      if (canViewPricing)
-        const NavigationRailDestination(
-          icon: Icon(Icons.sell_outlined),
-          selectedIcon: Icon(Icons.sell),
-          label: Text('Price Levels'),
-        ),
-      if (canViewPhase6)
-        const NavigationRailDestination(
-          icon: Icon(Icons.auto_awesome_outlined),
-          selectedIcon: Icon(Icons.auto_awesome),
-          label: Text('Business Automation'),
-        ),
-      if (canViewCashierShift)
-        const NavigationRailDestination(
-          icon: Icon(Icons.savings_outlined),
-          selectedIcon: Icon(Icons.savings),
-          label: Text('Cashier Shift'),
-        ),
-      if (canViewFinance)
-        const NavigationRailDestination(
-          icon: Icon(Icons.account_balance_wallet_outlined),
-          selectedIcon: Icon(Icons.account_balance_wallet),
-          label: Text('Finance'),
-        ),
-      if (canViewReports)
-        const NavigationRailDestination(
-          icon: Icon(Icons.analytics_outlined),
-          selectedIcon: Icon(Icons.analytics),
-          label: Text('Reports'),
-        ),
-      if (widget.authState.can('reports.view'))
-        const NavigationRailDestination(
-          icon: Icon(Icons.insights_outlined),
-          selectedIcon: Icon(Icons.insights),
-          label: Text('Management / MIS'),
-        ),
-      if (canViewAccounting)
-        const NavigationRailDestination(
-          icon: Icon(Icons.account_balance_outlined),
-          selectedIcon: Icon(Icons.account_balance),
-          label: Text('Accounts'),
-        ),
-      if (canViewAdministration)
-        const NavigationRailDestination(
-          icon: Icon(Icons.admin_panel_settings_outlined),
-          selectedIcon: Icon(Icons.admin_panel_settings),
-          label: Text('Administration'),
-        ),
+      ]),
+      _NavGroup('Sales', [
+        if (canViewSales)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.point_of_sale_outlined),
+              selectedIcon: Icon(Icons.point_of_sale),
+              label: Text('Sales'),
+            ),
+            PosScreen(authState: widget.authState),
+          ),
+        if (canViewWholesale)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.storefront_outlined),
+              selectedIcon: Icon(Icons.storefront),
+              label: Text('Wholesale'),
+            ),
+            WholesaleScreen(authState: widget.authState),
+          ),
+        if (canViewQuotations)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.request_quote_outlined),
+              selectedIcon: Icon(Icons.request_quote),
+              label: Text('Quotations'),
+            ),
+            QuotationsScreen(authState: widget.authState),
+          ),
+        if (canViewSalesOrders)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.assignment_outlined),
+              selectedIcon: Icon(Icons.assignment),
+              label: Text('Sales Orders'),
+            ),
+            SalesOrdersScreen(authState: widget.authState),
+          ),
+        if (canViewCashierShift)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.savings_outlined),
+              selectedIcon: Icon(Icons.savings),
+              label: Text('Cashier Shift'),
+            ),
+            CashierShiftScreen(authState: widget.authState),
+          ),
+        if (canViewCustomers)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.people_alt_outlined),
+              selectedIcon: Icon(Icons.people_alt),
+              label: Text('Customers'),
+            ),
+            CustomersScreen(authState: widget.authState),
+          ),
+      ]),
+      _NavGroup('Inventory', [
+        if (canViewProducts)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.medication_outlined),
+              selectedIcon: Icon(Icons.medication),
+              label: Text('Products'),
+            ),
+            ProductsScreen(authState: widget.authState),
+          ),
+        if (canViewCategories)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.category_outlined),
+              selectedIcon: Icon(Icons.category),
+              label: Text('Categories'),
+            ),
+            CatalogMastersScreen(
+              authState: widget.authState,
+              mode: CatalogMasterMode.categories,
+            ),
+          ),
+        if (canViewManufacturers)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.factory_outlined),
+              selectedIcon: Icon(Icons.factory),
+              label: Text('Manufacturers'),
+            ),
+            CatalogMastersScreen(
+              authState: widget.authState,
+              mode: CatalogMasterMode.manufacturers,
+            ),
+          ),
+        if (canViewInventory)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.inventory_2_outlined),
+              selectedIcon: Icon(Icons.inventory_2),
+              label: Text('Inventory'),
+            ),
+            InventoryScreen(authState: widget.authState),
+          ),
+        if (canViewGodowns)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.warehouse_outlined),
+              selectedIcon: Icon(Icons.warehouse),
+              label: Text('Godowns'),
+            ),
+            GodownsScreen(authState: widget.authState),
+          ),
+        if (canViewStockTransfers)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.compare_arrows_outlined),
+              selectedIcon: Icon(Icons.compare_arrows),
+              label: Text('Transfers'),
+            ),
+            StockTransfersScreen(authState: widget.authState),
+          ),
+      ]),
+      _NavGroup('Purchasing', [
+        if (canViewPurchasing)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.shopping_cart_outlined),
+              selectedIcon: Icon(Icons.shopping_cart),
+              label: Text('Purchasing'),
+            ),
+            PurchasingScreen(authState: widget.authState),
+          ),
+        if (canViewSuppliers)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.local_shipping_outlined),
+              selectedIcon: Icon(Icons.local_shipping),
+              label: Text('Suppliers'),
+            ),
+            SuppliersScreen(authState: widget.authState),
+          ),
+      ]),
+      _NavGroup('Finance / Management', [
+        if (canViewFinance)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.account_balance_wallet_outlined),
+              selectedIcon: Icon(Icons.account_balance_wallet),
+              label: Text('Finance'),
+            ),
+            FinanceScreen(authState: widget.authState),
+          ),
+        if (canViewAccounting)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.account_balance_outlined),
+              selectedIcon: Icon(Icons.account_balance),
+              label: Text('Accounts'),
+            ),
+            AccountsScreen(authState: widget.authState),
+          ),
+        if (canViewReports)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.analytics_outlined),
+              selectedIcon: Icon(Icons.analytics),
+              label: Text('Reports'),
+            ),
+            ReportsScreen(authState: widget.authState),
+          ),
+        if (canViewMis)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.insights_outlined),
+              selectedIcon: Icon(Icons.insights),
+              label: Text('Management / MIS'),
+            ),
+            MisScreen(authState: widget.authState),
+          ),
+        if (canViewPricing)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.sell_outlined),
+              selectedIcon: Icon(Icons.sell),
+              label: Text('Price Levels'),
+            ),
+            PriceLevelsScreen(authState: widget.authState),
+          ),
+        if (canViewPhase6)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.auto_awesome_outlined),
+              selectedIcon: Icon(Icons.auto_awesome),
+              label: Text('Business Automation'),
+            ),
+            Phase6Screen(authState: widget.authState),
+          ),
+        if (canViewUsers)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.manage_accounts_outlined),
+              selectedIcon: Icon(Icons.manage_accounts),
+              label: Text('Users'),
+            ),
+            UsersScreen(authState: widget.authState),
+          ),
+        if (canViewAdministration)
+          _NavItem(
+            const NavigationRailDestination(
+              icon: Icon(Icons.admin_panel_settings_outlined),
+              selectedIcon: Icon(Icons.admin_panel_settings),
+              label: Text('Administration'),
+            ),
+            AdministrationScreen(authState: widget.authState),
+          ),
+      ]),
+    ];
+    final destinations = <NavigationRailDestination>[];
+    final pages = <Widget>[];
+    for (final group in groups) {
+      if (group.items.isEmpty) continue;
+      if (destinations.isNotEmpty) {
+        destinations.add(
+          NavigationRailDestination(
+            disabled: true,
+            icon: const SizedBox(height: 4),
+            // A fixed width keeps a long group name (e.g. "Finance /
+            // Management") from ever becoming the widest destination in the
+            // rail - NavigationRail sizes itself to its widest destination,
+            // and letting a header grow that would shift every screen to
+            // its right by a few pixels at narrow window widths.
+            label: SizedBox(
+              width: 96,
+              child: Text(
+                group.label.toUpperCase(),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ),
+        );
+        pages.add(const SizedBox.shrink());
+      }
+      for (final item in group.items) {
+        destinations.add(item.destination);
+        pages.add(item.page);
+      }
+    }
+    destinations.add(
       const NavigationRailDestination(
         icon: Icon(Icons.account_circle_outlined),
         selectedIcon: Icon(Icons.account_circle),
         label: Text('My profile'),
       ),
-    ];
-    final pages = <Widget>[
-      _Dashboard(authState: widget.authState),
-      if (canViewUsers) UsersScreen(authState: widget.authState),
-      if (canViewProducts) ProductsScreen(authState: widget.authState),
-      if (canViewCategories)
-        CatalogMastersScreen(
-          authState: widget.authState,
-          mode: CatalogMasterMode.categories,
-        ),
-      if (canViewManufacturers)
-        CatalogMastersScreen(
-          authState: widget.authState,
-          mode: CatalogMasterMode.manufacturers,
-        ),
-      if (canViewInventory) InventoryScreen(authState: widget.authState),
-      if (canViewGodowns) GodownsScreen(authState: widget.authState),
-      if (canViewStockTransfers)
-        StockTransfersScreen(authState: widget.authState),
-      if (canViewSuppliers) SuppliersScreen(authState: widget.authState),
-      if (canViewCustomers) CustomersScreen(authState: widget.authState),
-      if (canViewPurchasing) PurchasingScreen(authState: widget.authState),
-      if (canViewSales) PosScreen(authState: widget.authState),
-      if (canViewQuotations) QuotationsScreen(authState: widget.authState),
-      if (canViewSalesOrders) SalesOrdersScreen(authState: widget.authState),
-      if (canViewWholesale) WholesaleScreen(authState: widget.authState),
-      if (canViewPricing) PriceLevelsScreen(authState: widget.authState),
-      if (canViewPhase6) Phase6Screen(authState: widget.authState),
-      if (canViewCashierShift) CashierShiftScreen(authState: widget.authState),
-      if (canViewFinance) FinanceScreen(authState: widget.authState),
-      if (canViewReports) ReportsScreen(authState: widget.authState),
-      if (widget.authState.can('reports.view'))
-        MisScreen(authState: widget.authState),
-      if (canViewAccounting) AccountsScreen(authState: widget.authState),
-      if (canViewAdministration)
-        AdministrationScreen(authState: widget.authState),
-      ProfileScreen(authState: widget.authState),
-    ];
+    );
+    pages.add(ProfileScreen(authState: widget.authState));
     if (_selected >= pages.length) _selected = 0;
-
-    return Scaffold(
-      body: Row(
-        children: [
-          NavigationRail(
-            minWidth: 76,
-            labelType: NavigationRailLabelType.all,
-            selectedIndex: _selected,
-            onDestinationSelected: (value) => setState(() => _selected = value),
-            // The destination list can exceed the window height once several
-            // permission-gated sections are enabled. `scrollable` makes the
-            // rail wrap its destinations in a SingleChildScrollView instead of
-            // overflowing; `leadingAtTop`/`trailingAtBottom` keep the branding
-            // icon and sign-out button fixed outside that scrollable area.
-            leadingAtTop: true,
-            trailingAtBottom: true,
-            scrollable: true,
-            leading: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              child: Icon(
-                Icons.local_pharmacy,
-                color: Theme.of(context).colorScheme.primary,
-                size: 32,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final expanded = _expanded ?? constraints.maxWidth >= 1150;
+        final user = widget.authState.currentUser!;
+        return Scaffold(
+          body: Row(
+            children: [
+              AppSidebar(
+                destinations: destinations,
+                selectedIndex: _selected,
+                expanded: expanded,
+                onSelected: (value) => setState(() {
+                  _selected = value;
+                  _visited.add(value);
+                }),
+                onToggle: () => setState(() => _expanded = !expanded),
+                onLogout: widget.authState.logout,
               ),
-            ),
-            trailing: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              child: IconButton(
-                tooltip: 'Sign out',
-                onPressed: widget.authState.logout,
-                icon: const Icon(Icons.logout),
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      height: 56,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          bottom: BorderSide(color: AppColors.border),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 18,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Branch · ${user.branch.name}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Icon(Icons.account_circle_outlined, size: 20),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              user.fullName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: IndexedStack(
+                        index: _selected,
+                        children: [
+                          for (var i = 0; i < pages.length; i++)
+                            _visited.contains(i)
+                                ? TickerMode(
+                                    enabled: i == _selected,
+                                    child: FocusScope(
+                                      canRequestFocus: i == _selected,
+                                      child: pages[i],
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            destinations: destinations,
+            ],
           ),
-          const VerticalDivider(width: 1),
-          Expanded(child: pages[_selected]),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _Dashboard extends StatelessWidget {
-  const _Dashboard({required this.authState});
+/// Pairs a nav destination with the page it opens so reordering destinations
+/// into groups can never desynchronize the two lists by index.
+class _NavItem {
+  const _NavItem(this.destination, this.page);
+  final NavigationRailDestination destination;
+  final Widget page;
+}
 
-  final AuthState authState;
-
-  @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Dashboard', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 6),
-          Text(
-            '${authState.currentUser!.branch.name} · ${authState.currentUser!.roles.map((role) => role.name).join(', ')}',
-          ),
-          const SizedBox(height: 36),
-          Text(
-            'Welcome, ${authState.currentUser!.fullName}',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-        ],
-      ),
-    ),
-  );
+class _NavGroup {
+  const _NavGroup(this.label, this.items);
+  final String label;
+  final List<_NavItem> items;
 }

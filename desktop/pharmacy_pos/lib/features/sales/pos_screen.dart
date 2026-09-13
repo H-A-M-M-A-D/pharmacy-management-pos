@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../auth/auth_state.dart';
@@ -8,7 +10,6 @@ import '../pricing/price_source_label.dart';
 class PosScreen extends StatefulWidget {
   const PosScreen({required this.authState, super.key});
   final AuthState authState;
-
   @override
   State<PosScreen> createState() => _PosScreenState();
 }
@@ -18,10 +19,13 @@ class _PosScreenState extends State<PosScreen>
   late final TabController _tabs = TabController(length: 3, vsync: this);
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
+  final _customerFocus = FocusNode();
   bool _searched = false;
+  bool _wasActive = false;
   final _customer = TextEditingController();
   final _phone = TextEditingController();
   final List<_CartLine> _cart = [];
+  String? _editingQuantity;
   CustomerLookup? _selectedCustomer;
   List<CustomerLookup> _customerMatches = [];
   List<PosProduct> _products = [];
@@ -34,17 +38,29 @@ class _PosScreenState extends State<PosScreen>
   SalesReturnDetails? _returnReceipt;
   bool _loading = false;
   String? _error;
-
   bool can(String permission) => widget.authState.can(permission);
   double get _subtotal => _cart.fold(0, (sum, x) => sum + x.gross);
   double get _discount => _cart.fold(0, (sum, x) => sum + x.discountAmount);
   double get _total => _cart.fold(0, (sum, x) => sum + x.net);
-
   @override
   void initState() {
     super.initState();
     _loadHistory();
     _loadGodowns();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (active && !_wasActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && TickerMode.valuesOf(context).enabled && _tabs.index == 0) {
+          _searchFocus.requestFocus();
+        }
+      });
+    }
+    _wasActive = active;
   }
 
   Future<void> _loadGodowns() async {
@@ -69,6 +85,7 @@ class _PosScreenState extends State<PosScreen>
     _tabs.dispose();
     _search.dispose();
     _searchFocus.dispose();
+    _customerFocus.dispose();
     _customer.dispose();
     _phone.dispose();
     super.dispose();
@@ -209,7 +226,6 @@ class _PosScreenState extends State<PosScreen>
         .toList(),
     'payments': payments,
   };
-
   Future<void> _hold() async {
     if (_cart.isEmpty) {
       setState(() => _error = 'Add at least one product.');
@@ -306,55 +322,83 @@ class _PosScreenState extends State<PosScreen>
   }
 
   @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'POS & Sales',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
-              IconButton.filledTonal(
-                onPressed: _loadHistory,
-                tooltip: 'Refresh',
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-        ),
-        TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: 'POS'),
-            Tab(text: 'Sales History'),
-            Tab(text: 'Sales Returns'),
-          ],
-        ),
-        if (_error != null)
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.f2): () {
+        _tabs.index = 0;
+        _searchFocus.requestFocus();
+      },
+      const SingleActivator(LogicalKeyboardKey.f4): () {
+        _tabs.index = 0;
+        _customerFocus.requestFocus();
+      },
+      const SingleActivator(LogicalKeyboardKey.f6): () {
+        if (can('sales.hold') && !_loading) _hold();
+      },
+      const SingleActivator(LogicalKeyboardKey.f8): () {
+        if (can('sales.create') && !_loading) _checkout();
+      },
+      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+        if (_cart.isEmpty) {
+          _tabs.index = 0;
+          _search.clear();
+          _searchFocus.requestFocus();
+        } else {
+          setState(
+            () => _error =
+                'Hold or complete the current sale before starting a new sale.',
+          );
+        }
+      },
+    },
+    child: SafeArea(
+      child: Column(
+        children: [
           Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'POS & Sales',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                ),
+                IconButton.filledTonal(
+                  onPressed: _loadHistory,
+                  tooltip: 'Refresh',
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             ),
           ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : TabBarView(
-                  controller: _tabs,
-                  children: [_pos(), _historyView(), _returnsView()],
-                ),
-        ),
-      ],
+          TabBar(
+            controller: _tabs,
+            tabs: const [
+              Tab(text: 'POS'),
+              Tab(text: 'Sales History'),
+              Tab(text: 'Sales Returns'),
+            ],
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if (_loading) const LinearProgressIndicator(minHeight: 2),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [_pos(), _historyView(), _returnsView()],
+            ),
+          ),
+        ],
+      ),
     ),
   );
-
   Widget _godownSelector() {
     if (_godowns.isEmpty) {
       return Container(
@@ -373,7 +417,27 @@ class _PosScreenState extends State<PosScreen>
         ),
       );
     }
-    if (_godowns.length == 1) return const SizedBox.shrink();
+    if (_godowns.length == 1) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.warehouse_outlined,
+              size: 18,
+              color: AppColors.primary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Selling from godown · ${_godowns.single.name}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
@@ -392,50 +456,85 @@ class _PosScreenState extends State<PosScreen>
     );
   }
 
-  Widget _pos() => Row(
-    children: [
-      Expanded(
-        flex: 3,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              _godownSelector(),
-              TextField(
-                key: const Key('pos_search'),
-                controller: _search,
-                focusNode: _searchFocus,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'Search or scan barcode',
-                  suffixIcon: IconButton(
-                    tooltip: 'Search',
-                    onPressed: _searchProducts,
-                    icon: const Icon(Icons.search),
+  Widget _pos() => LayoutBuilder(
+    builder: (context, constraints) {
+      final summaryWidth = constraints.maxWidth < 900 ? 280.0 : 328.0;
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _godownSelector(),
+                  TextField(
+                    key: const Key('pos_search'),
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: 'Search or scan barcode',
+                      hintText: 'Medicine, SKU or barcode · F2',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: IconButton(
+                        tooltip: 'Search',
+                        onPressed: _loading ? null : _searchProducts,
+                        icon: const Icon(Icons.arrow_forward),
+                      ),
+                    ),
+                    onSubmitted: (_) async {
+                      await _searchProducts();
+                      if (_products.length == 1) {
+                        _addProduct(_products.single);
+                        _search.clear();
+                      }
+                      _searchFocus.requestFocus();
+                    },
                   ),
-                ),
-                onSubmitted: (_) async {
-                  await _searchProducts();
-                  if (_products.length == 1) {
-                    _addProduct(_products.single);
-                    // Clear the barcode so the next scan isn't appended to
-                    // this one, and keep focus here for continuous scanning.
-                    _search.clear();
-                  }
-                  _searchFocus.requestFocus();
-                },
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: constraints.maxHeight < 520 ? 108 : 156,
+                    child: _productsTable(),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    children: [
+                      Text(
+                        'Cart',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        '${_cart.length} products · FEFO allocation',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: AppSectionCard(
+                      padding: EdgeInsets.zero,
+                      child: SingleChildScrollView(child: _cartTable()),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Expanded(child: _productsTable()),
-            ],
+            ),
           ),
-        ),
-      ),
-      const VerticalDivider(width: 1),
-      Expanded(flex: 4, child: _cartPanel()),
-    ],
+          Container(
+            width: summaryWidth,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(left: BorderSide(color: AppColors.border)),
+            ),
+            child: _cartPanel(),
+          ),
+        ],
+      );
+    },
   );
-
   Future<void> _startReturn(SaleListItem sale) async {
     setState(() => _loading = true);
     ReturnableSale returnable;
@@ -475,7 +574,7 @@ class _PosScreenState extends State<PosScreen>
 
   Widget _returnsView() {
     if (!can('sales.returns.view')) {
-      return const Center(child: Text('Not permitted'));
+      return AppEmptyState(title: 'Not permitted');
     }
     final returns = _returns?.items ?? const <SalesReturnListItem>[];
     return Padding(
@@ -487,10 +586,10 @@ class _PosScreenState extends State<PosScreen>
           const SizedBox(height: 12),
           Expanded(
             child: returns.isEmpty
-                ? const Center(child: Text('No returns found'))
+                ? AppEmptyState(title: 'No returns found')
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                    child: AppDataTable(
                       columns: const [
                         DataColumn(label: Text('Return #')),
                         DataColumn(label: Text('Original Invoice')),
@@ -563,12 +662,13 @@ class _PosScreenState extends State<PosScreen>
     return SingleChildScrollView(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Product')),
             DataColumn(label: Text('SKU')),
-            DataColumn(label: Text('Stock')),
-            DataColumn(label: Text('Price')),
+            DataColumn(label: Text('Stock'), numeric: true),
+            DataColumn(label: Text('Expiry')),
+            DataColumn(label: Text('Price'), numeric: true),
             DataColumn(label: Text('')),
           ],
           rows: _products
@@ -578,11 +678,14 @@ class _PosScreenState extends State<PosScreen>
                     DataCell(Text(p.name)),
                     DataCell(Text(p.sku)),
                     DataCell(Text('${p.availableQuantity}')),
+                    DataCell(_expiryIndicator(p)),
                     DataCell(Text(_money(p.indicativeRetailPrice ?? 0))),
                     DataCell(
                       IconButton(
                         tooltip: 'Add',
-                        onPressed: () => _addProduct(p),
+                        onPressed: p.availableQuantity <= 0
+                            ? null
+                            : () => _addProduct(p),
                         icon: const Icon(Icons.add_shopping_cart),
                       ),
                     ),
@@ -595,66 +698,113 @@ class _PosScreenState extends State<PosScreen>
     );
   }
 
+  Widget _expiryIndicator(PosProduct product) {
+    final expiry = product.nearestExpiryDate;
+    if (expiry == null) return const Text('N/A');
+    final today = DateTime.now();
+    final days = DateTime(
+      expiry.year,
+      expiry.month,
+      expiry.day,
+    ).difference(DateTime(today.year, today.month, today.day)).inDays;
+    final date =
+        '${expiry.year}-${expiry.month.toString().padLeft(2, '0')}-${expiry.day.toString().padLeft(2, '0')}';
+    if (days < 0) return AppStatusChip('Expired: $date');
+    if (days <= 30) return AppStatusChip('Near expiry: $date');
+    return Text(date);
+  }
+
   Widget _cartPanel() => Padding(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(16),
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Cart', style: Theme.of(context).textTheme.titleLarge),
-        _customerSelector(),
-        const SizedBox(height: 12),
-        Expanded(child: _cartTable()),
-        const Divider(),
-        Row(
-          children: [
-            Expanded(child: Text('Subtotal ${_money(_subtotal)}')),
-            Expanded(child: Text('Discount ${_money(_discount)}')),
-            Expanded(
-              child: Text(
-                'Total ${_money(_total)}',
-                key: const Key('cart_total'),
-              ),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Checkout',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 16),
+                _customerSelector(),
+                const SizedBox(height: 20),
+                Text(
+                  'ORDER SUMMARY',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+                const SizedBox(height: 12),
+                _summaryRow('Subtotal', _money(_subtotal)),
+                const SizedBox(height: 8),
+                _summaryRow('Discount', _money(_discount)),
+                if (_selectedCustomer != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      'Customer credit available ${_money(_selectedCustomer!.availableCredit)}',
+                      key: const Key('selected_customer_credit'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                if (_receipt != null) _receiptPanel(_receipt!),
+              ],
             ),
-          ],
-        ),
-        if (_selectedCustomer != null)
-          Text(
-            'Customer credit available ${_money(_selectedCustomer!.availableCredit)}',
-            key: const Key('selected_customer_credit'),
           ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            if (can('sales.hold'))
-              FilledButton.tonalIcon(
-                key: const Key('hold_sale'),
-                onPressed: _hold,
-                icon: const Icon(Icons.pause_circle_outline),
-                label: const Text('Hold'),
-              ),
-            const Spacer(),
-            FilledButton.icon(
-              key: const Key('checkout_sale'),
-              onPressed: _checkout,
-              icon: const Icon(Icons.point_of_sale),
-              label: const Text('Checkout'),
-            ),
-          ],
         ),
-        if (_receipt != null) _receiptPanel(_receipt!),
+        const Divider(),
+        const SizedBox(height: 16),
+        Text('TOTAL DUE', style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 4),
+        Text(
+          'Total ${_money(_total)}',
+          key: const Key('cart_total'),
+          style: const TextStyle(
+            fontSize: 25,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (can('sales.create'))
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              key: const Key('checkout_sale'),
+              onPressed: _loading ? null : _checkout,
+              icon: const Icon(Icons.payments_outlined),
+              label: const Text('Checkout · F8'),
+            ),
+          ),
+        if (can('sales.hold')) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('hold_sale'),
+            onPressed: _loading ? null : _hold,
+            icon: const Icon(Icons.pause_circle_outline),
+            label: const Text('Hold · F6'),
+          ),
+        ],
       ],
     ),
   );
-
+  Widget _summaryRow(String label, String value) => Row(
+    children: [
+      Text(label, style: Theme.of(context).textTheme.bodySmall),
+      const Spacer(),
+      Text(value, style: Theme.of(context).textTheme.labelLarge),
+    ],
+  );
   Widget _cartTable() {
-    if (_cart.isEmpty) return const Center(child: Text('Cart is empty'));
+    if (_cart.isEmpty) return AppEmptyState(title: 'Cart is empty');
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: DataTable(
+      child: AppDataTable(
         columns: [
           const DataColumn(label: Text('Product')),
-          const DataColumn(label: Text('Qty')),
-          const DataColumn(label: Text('Price')),
+          const DataColumn(label: Text('Qty'), numeric: true),
+          const DataColumn(label: Text('Price'), numeric: true),
           if (can('sales.discount'))
             const DataColumn(label: Text('Discount %')),
           const DataColumn(label: Text('Net')),
@@ -675,7 +825,40 @@ class _PosScreenState extends State<PosScreen>
                               _changeQuantity(line, line.quantity - 1),
                           icon: const Icon(Icons.remove),
                         ),
-                        Text('${line.quantity}'),
+                        _editingQuantity == line.product.productId
+                            ? SizedBox(
+                                width: 54,
+                                child: TextFormField(
+                                  key: Key(
+                                    'edit_qty_${line.product.productId}',
+                                  ),
+                                  initialValue: '${line.quantity}',
+                                  autofocus: true,
+                                  keyboardType: TextInputType.number,
+                                  onFieldSubmitted: (value) {
+                                    _changeQuantity(
+                                      line,
+                                      int.tryParse(value) ?? line.quantity,
+                                    );
+                                    setState(() => _editingQuantity = null);
+                                    _searchFocus.requestFocus();
+                                  },
+                                ),
+                              )
+                            : InkWell(
+                                key: Key('qty_${line.product.productId}'),
+                                onTap: () => setState(
+                                  () =>
+                                      _editingQuantity = line.product.productId,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 8,
+                                  ),
+                                  child: Text('${line.quantity}'),
+                                ),
+                              ),
                         IconButton(
                           tooltip: 'Increase',
                           onPressed: () =>
@@ -742,6 +925,7 @@ class _PosScreenState extends State<PosScreen>
             child: TextField(
               key: const Key('pos_customer_search'),
               controller: _customer,
+              focusNode: _customerFocus,
               decoration: InputDecoration(
                 labelText: 'Customer',
                 suffixIcon: IconButton(
@@ -751,7 +935,12 @@ class _PosScreenState extends State<PosScreen>
                 ),
               ),
               onSubmitted: (_) => _searchCustomers(),
-              onChanged: (_) { setState(() => _selectedCustomer = null); for (final line in _cart) { _resolvePrice(line); } },
+              onChanged: (_) {
+                setState(() => _selectedCustomer = null);
+                for (final line in _cart) {
+                  _resolvePrice(line);
+                }
+              },
             ),
           ),
           const SizedBox(width: 12),
@@ -775,11 +964,16 @@ class _PosScreenState extends State<PosScreen>
                   key: Key('select_customer_${customer.customerCode}'),
                   avatar: const Icon(Icons.person_outline, size: 18),
                   label: Text('${customer.customerCode} ${customer.name}'),
-                  onPressed: () { setState(() {
-                    _selectedCustomer = customer;
-                    _customer.text = customer.name;
-                    _phone.text = customer.phoneNumber ?? '';
-                  }); for (final line in _cart) { _resolvePrice(line); } },
+                  onPressed: () {
+                    setState(() {
+                      _selectedCustomer = customer;
+                      _customer.text = customer.name;
+                      _phone.text = customer.phoneNumber ?? '';
+                    });
+                    for (final line in _cart) {
+                      _resolvePrice(line);
+                    }
+                  },
                 ),
               );
             }).toList(),
@@ -787,7 +981,6 @@ class _PosScreenState extends State<PosScreen>
         ),
     ],
   );
-
   Future<void> _searchCustomers() async {
     if (!can('customers.view')) return;
     try {
@@ -811,7 +1004,6 @@ class _PosScreenState extends State<PosScreen>
       ],
     ),
   );
-
   Widget _heldTable() {
     final held = _held?.items ?? const <SaleListItem>[];
     return Column(
@@ -838,76 +1030,81 @@ class _PosScreenState extends State<PosScreen>
 
   Widget _salesTable() {
     final sales = _history?.items ?? const <SaleListItem>[];
-    if (sales.isEmpty) return const Center(child: Text('No sales found'));
+    if (sales.isEmpty) return AppEmptyState(title: 'No sales found');
     return SingleChildScrollView(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
-        columnSpacing: 8,
-        horizontalMargin: 8,
-        columns: const [
-          DataColumn(label: Text('Invoice')),
-          DataColumn(label: Text('Cashier')),
-          DataColumn(label: Text('Items')),
-          DataColumn(label: Text('Return')),
-          DataColumn(label: Text('Actions')),
-          DataColumn(label: Text('Total')),
-          DataColumn(label: Text('Credit')),
-          DataColumn(label: Text('Payment')),
-        ],
-        rows: sales
-            .map(
-              (sale) => DataRow(
-                cells: [
-                  DataCell(Text(sale.invoiceNumber ?? sale.holdNumber ?? '-')),
-                  DataCell(Text(sale.cashierName)),
-                  DataCell(Text('${sale.itemCount}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Tooltip(
-                          message: _returnLabel(sale.returnState),
-                          child: const Icon(
-                            Icons.assignment_turned_in_outlined,
-                          ),
-                        ),
-                        if (can('sales.returns.create') &&
-                            sale.status == 'Posted' &&
-                            sale.returnState != 'FullyReturned')
-                          IconButton(
-                            tooltip: 'Return items',
-                            onPressed: () => _startReturn(sale),
-                            icon: const Icon(Icons.assignment_return_outlined),
-                          ),
-                      ],
+        child: AppDataTable(
+          columnSpacing: 8,
+          horizontalMargin: 8,
+          columns: const [
+            DataColumn(label: Text('Invoice')),
+            DataColumn(label: Text('Cashier')),
+            DataColumn(label: Text('Items')),
+            DataColumn(label: Text('Return')),
+            DataColumn(label: Text('Actions')),
+            DataColumn(label: Text('Total'), numeric: true),
+            DataColumn(label: Text('Credit'), numeric: true),
+            DataColumn(label: Text('Payment')),
+          ],
+          rows: sales
+              .map(
+                (sale) => DataRow(
+                  cells: [
+                    DataCell(
+                      Text(sale.invoiceNumber ?? sale.holdNumber ?? '-'),
                     ),
-                  ),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Receipt',
-                          onPressed: () => _showReceipt(sale),
-                          icon: const Icon(Icons.receipt_long_outlined),
-                        ),
-                        if (can('sales.reprint'))
-                          IconButton(
-                            tooltip: 'Reprint receipt',
-                            onPressed: () => _showReceipt(sale, reprint: true),
-                            icon: const Icon(Icons.print_outlined),
+                    DataCell(Text(sale.cashierName)),
+                    DataCell(Text('${sale.itemCount}')),
+                    DataCell(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Tooltip(
+                            message: _returnLabel(sale.returnState),
+                            child: const Icon(
+                              Icons.assignment_turned_in_outlined,
+                            ),
                           ),
-                      ],
+                          if (can('sales.returns.create') &&
+                              sale.status == 'Posted' &&
+                              sale.returnState != 'FullyReturned')
+                            IconButton(
+                              tooltip: 'Return items',
+                              onPressed: () => _startReturn(sale),
+                              icon: const Icon(
+                                Icons.assignment_return_outlined,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  DataCell(Text(_money(sale.netTotal))),
-                  DataCell(Text(_money(sale.creditAmount))),
-                  DataCell(Text(sale.paymentSummary)),
-                ],
-              ),
-            )
-            .toList(),
+                    DataCell(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Receipt',
+                            onPressed: () => _showReceipt(sale),
+                            icon: const Icon(Icons.receipt_long_outlined),
+                          ),
+                          if (can('sales.reprint'))
+                            IconButton(
+                              tooltip: 'Reprint receipt',
+                              onPressed: () =>
+                                  _showReceipt(sale, reprint: true),
+                              icon: const Icon(Icons.print_outlined),
+                            ),
+                        ],
+                      ),
+                    ),
+                    DataCell(Text(_money(sale.netTotal))),
+                    DataCell(Text(_money(sale.creditAmount))),
+                    DataCell(Text(sale.paymentSummary)),
+                  ],
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -930,9 +1127,14 @@ class _PosScreenState extends State<PosScreen>
             Text(
               'Total ${_money(sale.netTotal)}  Paid ${_money(sale.amountPaid)}  Change ${_money(sale.changeGiven)}',
             ),
-              if (sale.creditAmount > 0)
-                Text('Credit ${_money(sale.creditAmount)}'),
-              for (final item in sale.items.where((item) => item.priceSource != 'Default')) Text('${item.productName}: ${priceSourceLabel(item.priceSource)}'),
+            if (sale.creditAmount > 0)
+              Text('Credit ${_money(sale.creditAmount)}'),
+            for (final item in sale.items.where(
+              (item) => item.priceSource != 'Default',
+            ))
+              Text(
+                '${item.productName}: ${priceSourceLabel(item.priceSource)}',
+              ),
           ],
         ),
       ),
@@ -951,7 +1153,6 @@ class _PaymentDialog extends StatefulWidget {
   final bool creditAllowed;
   final String? customerName;
   final List<FinancialAccountInfo> accounts;
-
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
 }
@@ -963,13 +1164,11 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   String? _error;
   String? _cashAccountId;
   String? _cardAccountId;
-
   double get _applied =>
       (double.tryParse(_cashApplied.text) ?? 0) +
       (double.tryParse(_cardApplied.text) ?? 0);
   double get _creditAmount =>
       (widget.total - _applied).clamp(0, widget.total).toDouble();
-
   @override
   void initState() {
     super.initState();
@@ -1058,7 +1257,6 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       ),
     ],
   );
-
   void _confirm() {
     final cash = double.tryParse(_cashApplied.text) ?? 0;
     final tendered = double.tryParse(_cashTendered.text) ?? 0;
@@ -1130,7 +1328,6 @@ class _SalesReturnDialog extends StatefulWidget {
   const _SalesReturnDialog({required this.authState, required this.returnable});
   final AuthState authState;
   final ReturnableSale returnable;
-
   @override
   State<_SalesReturnDialog> createState() => _SalesReturnDialogState();
 }
@@ -1145,7 +1342,6 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
   bool _posting = false;
   List<FinancialAccountInfo> _refundAccounts = [];
   String? _refundAccountId;
-
   @override
   void initState() {
     super.initState();
@@ -1213,9 +1409,7 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
 
   bool get _hasCustomerCredit => widget.returnable.customerId != null;
   double get _defaultCashRefund => _hasCustomerCredit ? 0 : _refundTotal;
-
   void _updateCash() => _cash.text = _defaultCashRefund.toStringAsFixed(2);
-
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Sales Return / Refund'),
@@ -1251,12 +1445,12 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
             const SizedBox(height: 12),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: DataTable(
+              child: AppDataTable(
                 columns: const [
                   DataColumn(label: Text('Product')),
                   DataColumn(label: Text('Batch')),
                   DataColumn(label: Text('Remaining')),
-                  DataColumn(label: Text('Return Qty')),
+                  DataColumn(label: Text('Return Qty'), numeric: true),
                   DataColumn(label: Text('Disposition')),
                   DataColumn(label: Text('Refund')),
                 ],
@@ -1359,7 +1553,6 @@ class _SalesReturnDialogState extends State<_SalesReturnDialog> {
       ),
     ],
   );
-
   Future<void> _post() async {
     final allocations = <Map<String, dynamic>>[];
     for (final entry in _quantities.entries) {
@@ -1454,7 +1647,6 @@ int _reasonIndex(String reason) => switch (reason) {
   'QualityIssue' => 4,
   _ => 5,
 };
-
 String _returnLabel(String state) => switch (state) {
   'PartiallyReturned' => 'Partially Returned',
   'FullyReturned' => 'Fully Returned',

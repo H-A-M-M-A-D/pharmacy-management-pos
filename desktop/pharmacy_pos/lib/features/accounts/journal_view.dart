@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -75,14 +77,14 @@ class _JournalViewState extends State<JournalView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
-    if (_items.isEmpty) return const Center(child: Text('No journal entries match these filters.'));
+    if (_items.isEmpty) return AppEmptyState(title: 'No journal entries match these filters.');
     return Column(children: [
-      Expanded(child: horizontalTable(DataTable(columns: const [
+      Expanded(child: horizontalTable(AppDataTable(columns: const [
         DataColumn(label: Text('Entry #')), DataColumn(label: Text('Date')), DataColumn(label: Text('Source')),
         DataColumn(label: Text('Reference')), DataColumn(label: Text('Description')), DataColumn(label: Text('Branch')),
-        DataColumn(label: Text('Debit')), DataColumn(label: Text('Credit')), DataColumn(label: Text('Status')),
+        DataColumn(label: Text('Debit'), numeric: true), DataColumn(label: Text('Credit'), numeric: true), DataColumn(label: Text('Status')),
       ], rows: _items.map((x) => DataRow(onSelectChanged: (_) => _details(x), cells: [
         DataCell(Text(x.number)), DataCell(Text(shortDate(x.date))), DataCell(Text(x.sourceType)), DataCell(Text(x.reference ?? '-')),
         DataCell(SizedBox(width: 220, child: Text(x.description, overflow: TextOverflow.ellipsis))), DataCell(Text(x.branchName)),
@@ -138,9 +140,9 @@ class _JournalDetailsDialogState extends State<_JournalDetailsDialog> {
       content: SizedBox(width: 850, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('${shortDate(details.date)}  ·  ${details.sourceType}  ·  ${details.branchName}'),
         Text('${details.reference ?? 'No reference'}  ·  Posted by ${details.postedBy}'), const SizedBox(height: 8), Text(details.description), const Divider(),
-        SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [
+        SingleChildScrollView(scrollDirection: Axis.horizontal, child: AppDataTable(columns: const [
           DataColumn(label: Text('Account')), DataColumn(label: Text('Description')), DataColumn(label: Text('Party')),
-          DataColumn(label: Text('Debit')), DataColumn(label: Text('Credit')),
+          DataColumn(label: Text('Debit'), numeric: true), DataColumn(label: Text('Credit'), numeric: true),
         ], rows: details.lines.map((x) => DataRow(cells: [
           DataCell(Text('${x.code} · ${x.name}')), DataCell(Text(x.description ?? '-')), DataCell(Text(x.customerName ?? x.supplierName ?? '-')),
           DataCell(Text(money(x.debit))), DataCell(Text(money(x.credit))),
@@ -208,7 +210,7 @@ class _ManualJournalDialogState extends State<_ManualJournalDialog> {
         IconButton(onPressed: _lines.length > 2 ? () { setState(() { final removed = _lines.removeAt(i); removed.dispose(); }); } : null, icon: const Icon(Icons.remove_circle_outline)),
       ])),
       Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _lines.add(_JournalDraftLine())), icon: const Icon(Icons.add), label: const Text('Add line'))),
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('Total debit: ${money(debit)}'), const SizedBox(width: 28), Text('Total credit: ${money(credit)}'), const SizedBox(width: 18), Icon(debit > 0 && (debit - credit).abs() < .005 ? Icons.check_circle : Icons.error_outline, color: debit > 0 && (debit - credit).abs() < .005 ? Colors.green : Theme.of(context).colorScheme.error)]))),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('Total debit: ${money(debit)}'), const SizedBox(width: 28), Text('Total credit: ${money(credit)}'), const SizedBox(width: 18), Icon(debit > 0 && (debit - credit).abs() < .005 ? Icons.check_circle : Icons.error_outline, color: debit > 0 && (debit - credit).abs() < .005 ? AppColors.success : Theme.of(context).colorScheme.error)]))),
       if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, key: const Key('manual_journal_error'), style: TextStyle(color: Theme.of(context).colorScheme.error))),
     ]))),
     actions: [TextButton(onPressed: _saving ? null : () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(key: const Key('manual_journal_post'), onPressed: _saving ? null : _post, child: Text(_saving ? 'Posting…' : 'Review & post'))],

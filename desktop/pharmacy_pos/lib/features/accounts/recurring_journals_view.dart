@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -52,15 +54,15 @@ class _RecurringJournalsViewState extends State<RecurringJournalsView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
-    if (_templates.isEmpty) return const Center(child: Text('No recurring journal templates yet.'));
-    return horizontalTable(DataTable(columns: const [
+    if (_templates.isEmpty) return AppEmptyState(title: 'No recurring journal templates yet.');
+    return horizontalTable(AppDataTable(columns: const [
       DataColumn(label: Text('Name')), DataColumn(label: Text('Frequency')), DataColumn(label: Text('Next run')),
       DataColumn(label: Text('Branch')), DataColumn(label: Text('Status')), DataColumn(label: Text('Actions')),
     ], rows: _templates.map((t) => DataRow(cells: [
       DataCell(Text('${t['name']}')), DataCell(Text(enumName(t['frequency']))), DataCell(Text('${t['nextRunDate']}')),
-      DataCell(Text('${t['branchName']}')), DataCell(Chip(label: Text(t['isActive'] == true ? 'Active' : 'Inactive'), visualDensity: VisualDensity.compact)),
+      DataCell(Text('${t['branchName']}')), DataCell(AppStatusChip(t['isActive'] == true ? 'Active' : 'Inactive')),
       DataCell(widget.authState.can('accounts.recurring.manage') ? TextButton(onPressed: () => _toggle(t), child: Text(t['isActive'] == true ? 'Deactivate' : 'Activate')) : const SizedBox.shrink()),
     ])).toList()));
   }
@@ -125,7 +127,7 @@ class _TemplateFormState extends State<_TemplateForm> {
         IconButton(onPressed: _lines.length > 2 ? () { setState(() { final removed = _lines.removeAt(i); removed.dispose(); }); } : null, icon: const Icon(Icons.remove_circle_outline)),
       ])),
       Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _lines.add(_RecurringLine())), icon: const Icon(Icons.add), label: const Text('Add line'))),
-      Text('Debit ${money(debit)}   Credit ${money(credit)}', style: TextStyle(color: (debit - credit).abs() < .005 && debit > 0 ? Colors.green : Theme.of(context).colorScheme.error)),
+      Text('Debit ${money(debit)}   Credit ${money(credit)}', style: TextStyle(color: (debit - credit).abs() < .005 && debit > 0 ? AppColors.success : Theme.of(context).colorScheme.error)),
       if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
     ]))),
     actions: [TextButton(onPressed: _saving ? null : () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(key: const Key('recurring_save'), onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving…' : 'Create'))],

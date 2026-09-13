@@ -13,7 +13,7 @@ namespace {
 // automatically when this process exits, which is exactly when a second
 // launch should be allowed to become the primary instance.
 const wchar_t kSingleInstanceMutexName[] = L"PharmacyPOS_SingleInstance_Mutex";
-const wchar_t kMainWindowTitle[] = L"pharmacy_pos";
+const wchar_t kMainWindowTitle[] = L"Pharmacy Management POS";
 
 bool BringExistingInstanceToFront() {
   HWND existing = ::FindWindow(nullptr, kMainWindowTitle);
@@ -57,7 +57,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"pharmacy_pos", origin, size)) {
+  if (!window.Create(kMainWindowTitle, origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -113,7 +115,7 @@ class _PurchasingScreenState extends State<PurchasingScreen>
         ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppLoadingState()
               : _error != null
               ? Center(child: Text(_error!))
               : TabBarView(
@@ -132,23 +134,23 @@ class _PurchasingScreenState extends State<PurchasingScreen>
   Widget _ordersTable() {
     final orders = _orders?.items ?? const <PurchaseOrderListItem>[];
     if (!can('purchase_orders.view')) {
-      return const Center(child: Text('Not available'));
+      return AppEmptyState(title: 'Not available');
     }
     if (orders.isEmpty) {
-      return const Center(child: Text('No purchase orders found'));
+      return AppEmptyState(title: 'No purchase orders found');
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('PO #')),
             DataColumn(label: Text('Supplier')),
             DataColumn(label: Text('Branch')),
             DataColumn(label: Text('Order Date')),
             DataColumn(label: Text('Items')),
-            DataColumn(label: Text('Received')),
+            DataColumn(label: Text('Received'), numeric: true),
             DataColumn(label: Text('Status')),
             DataColumn(label: Text('Actions')),
           ],
@@ -166,12 +168,7 @@ class _PurchasingScreenState extends State<PurchasingScreen>
                         '${order.receivedQuantity}/${order.orderedQuantity}',
                       ),
                     ),
-                    DataCell(
-                      Chip(
-                        label: Text(order.status),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
+                    DataCell(AppStatusChip(order.status)),
                     DataCell(
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -214,16 +211,16 @@ class _PurchasingScreenState extends State<PurchasingScreen>
   Widget _purchasesTable() {
     final purchases = _purchases?.items ?? const <PurchaseHistoryItem>[];
     if (!can('purchases.view')) {
-      return const Center(child: Text('Not available'));
+      return AppEmptyState(title: 'Not available');
     }
     if (purchases.isEmpty) {
-      return const Center(child: Text('No purchases found'));
+      return AppEmptyState(title: 'No purchases found');
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Action')),
             DataColumn(label: Text('GRN #')),
@@ -259,12 +256,7 @@ class _PurchasingScreenState extends State<PurchasingScreen>
                     DataCell(Text(purchase.branchName)),
                     DataCell(Text(_date(purchase.receiptDate))),
                     DataCell(Text(_money(purchase.netTotal))),
-                    DataCell(
-                      Chip(
-                        label: Text(purchase.status),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
+                    DataCell(AppStatusChip(purchase.status)),
                     DataCell(Text(_returnStateLabel(purchase.returnState))),
                   ],
                 ),
@@ -278,19 +270,19 @@ class _PurchasingScreenState extends State<PurchasingScreen>
   Widget _returnsTable() {
     final returns = _returns?.items ?? const <PurchaseReturnListItem>[];
     if (!can('purchase_returns.view')) {
-      return const Center(child: Text('Not available'));
+      return AppEmptyState(title: 'Not available');
     }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           child: returns.isEmpty
-              ? const Center(child: Text('No purchase returns found'))
+              ? AppEmptyState(title: 'No purchase returns found')
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                    child: AppDataTable(
                       columns: const [
                         DataColumn(label: Text('Action')),
                         DataColumn(label: Text('Return #')),
@@ -299,7 +291,7 @@ class _PurchasingScreenState extends State<PurchasingScreen>
                         DataColumn(label: Text('Date')),
                         DataColumn(label: Text('Paid')),
                         DataColumn(label: Text('Bonus')),
-                        DataColumn(label: Text('Credit')),
+                        DataColumn(label: Text('Credit'), numeric: true),
                         DataColumn(label: Text('Reason')),
                       ],
                       rows: returns
@@ -581,14 +573,14 @@ class _PurchaseReturnDialogState extends State<_PurchaseReturnDialog> {
               const SizedBox(height: 12),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
+                child: AppDataTable(
                   columns: const [
                     DataColumn(label: Text('Product')),
                     DataColumn(label: Text('Batch')),
                     DataColumn(label: Text('Expiry')),
                     DataColumn(label: Text('Paid left')),
                     DataColumn(label: Text('Bonus left')),
-                    DataColumn(label: Text('Stock')),
+                    DataColumn(label: Text('Stock'), numeric: true),
                     DataColumn(label: Text('Paid')),
                     DataColumn(label: Text('Bonus')),
                   ],
@@ -777,7 +769,7 @@ class _PurchaseOrderDialogState extends State<_PurchaseOrderDialog> {
     content: SizedBox(
       width: 560,
       child: _options == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingState()
           : Form(
               key: _form,
               child: Column(
@@ -915,7 +907,8 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
       setState(() {
         _options = options;
         _branchId = widget.order?.branchId ?? options.branches.firstOrNull?.id;
-        _supplierId = widget.order?.supplierId ?? options.suppliers.firstOrNull?.id;
+        _supplierId =
+            widget.order?.supplierId ?? options.suppliers.firstOrNull?.id;
         _productId = options.products.firstOrNull?.id;
       });
     }
@@ -928,11 +921,13 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     if (!mounted) return;
     setState(() {
       _godowns = godowns;
-      _godownId = widget.order?.godownId ?? (godowns.isEmpty
-          ? null
-          : godowns
-                .firstWhere((g) => g.isDefault, orElse: () => godowns.first)
-                .id);
+      _godownId =
+          widget.order?.godownId ??
+          (godowns.isEmpty
+              ? null
+              : godowns
+                    .firstWhere((g) => g.isDefault, orElse: () => godowns.first)
+                    .id);
     });
   }
 
@@ -942,13 +937,21 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     content: SizedBox(
       width: 680,
       child: _options == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingState()
           : Form(
               key: _form,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    const AppWorkflowStrip(
+                      steps: [
+                        'Supplier',
+                        'Products / PO',
+                        'Batch & godown',
+                        'Review & receive',
+                      ],
+                    ),
                     if (widget.order != null)
                       Align(
                         alignment: Alignment.centerLeft,
@@ -956,124 +959,145 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
                           '${widget.order!.orderNumber}: ${widget.order!.receivedQuantity}/${widget.order!.orderedQuantity} received',
                         ),
                       ),
-                    _lookup('Branch', _branchId, _options!.branches, (v) {
-                      setState(() => _branchId = v);
-                      _reloadGodowns();
-                    }),
-                    if (_godowns.length > 1)
-                      _lookup(
-                        'Godown',
-                        _godownId,
-                        _godowns,
-                        (v) => setState(() => _godownId = v),
-                      )
-                    else if (_godowns.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'No godown is configured for this branch yet. Ask an administrator to set one up before receiving stock.',
-                            style: TextStyle(color: Colors.orange),
-                          ),
-                        ),
-                      ),
-                    _lookup(
-                      'Supplier',
-                      _supplierId,
-                      _options!.suppliers,
-                      (v) => _supplierId = v,
-                    ),
-                    TextFormField(
-                      controller: _invoice,
-                      decoration: const InputDecoration(
-                        labelText: 'Supplier Invoice #',
-                      ),
-                    ),
-                    _lookup(
-                      'Product',
-                      _productId,
-                      _options!.products,
-                      (v) => _productId = v,
-                    ),
-                    TextFormField(
-                      key: const Key('receipt_batch'),
-                      controller: _batch,
-                      decoration: const InputDecoration(
-                        labelText: 'Batch Number',
-                      ),
-                      validator: _required,
-                    ),
-                    Row(
+                    AppFormGrid(
                       children: [
-                        Expanded(
-                          child: TextFormField(
-                            key: const Key('receipt_paid'),
-                            controller: _paid,
+                        _lookup('Branch', _branchId, _options!.branches, (v) {
+                          setState(() => _branchId = v);
+                          _reloadGodowns();
+                        }),
+                        if (_godowns.length > 1)
+                          _lookup(
+                            'Godown',
+                            _godownId,
+                            _godowns,
+                            (v) => setState(() => _godownId = v),
+                          )
+                        else if (_godowns.length == 1)
+                          InputDecorator(
                             decoration: const InputDecoration(
-                              labelText: 'Paid Qty',
+                              labelText: 'Godown',
                             ),
-                            validator: _positiveInt,
+                            child: Text(_godowns.single.name),
+                          )
+                        else if (_godowns.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'No godown is configured for this branch yet. Ask an administrator to set one up before receiving stock.',
+                                style: TextStyle(color: AppColors.warning),
+                              ),
+                            ),
+                          ),
+                        _lookup(
+                          'Supplier',
+                          _supplierId,
+                          _options!.suppliers,
+                          (v) => _supplierId = v,
+                        ),
+                        TextFormField(
+                          controller: _invoice,
+                          decoration: const InputDecoration(
+                            labelText: 'Supplier Invoice #',
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            key: const Key('receipt_bonus'),
-                            controller: _bonus,
-                            decoration: const InputDecoration(
-                              labelText: 'Bonus Qty',
-                            ),
-                            validator: _nonNegativeInt,
+                        _lookup(
+                          'Product',
+                          _productId,
+                          _options!.products,
+                          (v) => _productId = v,
+                        ),
+                        TextFormField(
+                          key: const Key('receipt_batch'),
+                          controller: _batch,
+                          decoration: const InputDecoration(
+                            labelText: 'Batch Number',
                           ),
+                          validator: _required,
                         ),
                       ],
                     ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _purchasePrice,
-                            decoration: const InputDecoration(
-                              labelText: 'Purchase Price',
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              key: const Key('receipt_paid'),
+                              controller: _paid,
+                              decoration: const InputDecoration(
+                                labelText: 'Paid Qty',
+                              ),
+                              validator: _positiveInt,
                             ),
-                            validator: _nonNegativeMoney,
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _retailPrice,
-                            decoration: const InputDecoration(
-                              labelText: 'Retail Price',
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              key: const Key('receipt_bonus'),
+                              controller: _bonus,
+                              decoration: const InputDecoration(
+                                labelText: 'Bonus Qty',
+                              ),
+                              validator: _nonNegativeInt,
                             ),
-                            validator: _nonNegativeMoney,
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _discount,
-                            decoration: const InputDecoration(
-                              labelText: 'Discount %',
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _purchasePrice,
+                              decoration: const InputDecoration(
+                                labelText: 'Purchase Price',
+                              ),
+                              validator: _nonNegativeMoney,
                             ),
-                            validator: _percent,
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _tax,
-                            decoration: const InputDecoration(
-                              labelText: 'Tax %',
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _retailPrice,
+                              decoration: const InputDecoration(
+                                labelText: 'Retail Price',
+                              ),
+                              validator: _nonNegativeMoney,
                             ),
-                            validator: _percent,
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _discount,
+                              decoration: const InputDecoration(
+                                labelText: 'Discount %',
+                              ),
+                              validator: _percent,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _tax,
+                              decoration: const InputDecoration(
+                                labelText: 'Tax %',
+                              ),
+                              validator: _percent,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Text(
@@ -1137,12 +1161,34 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         },
       ],
     };
-      try {
-        final receipt = widget.order == null ? await widget.authState.postDirectPurchase(body) : await widget.authState.postGoodsReceipt(body);
-        if (mounted && widget.authState.can('pricing.suggest') && (widget.authState.can('sales.cost_view') || widget.authState.can('reports.profitability'))) {
-          final navigatorContext = Navigator.of(context).context;
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Purchase posted. Cost-based price suggestions are available for manager review.'), action: SnackBarAction(label: 'Review prices', onPressed: () => showDialog<void>(context: navigatorContext, builder: (_) => Phase6SuggestionsDialog(authState: widget.authState, expiry: false, goodsReceiptId: receipt.id)))));
-        }
+    try {
+      final receipt = widget.order == null
+          ? await widget.authState.postDirectPurchase(body)
+          : await widget.authState.postGoodsReceipt(body);
+      if (mounted &&
+          widget.authState.can('pricing.suggest') &&
+          (widget.authState.can('sales.cost_view') ||
+              widget.authState.can('reports.profitability'))) {
+        final navigatorContext = Navigator.of(context).context;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Purchase posted. Cost-based price suggestions are available for manager review.',
+            ),
+            action: SnackBarAction(
+              label: 'Review prices',
+              onPressed: () => showDialog<void>(
+                context: navigatorContext,
+                builder: (_) => Phase6SuggestionsDialog(
+                  authState: widget.authState,
+                  expiry: false,
+                  goodsReceiptId: receipt.id,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);

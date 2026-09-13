@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -47,7 +48,7 @@ class _MovementBookViewState extends State<_MovementBookView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
     final lines = ((_data?['lines'] as Map<String, dynamic>?)?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
     final total = (_data?['lines'] as Map<String, dynamic>?)?['totalCount'] as int? ?? 0;
@@ -58,9 +59,9 @@ class _MovementBookViewState extends State<_MovementBookView> {
         Chip(label: Text('Payments  ${money(amount(_data?['totalPayments']))}')),
         Chip(label: Text('Closing  ${money(amount(_data?['closingBalance']))}')),
       ])),
-      Expanded(child: lines.isEmpty ? const Center(child: Text('No activity for this period.')) : horizontalTable(DataTable(columns: const [
+      Expanded(child: lines.isEmpty ? AppEmptyState(title: 'No activity for this period.') : horizontalTable(AppDataTable(columns: const [
         DataColumn(label: Text('Date')), DataColumn(label: Text('Reference')), DataColumn(label: Text('Description')), DataColumn(label: Text('Source')),
-        DataColumn(label: Text('Receipt')), DataColumn(label: Text('Payment')), DataColumn(label: Text('Balance')), DataColumn(label: Text('Posted by')),
+        DataColumn(label: Text('Receipt')), DataColumn(label: Text('Payment')), DataColumn(label: Text('Balance'), numeric: true), DataColumn(label: Text('Posted by')),
       ], rows: lines.map((x) => DataRow(cells: [
         DataCell(Text(shortDate(DateTime.parse(x['dateUtc'] as String).toLocal()))), DataCell(Text('${x['reference']}')),
         DataCell(SizedBox(width: 200, child: Text('${x['description']}', overflow: TextOverflow.ellipsis))), DataCell(Text(enumName(x['sourceType']))),
@@ -124,15 +125,15 @@ class _DayBookViewState extends State<DayBookView> {
     Expanded(child: _body()),
   ]);
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
     final lines = ((_data?['lines'] as Map<String, dynamic>?)?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
     final total = (_data?['lines'] as Map<String, dynamic>?)?['totalCount'] as int? ?? 0;
     return Column(children: [
       Padding(padding: const EdgeInsets.all(12), child: Wrap(spacing: 10, children: [Chip(label: Text('Total debit  ${money(amount(_data?['totalDebit']))}')), Chip(label: Text('Total credit  ${money(amount(_data?['totalCredit']))}'))])),
-      Expanded(child: lines.isEmpty ? const Center(child: Text('No posted entries for this period.')) : horizontalTable(DataTable(columns: const [
+      Expanded(child: lines.isEmpty ? AppEmptyState(title: 'No posted entries for this period.') : horizontalTable(AppDataTable(columns: const [
         DataColumn(label: Text('Date')), DataColumn(label: Text('Entry #')), DataColumn(label: Text('Source')), DataColumn(label: Text('Reference')),
-        DataColumn(label: Text('Narration')), DataColumn(label: Text('Debit')), DataColumn(label: Text('Credit')), DataColumn(label: Text('Posted by')), DataColumn(label: Text('Branch')),
+        DataColumn(label: Text('Narration')), DataColumn(label: Text('Debit'), numeric: true), DataColumn(label: Text('Credit'), numeric: true), DataColumn(label: Text('Posted by')), DataColumn(label: Text('Branch')),
       ], rows: lines.map((x) => DataRow(cells: [
         DataCell(Text(shortDate(DateTime.parse(x['dateUtc'] as String).toLocal()))), DataCell(Text('${x['entryNumber']}')), DataCell(Text(enumName(x['sourceType']))),
         DataCell(Text('${x['reference'] ?? '-'}')), DataCell(SizedBox(width: 200, child: Text('${x['description']}', overflow: TextOverflow.ellipsis))),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
@@ -52,12 +53,12 @@ class _ChartOfAccountsViewState extends State<ChartOfAccountsView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
-    if (_accounts.isEmpty) return const Center(child: Text('No chart accounts found.'));
+    if (_accounts.isEmpty) return AppEmptyState(title: 'No chart accounts found.');
     final mappingByAccount = <String, List<String>>{};
     for (final mapping in _mappings) { (mappingByAccount[mapping.accountId] ??= []).add(mapping.key); }
-    return horizontalTable(DataTable(
+    return horizontalTable(AppDataTable(
       columnSpacing: 28,
       columns: const [
         DataColumn(label: Text('Code')), DataColumn(label: Text('Account')), DataColumn(label: Text('Type')),
@@ -73,7 +74,7 @@ class _ChartOfAccountsViewState extends State<ChartOfAccountsView> {
         DataCell(Text(account.accountType)), DataCell(Text(account.normalBalance)),
         DataCell(Text(account.isPostingAccount ? 'Posting' : 'Control')),
         DataCell(SizedBox(width: 220, child: Text((mappingByAccount[account.id] ?? const []).join(', '), overflow: TextOverflow.ellipsis))),
-        DataCell(Chip(label: Text(account.isActive ? 'Active' : 'Inactive'), visualDensity: VisualDensity.compact)),
+        DataCell(AppStatusChip(account.isActive ? 'Active' : 'Inactive')),
         DataCell(widget.authState.can('accounts.coa.manage') ? Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(key: Key('coa_edit_${account.id}'), tooltip: 'Edit', onPressed: () => _edit(account), icon: const Icon(Icons.edit_outlined)),
           IconButton(tooltip: account.isActive ? 'Deactivate' : 'Activate', onPressed: () => _toggle(account), icon: Icon(account.isActive ? Icons.block : Icons.check_circle_outline)),

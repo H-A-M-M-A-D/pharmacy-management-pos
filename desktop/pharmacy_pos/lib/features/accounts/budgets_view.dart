@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
 import 'accounts_models.dart';
@@ -38,8 +39,8 @@ class _BudgetsViewState extends State<BudgetsView> {
       IconButton(tooltip: 'Refresh', onPressed: _load, icon: const Icon(Icons.refresh)),
       if (widget.authState.can('accounts.budgets.manage')) FilledButton(key: const Key('budget_create'), onPressed: _edit, child: const Text('New budget')),
     ]),
-    Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : _error != null ? AccountsError(_error!, onRetry: _load) :
-      _budgets.isEmpty ? const Center(child: Text('No budgets for this fiscal year.')) : horizontalTable(DataTable(columns: const [
+    Expanded(child: _loading ? const AppLoadingState() : _error != null ? AccountsError(_error!, onRetry: _load) :
+      _budgets.isEmpty ? AppEmptyState(title: 'No budgets for this fiscal year.') : horizontalTable(AppDataTable(columns: const [
         DataColumn(label: Text('Account')), DataColumn(label: Text('Period')), DataColumn(label: Text('Budget')), DataColumn(label: Text('Actions')),
       ], rows: _budgets.map((b) => DataRow(cells: [
         DataCell(Text('${b['accountCode']} ${b['accountName']}')), DataCell(Text('${b['periodNumber'] ?? 'Annual'}')),
@@ -95,7 +96,7 @@ class _BudgetFormState extends State<_BudgetForm> {
   }
   @override
   Widget build(BuildContext context) => AlertDialog(title: Text(widget.budget == null ? 'New budget' : 'Edit budget'), content: SizedBox(width: 440,
-    child: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+    child: _loading ? const AppLoadingState() : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
       DropdownButtonFormField<String>(key: const Key('budget_account'), initialValue: _accountId, isExpanded: true, decoration: const InputDecoration(labelText: 'Account'),
         items: _accounts.map((a) => DropdownMenuItem(value: a.id, child: Text('${a.code} ${a.name}'))).toList(), onChanged: widget.budget == null ? (id) => setState(() => _accountId = id) : null),
       TextField(key: const Key('budget_amount'), controller: _amount, decoration: const InputDecoration(labelText: 'Budget amount')),

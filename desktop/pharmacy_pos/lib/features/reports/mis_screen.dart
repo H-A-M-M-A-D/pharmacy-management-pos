@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 import '../auth/auth_state.dart';
 import 'report_periods.dart';
 
@@ -998,7 +1000,7 @@ class _MisScreenState extends State<MisScreen> {
           const SizedBox(height: 12),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState()
                 : _error != null
                 ? Center(child: Text(_error!))
                 : _content(),
@@ -1063,7 +1065,7 @@ class _MisScreenState extends State<MisScreen> {
   Widget _content() {
     final data = _data;
     if (data == null) {
-      return const Center(child: Text('No management data for this period.'));
+      return AppEmptyState(title: 'No management data for this period.');
     }
     if (data is Map && data.containsKey('comparison')) {
       return _overview(Map<String, dynamic>.from(data));
@@ -1079,7 +1081,7 @@ class _MisScreenState extends State<MisScreen> {
         ? data['items'] as List
         : [data];
     if (rows.isEmpty) {
-      return const Center(child: Text('No management data for this period.'));
+      return AppEmptyState(title: 'No management data for this period.');
     }
     return SingleChildScrollView(
       child: _table(
@@ -1154,7 +1156,7 @@ class _MisScreenState extends State<MisScreen> {
         .toList();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: DataTable(
+      child: AppDataTable(
         columns: [
           for (final k in keys) DataColumn(label: Text(_label(k))),
           if (drill) const DataColumn(label: Text('Detail')),
@@ -1340,7 +1342,7 @@ class _MisScreenState extends State<MisScreen> {
                         (rows[i][metric] as num? ?? 0).toDouble(),
                       ),
                   ],
-                  color: const Color(0xFF176B5B),
+                  color: AppColors.primary,
                   barWidth: 2,
                   dotData: const FlDotData(show: false),
                 ),
@@ -1415,7 +1417,7 @@ class _MisScreenState extends State<MisScreen> {
                     barRods: [
                       BarChartRodData(
                         toY: (rows[i][metric] as num? ?? 0).toDouble(),
-                        color: const Color(0xFF176B5B),
+                        color: AppColors.primary,
                         width: 24,
                       ),
                     ],

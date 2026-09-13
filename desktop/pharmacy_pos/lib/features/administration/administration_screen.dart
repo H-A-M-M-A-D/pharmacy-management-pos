@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../auth/auth_state.dart';
 
@@ -334,7 +335,7 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState()
                 : _content(),
           ),
         ],
@@ -349,7 +350,7 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
     if (_selected == 'Audit') {
       final rows = _data['items'] as List<dynamic>? ?? [];
       return rows.isEmpty
-          ? const Center(child: Text('No records found'))
+          ? AppEmptyState(title: 'No records found')
           : ListView(
               children: rows.map((raw) {
                 final x = raw as Map<String, dynamic>;
@@ -463,10 +464,10 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
   }
 
   Widget _table(List<dynamic> rows, List<String> columns) => rows.isEmpty
-      ? const Center(child: Text('No records found'))
+      ? AppEmptyState(title: 'No records found')
       : SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: DataTable(
+          child: AppDataTable(
             columns: columns
                 .map((x) => DataColumn(label: Text(_label(x))))
                 .toList(),

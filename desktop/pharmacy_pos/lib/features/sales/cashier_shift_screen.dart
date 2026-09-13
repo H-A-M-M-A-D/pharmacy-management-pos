@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -88,7 +89,7 @@ class _CashierShiftScreenState extends State<CashierShiftScreen>
   );
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) {
       return Center(
         child: Column(
@@ -225,7 +226,7 @@ class _ShiftDetailCard extends StatelessWidget {
             const SizedBox(height: 8),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: DataTable(
+              child: AppDataTable(
                 columns: const [
                   DataColumn(label: Text('Method')),
                   DataColumn(label: Text('Sales')),
@@ -640,16 +641,16 @@ class _ShiftHistoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!authState.can('cashier_shift.view')) {
-      return const Center(child: Text('You do not have permission to view shift history.'));
+      return AppEmptyState(title: 'You do not have permission to view shift history.');
     }
     if (history.isEmpty) {
-      return const Center(child: Text('No cashier shifts found'));
+      return AppEmptyState(title: 'No cashier shifts found');
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(
+        child: AppDataTable(
           columns: const [
             DataColumn(label: Text('Cashier')),
             DataColumn(label: Text('Branch')),
@@ -715,7 +716,7 @@ class _StatusChip extends StatelessWidget {
   final String label;
   @override
   Widget build(BuildContext context) =>
-      Chip(label: Text(label), visualDensity: VisualDensity.compact);
+      AppStatusChip(label);
 }
 
 String? _required(String? value) =>

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/app_widgets.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
@@ -49,17 +51,17 @@ class _BankReconciliationViewState extends State<BankReconciliationView> {
   ]);
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const AppLoadingState();
     if (_error != null) return AccountsError(_error!, onRetry: _load);
-    if (_reconciliations.isEmpty) return const Center(child: Text('No bank reconciliations yet.'));
-    return horizontalTable(DataTable(columns: const [
+    if (_reconciliations.isEmpty) return AppEmptyState(title: 'No bank reconciliations yet.');
+    return horizontalTable(AppDataTable(columns: const [
       DataColumn(label: Text('Account')), DataColumn(label: Text('Statement period')), DataColumn(label: Text('Statement closing')),
       DataColumn(label: Text('Book balance')), DataColumn(label: Text('Difference')), DataColumn(label: Text('Status')),
     ], rows: _reconciliations.map((r) => DataRow(onSelectChanged: (_) => _openDetail(r), cells: [
       DataCell(Text('${r['financialAccountName']}')), DataCell(Text('${r['statementStartDate']} – ${r['statementEndDate']}')),
       DataCell(Text(money(amount(r['statementClosingBalance'])))), DataCell(Text(money(amount(r['bookBalance'])))),
-      DataCell(Text(money(amount(r['difference'])), style: TextStyle(color: amount(r['difference']).abs() < .005 ? Colors.green : Theme.of(context).colorScheme.error))),
-      DataCell(Chip(label: Text(enumName(r['status'])), visualDensity: VisualDensity.compact)),
+      DataCell(Text(money(amount(r['difference'])), style: TextStyle(color: amount(r['difference']).abs() < .005 ? AppColors.success : Theme.of(context).colorScheme.error))),
+      DataCell(AppStatusChip(enumName(r['status']))),
     ])).toList()));
   }
 
@@ -156,7 +158,7 @@ class _ReconciliationDetailState extends State<_ReconciliationDetail> {
     final inProgress = _data != null && enumName(_data!['status']) == 'InProgress';
     return AlertDialog(
       title: Text('${_data?['financialAccountName'] ?? ''} reconciliation'),
-      content: SizedBox(width: 780, height: 520, child: _loading ? const Center(child: CircularProgressIndicator()) : _error != null ? AccountsError(_error!, onRetry: _load) : _body(inProgress)),
+      content: SizedBox(width: 780, height: 520, child: _loading ? const AppLoadingState() : _error != null ? AccountsError(_error!, onRetry: _load) : _body(inProgress)),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Close')),
         if (inProgress && widget.authState.can('accounts.reconciliation.manage')) ...[
@@ -178,7 +180,7 @@ class _ReconciliationDetailState extends State<_ReconciliationDetail> {
       Wrap(spacing: 16, children: [
         Text('Statement closing: ${money(amount(data['statementClosingBalance']))}'),
         Text('Book balance: ${money(amount(data['bookBalance']))}'),
-        Text('Difference: ${money(difference)}', style: TextStyle(color: difference.abs() < .005 ? Colors.green : Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold)),
+        Text('Difference: ${money(difference)}', style: TextStyle(color: difference.abs() < .005 ? AppColors.success : Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold)),
         Text('Matched total: ${money(amount(data['matchedTotal']))}'),
       ]),
       if (totalCandidateCount > lines.length)
@@ -186,7 +188,7 @@ class _ReconciliationDetailState extends State<_ReconciliationDetail> {
           'Showing the most recent ${lines.length} of $totalCandidateCount candidate entries. Totals include all candidates.',
           style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
       const SizedBox(height: 10),
-      Expanded(child: lines.isEmpty ? const Center(child: Text('No ledger activity for this account.')) : ListView.builder(itemCount: lines.length, itemBuilder: (context, i) {
+      Expanded(child: lines.isEmpty ? AppEmptyState(title: 'No ledger activity for this account.') : ListView.builder(itemCount: lines.length, itemBuilder: (context, i) {
         final line = lines[i];
         final id = '${line['financialLedgerEntryId']}';
         final matched = line['isMatched'] == true;

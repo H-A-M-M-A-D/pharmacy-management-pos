@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 import '../../core/api_client.dart';
 import '../auth/auth_state.dart';
 import 'accounts_models.dart';
@@ -50,9 +51,9 @@ class _PartyAdjustmentsViewState extends State<PartyAdjustmentsView> {
         onChanged: (t) { if (t != null) { _type = t; _load(); } }),
       if (widget.authState.can('${_type.permission}.create')) FilledButton(key: const Key('adjustment_create'), onPressed: _create, child: const Text('New adjustment')),
     ]),
-    Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : _error != null ? AccountsError(_error!, onRetry: _load) :
-      _rows.isEmpty ? const Center(child: Text('No adjustments in this branch.')) : horizontalTable(DataTable(columns: const [
-        DataColumn(label: Text('Number')), DataColumn(label: Text('Party')), DataColumn(label: Text('Amount')), DataColumn(label: Text('Reason / Remaining')),
+    Expanded(child: _loading ? const AppLoadingState() : _error != null ? AccountsError(_error!, onRetry: _load) :
+      _rows.isEmpty ? AppEmptyState(title: 'No adjustments in this branch.') : horizontalTable(AppDataTable(columns: const [
+        DataColumn(label: Text('Number')), DataColumn(label: Text('Party')), DataColumn(label: Text('Amount'), numeric: true), DataColumn(label: Text('Reason / Remaining')),
       ], rows: _rows.map((r) => DataRow(cells: [
         DataCell(Text('${r['creditNoteNumber'] ?? r['debitNoteNumber'] ?? r['writeOffNumber'] ?? r['advanceNumber']}')),
         DataCell(Text('${r['customerName'] ?? r['supplierName']}')), DataCell(Text(money(amount(r['amount'])))),
@@ -115,7 +116,7 @@ class _AdjustmentFormState extends State<_AdjustmentForm> {
   }
   @override
   Widget build(BuildContext context) => AlertDialog(title: Text(widget.type.label), content: SizedBox(width: 440,
-    child: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+    child: _loading ? const AppLoadingState() : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
       DropdownButtonFormField<String>(key: const Key('adjustment_party'), initialValue: _partyId, isExpanded: true, decoration: const InputDecoration(labelText: 'Party'),
         items: _parties.map((p) => DropdownMenuItem(value: p.$1, child: Text(p.$2))).toList(), onChanged: (id) => setState(() => _partyId = id)),
       TextField(key: const Key('adjustment_amount'), controller: _amount, decoration: const InputDecoration(labelText: 'Amount')),

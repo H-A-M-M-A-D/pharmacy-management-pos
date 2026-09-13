@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../ui/app_widgets.dart';
 import '../auth/auth_state.dart';
 
 class Phase6SuggestionsDialog extends StatefulWidget {
@@ -142,7 +143,7 @@ class _Phase6SuggestionsDialogState extends State<Phase6SuggestionsDialog> {
           if (_busy) const LinearProgressIndicator(),
           Expanded(
             child: _rows.isEmpty
-                ? const Center(child: Text('No price suggestions.'))
+                ? AppEmptyState(title: 'No price suggestions.')
                 : ListView(
                     children: [
                       for (final row in _rows)
